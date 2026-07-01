@@ -1,0 +1,8 @@
+# Fourre-tout customer article code -> SAP MATNR mapping
+# Format: customer_code,matnr,description
+# Add rows below as materials are registered
+customer_code,matnr,description
+# POMPAC corrections go here
+# Example: 1111,7099018,Material placeholder registration
+1111,7099018,Dummy material 1
+2222,8716796114,Dummy material 2

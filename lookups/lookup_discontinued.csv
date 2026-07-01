@@ -1,0 +1,4 @@
+# Discontinued / phased-out SAP material codes
+# Any MATNR in this list is rejected with DISCONTINUED_MATERIAL
+matnr,reason,discontinued_date
+# Example: 7099018,Superseded by 7099019,2025-01-01

@@ -1,0 +1,64 @@
+command:
+  - uvicorn
+  - server:app
+  - --host=0.0.0.0
+  - --port=8000
+
+env:
+  - name: EDIFACT_PROFILE
+    value: "ELM_STANDARD"
+  - name: EDIFACT_SYNTAX
+    value: "D96A"
+  - name: EDIFACT_CHARSET
+    value: "UNOC:3"
+  - name: UNB_SENDER_GLN
+    value: "4399901876613"
+  - name: UNB_RECEIVER_GLN
+    value: "3015981600108"
+  - name: MASTERDATA_SOURCE_DIR
+    value: "/Workspace/Users/rsr1dy@bosch.com/masterdata"
+  - name: APP_ROOT
+    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT"
+  - name: ENGINE_DIR
+    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT"
+  - name: MASTERDATA_RUNTIME_DIR
+    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/masterdata"
+  - name: OUTBOX_DIR
+    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/outbox"
+  - name: LOG_DIR
+    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/logs"
+  - name: DB_PATH
+    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/edifact_standalone.db"
+  - name: INTAKE_DIR
+    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/intake"
+  - name: DATABRICKS_MODEL_ENDPOINT
+    value: "databricks-gpt-oss-120b"
+  - name: EDIFACT_CATALOG
+    value: "hive_metastore"
+  - name: EDIFACT_SCHEMA
+    value: "file2edi"
+  - name: FILE2EDI_UI
+    value: "react"
+  # ── Persistence Tier 2 (Workspace JSONL) — no admin required ─────────────
+  # Grant app SP CAN_EDIT on /Users/rsr1dy@bosch.com/EDIFACT/data/persist
+  # - name: DATABRICKS_PERSIST_PATH
+  #   value: "/Users/rsr1dy@bosch.com/EDIFACT/data/persist"
+  #
+  # ── Persistence Tier 1 (Delta / Unity Catalog) — requires admin grant ────
+  # Run scripts/create_delta_tables.sql after granting schema access:
+  #   GRANT CREATE, USAGE ON SCHEMA bci_rbs_prod.file2edi TO `<app-sp>`;
+  # - name: DATABRICKS_WAREHOUSE_ID
+  #   value: "607eec0346978542"
+  # - name: EDIFACT_CATALOG
+  #   value: "bci_rbs_prod"
+  # - name: EDIFACT_SCHEMA
+  #   value: "file2edi"
+  # ─────────────────────────────────────────────────────────────────────────
+  - name: F2EDI_API_BASE
+    value: "https://file2edi-5555213114570927.7.azure.databricksapps.com"
+
+resources:
+  - name: serving-endpoint
+    serving_endpoint:
+      name: databricks-gpt-oss-120b
+      permission: CAN_QUERY

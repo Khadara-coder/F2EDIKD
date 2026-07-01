@@ -1,0 +1,48 @@
+services:
+  file2edi:
+    build:
+      context: .
+      dockerfile: Dockerfile.file2edi
+    container_name: file2edi
+    ports:
+      - "${FILE2EDI_PORT:-8080}:8000"
+    environment:
+      MOCK_MODE: "true"
+      EDIFACT_PROFILE: "ELM_STANDARD"
+      UNB_SENDER_GLN: "4399901876613"
+      UNB_RECEIVER_GLN: "3015981600108"
+      MASTERDATA_SOURCE_DIR: /app/data/masterdata
+      MASTERDATA_RUNTIME_DIR: /app/data/masterdata
+      MASTER_DATA_DIR: /app/data/masterdata
+      OUTBOX_DIR: /app/data/outbox
+      LOG_DIR: /app/data/logs
+      DB_PATH: /app/data/edifact_standalone.db
+      INTAKE_DIR: /app/data/intake
+      # Databricks (production — set in .env)
+      DATABRICKS_SERVER_HOSTNAME: ${DATABRICKS_SERVER_HOSTNAME:-}
+      DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
+      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
+      DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-hive_metastore}
+      DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-file2edi}
+      DATABRICKS_WAREHOUSE_ID: ${DATABRICKS_WAREHOUSE_ID:-}
+      DATABRICKS_PERSIST_PATH: ${DATABRICKS_PERSIST_PATH:-}
+      SFTP_HOST: ${SFTP_HOST:-}
+      SFTP_USERNAME: ${SFTP_USERNAME:-}
+      SFTP_PASSWORD: ${SFTP_PASSWORD:-}
+      SFTP_REMOTE_DIR: ${SFTP_REMOTE_DIR:-}
+    volumes:
+      - file2edi_data:/app/data
+      - ./data/masterdata:/app/data/masterdata:ro
+      - ./lookups:/app/lookups:ro
+      - ./config.ini:/app/config.ini:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/api/health/system"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  file2edi_data:
+    driver: local

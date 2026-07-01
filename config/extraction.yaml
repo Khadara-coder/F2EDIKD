@@ -1,0 +1,235 @@
+scoring:
+  buyer_min_score: 45
+  buyer_min_margin: 10
+  buyer_vat_auto_score: 140
+  buyer_order_lookup_score: 200
+  shipto_validated_min: 75
+  street_exact_ratio: 0.88
+  street_fuzzy_ratio: 0.68
+  layout_geo_bonus_factor: 0.35
+  layout_above_anchor_factor: 0.35
+  layout_delivery_min_score: 75
+  layout_billing_column_penalty: 45
+  layout_delivery_column_bonus: 12
+  layout_delivery_anchor_block_bonus: 25
+  delivery_resolve_layout_min_score: 70
+  shipto_min_margin: 15
+  shipto_service_name_score: 40
+  shipto_service_tokens_score: 30
+  layout_require_closer_to_delivery: true
+  layout_vocabulary_margin_norm: 0.01
+  layout_ocr_relaxed_anchor_claim: true
+  shipto_master_guided_min: 55
+  shipto_embedding_weight: 25
+  shipto_embedding_min_sim: 0.55
+
+anchors:
+  delivery:
+    - adresse de livraison
+    - dresse de livraison
+    - adresse livraisen
+    - adresse livrason
+    - adresse livraison
+    - lieu de livraison
+    - livrer a
+    - livre a
+    - ship to
+    - delivery address
+    - chantier
+  delivery_secondary:
+    - destinataire
+  delivery_exclude:
+    - plusieurs de nos agences
+    - une seule adresse
+    - colisages separes
+    - identifier chaque colis
+    - numero de commande
+    - nom de l'agence destinataire
+    - ne seront pas retires
+  negative:
+    - facture a
+    - bill to
+    - adresse de facturation
+    - facturation
+    - payer a
+    - expedier
+  negative_exclude:
+    - code reference
+    - reference fournisseur
+    - ref fournisseur
+    - designation
+    - quantite
+    - montant
+    - delai
+    - imperatif
+    - efacture
+    - siret
+    - iban
+    - rcs
+    - siege social
+
+postal_false_positive_patterns:
+  - "\\b(?:csp|ref|reference)\\b"
+  - "\\bcommande\\s+n"
+  - "\\bn[°o]\\b"
+  - "\\bst\\s+\\d\\s+"
+  - "\\bbon\\s+de\\s+commande\\b"
+  - "\\bdevise\\b"
+  - "\\bport\\s+franco\\b"
+  - "\\bbp\\s+\\d"
+  - "\\bpu\\s+ht\\b"
+  - "\\btype\\s+livraison\\b"
+
+postal_invalid_city_tokens:
+  - devise
+  - quantite
+  - designation
+  - article
+  - total
+  - france
+  - ht
+  - ttc
+  - catalogue
+  - delai
+  - prix
+  - unite
+  - montant
+  - reference
+  - facture
+  - commande
+  - chemin
+  - route
+  - avenue
+  - rue
+  - boulevard
+  - impasse
+  - place
+  - zone
+  - za
+  - zac
+  - zi
+  - passage
+  - cours
+  - quai
+  - faubourg
+  - allee
+  - sentier
+  - voie
+  - lieu
+  - lotissement
+  - residence
+
+postal_form_prefix_patterns:
+  - "^devise[.\\s]+"
+  - "^type\\s+livraison[.\\s]+"
+  - "^livre\\s+"
+  - "^depot[.\\s+]+"
+  - "^dépot[.\\s+]+"
+
+internal_company_addresses:
+  - name: ELM LEBLANC
+    organization_fragments:
+      - elm leblanc
+      - elm.leblanc
+      - bosch thermotechnologie
+      - bosch home comfort
+      - bosch produits finis
+      - thermotechnologie france
+    postals:
+      - "93700"
+      - "93711"
+    cities:
+      - drancy
+      - drancy cedex
+      - drnacy
+    street_fragments:
+      - rue de stalingrad
+      - rue de stanlingrad
+      - stalingrad
+    street_numbers:
+      - "126"
+      - "124"
+
+  - name: GARANKA HOLDING VANNES
+    organization_fragments:
+      - garanka holding
+      - garanka ile-de-france
+    postals:
+      - "56000"
+    cities:
+      - vannes
+    street_fragments:
+      - rue michael faraday
+      - michael faraday
+
+street_type_abbreviations:
+  av: avenue
+  bd: boulevard
+  rte: route
+  ch: chemin
+  imp: impasse
+  pl: place
+  fbg: faubourg
+  pas: passage
+  crs: cours
+
+delivery_section_stop_words:
+  - quantites
+  - quantite
+  - designation
+  - code reference
+  - reference fournisseur
+  - montant ht
+  - montant net
+  - prix net
+  - total ht
+  - p.u
+  - delai
+  - article
+  - dosseret
+  - destinataire
+  - expedier
+  - facture a
+
+noise_lines:
+  - facture a
+  - adresse de livraison
+  - merci de livrer
+  - infos fournisseur
+  - correspondant
+  - contact
+  - mail
+  - email
+  - tel
+  - fax
+  - virement
+  - page
+  - article
+  - designation
+  - mode livraison
+  - condition paiement
+  - total
+  - commande
+  - reference
+  - code fournisseur
+  - observations
+
+section_stop_words:
+  - article
+  - designation
+  - montant ht
+  - prix net
+  - total ht
+  - mode livraison
+  - condition paiement
+  - signature
+  - "page "
+
+ocr:
+  min_native_text_chars: 30
+  selective_crop_enabled: true
+  selective_crop_top_ratio: 0.55
+  selective_crop_margin_px: 12
+
+pdf:
+  max_pages_per_request: 8

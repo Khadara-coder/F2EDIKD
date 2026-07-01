@@ -1,0 +1,4 @@
+# EAN-13 barcode -> SAP MATNR mapping
+# Format: ean,matnr,description
+ean,matnr,description
+# Add EAN entries as they are confirmed

@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+*.egg-info/
+dist/
+build/
+
+# Node / frontend
+frontend/node_modules/
+frontend/dist/
+backend/node_modules/
+*.tsbuildinfo
+
+# Secrets & local config
+.env
+.env.local
+.env.*.local
+config.ini
+*.pem
+*.key
+
+# SQLite & runtime data
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+data/intake/
+data/processed/
+data/reject/
+data/outbox/
+data/logs/
+outbox/
+logs/
+
+# Large master data (bundled/downloaded at deploy)
+data/masterdata/*.csv
+F2EDI/data/masterdata/*.csv
+
+# Sample / uploaded PDFs
+*.pdf
+
+# Uploads & generated artifacts
+*.tst
+*.edi
+
+# IDE & OS
+.cursor/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Backups
+*.bak
+*.bak2
+server.py.bak*
+
+# Misc
+n8n workflow.txt
