@@ -1,8 +1,40 @@
-# EDIFACT Orders Generator
+# File2EDI / EDIFACT Orders Generator
 
-Production-grade Python generator for EDIFACT ORDERS D.96A `.tst` files.
+Application **File2EDI** (React + FastAPI) et moteur Python de génération EDIFACT ORDERS D.96A (`.tst`) pour Bosch Thermotechnologie France.
 
-Converts customer PDF purchase orders into ELM_STANDARD EDIFACT ORDERS for SAP intake via Esker/ELM.
+**Dépôt :** [github.com/Khadara-coder/F2EDIKD](https://github.com/Khadara-coder/F2EDIKD)
+
+---
+
+## Démarrage rapide (après clone)
+
+```powershell
+git clone https://github.com/Khadara-coder/F2EDIKD.git
+cd F2EDIKD
+copy .env.example .env
+pip install -r requirements.txt
+```
+
+Copiez les CSV masterdata dans `data/masterdata/` (voir [data/masterdata/README.md](data/masterdata/README.md)).
+
+```powershell
+cd frontend
+npm install
+npm run build
+cd ..
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```
+
+- **UI :** http://localhost:8000  
+- **API :** http://localhost:8000/api/health/system  
+
+Pages : Cockpit · Convertir · Revue · Historique · Données maîtres · Paramètres
+
+Déploiement Docker / Databricks : [docs/FILE2EDI_DEPLOYMENT.md](docs/FILE2EDI_DEPLOYMENT.md)
+
+---
+
+## EDIFACT batch (moteur Python)
 
 ---
 

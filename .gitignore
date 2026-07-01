@@ -62,6 +62,7 @@ desktop.ini
 *.bak
 *.bak2
 server.py.bak*
+static/*.bak*
 
 # Misc
 n8n workflow.txt
