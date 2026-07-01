@@ -2,15 +2,16 @@
 
 Application **File2EDI** (React + FastAPI) et moteur Python de génération EDIFACT ORDERS D.96A (`.tst`) pour Bosch Thermotechnologie France.
 
-**Dépôt :** [github.com/Khadara-coder/F2EDIKD](https://github.com/Khadara-coder/F2EDIKD)
+**Dépôt Bosch :** [github.boschdevcloud.com/DIK1DY/F2EDIDK](https://github.boschdevcloud.com/DIK1DY/F2EDIDK)  
+**Miroir public :** [github.com/Khadara-coder/F2EDIKD](https://github.com/Khadara-coder/F2EDIKD)
 
 ---
 
 ## Démarrage rapide (après clone)
 
 ```powershell
-git clone https://github.com/Khadara-coder/F2EDIKD.git
-cd F2EDIKD
+git clone https://github.boschdevcloud.com/DIK1DY/F2EDIDK.git
+cd F2EDIDK
 copy .env.example .env
 pip install -r requirements.txt
 ```
