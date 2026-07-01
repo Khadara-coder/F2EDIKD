@@ -2,7 +2,7 @@
 
 Bosch Thermotechnologie France / ELM_STANDARD D.96A ORDERS
 Entry:  uvicorn server:app --host=0.0.0.0 --port=8000
-UI:     frontend/dist (React + Vite) — set FILE2EDI_UI=legacy for static/index.html only
+UI:     frontend/dist (React + Vite)
 API:    /api/*
 """
 from __future__ import annotations
@@ -1133,25 +1133,14 @@ try:
 except Exception as _f2e_exc:
     log.warning("File2EDI router not mounted: %s", _f2e_exc)
 
-# ── SPA static assets (React primary; legacy Alpine UI opt-in only) ───────────
+# ── SPA static assets (React only) ─────────────────────────────────────────────
 _FRONTEND_DIST = APP_ROOT / "frontend" / "dist"
-_LEGACY_STATIC = APP_ROOT / "static"
-_FILE2EDI_UI = os.environ.get("FILE2EDI_UI", "react").strip().lower()
-
-if _FILE2EDI_UI == "legacy":
-    STATIC_DIR = _LEGACY_STATIC
-    log.info("UI mode: legacy (static/index.html Alpine.js)")
-elif (_FRONTEND_DIST / "index.html").exists():
-    STATIC_DIR = _FRONTEND_DIST
-    log.info("UI mode: react (frontend/dist)")
+STATIC_DIR = _FRONTEND_DIST
+INDEX_HTML = _FRONTEND_DIST / "index.html"
+if INDEX_HTML.exists():
+    log.info("UI: React SPA (frontend/dist)")
 else:
-    STATIC_DIR = _FRONTEND_DIST
-    log.warning(
-        "UI mode: react requested but frontend/dist missing — "
-        "run: cd frontend && npm install && npm run build"
-    )
-
-INDEX_HTML = STATIC_DIR / "index.html"
+    log.warning("frontend/dist missing — run: cd frontend && npm install && npm run build")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FULL PLATFORM BACKEND  (n8n → File2EDI migration)
@@ -3020,21 +3009,17 @@ def _spa_index_response() -> HTMLResponse:
         status_code=503,
     )
 
-# Mount Vite assets (/assets/*). Legacy static/ only in FILE2EDI_UI=legacy mode.
+# Mount Vite assets (/assets/*)
 if STATIC_DIR.exists():
     assets_dir = STATIC_DIR / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-if _FILE2EDI_UI == "legacy" and _LEGACY_STATIC.exists():
-    app.mount("/static", StaticFiles(directory=str(_LEGACY_STATIC)), name="static")
-elif STATIC_DIR.exists() and not (STATIC_DIR / "assets").exists():
-    app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 @app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)
 def spa_fallback(full_path: str):
     """React Router paths (/revue, /convertir, …) — serve index.html on direct URL access."""
-    if full_path.startswith(("api/", "assets/", "static/")):
+    if full_path.startswith(("api/", "assets/")):
         raise HTTPException(404)
     return _spa_index_response()
 

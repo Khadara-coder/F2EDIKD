@@ -37,8 +37,6 @@ env:
     value: "hive_metastore"
   - name: EDIFACT_SCHEMA
     value: "file2edi"
-  - name: FILE2EDI_UI
-    value: "react"
   # ── Persistence Tier 2 (Workspace JSONL) — no admin required ─────────────
   # Grant app SP CAN_EDIT on /Users/rsr1dy@bosch.com/EDIFACT/data/persist
   # - name: DATABRICKS_PERSIST_PATH
