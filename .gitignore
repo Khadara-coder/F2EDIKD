@@ -9,8 +9,8 @@ __pycache__/
 venv/
 env/
 *.egg-info/
-dist/
-build/
+/build/
+/dist/
 
 # Node / frontend (dist versionné pour déploiement sans npm)
 frontend/node_modules/
