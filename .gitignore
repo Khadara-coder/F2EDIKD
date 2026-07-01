@@ -12,9 +12,8 @@ env/
 dist/
 build/
 
-# Node / frontend
+# Node / frontend (dist versionné pour déploiement sans npm)
 frontend/node_modules/
-frontend/dist/
 backend/node_modules/
 *.tsbuildinfo
 
