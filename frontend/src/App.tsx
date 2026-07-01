@@ -27,6 +27,7 @@ export function App() {
             <Route path="/" element={<CockpitPage />} />
             <Route path="/convertir" element={<ConvertirPage />} />
             <Route path="/revue" element={<RevueListPage />} />
+            <Route path="/revue/" element={<Navigate to="/revue" replace />} />
             <Route path="/revue/:orderId" element={<RevuePage />} />
             <Route path="/historique" element={<HistoriquePage />} />
             <Route path="/donnees-maitres" element={<DonneesMaitresPage />} />

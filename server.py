@@ -1,8 +1,8 @@
-"""EDIFACT Generator — FastAPI REST API + shadcn/ui SPA frontend.
+"""EDIFACT Generator — FastAPI REST API + File2EDI React SPA.
 
 Bosch Thermotechnologie France / ELM_STANDARD D.96A ORDERS
 Entry:  uvicorn server:app --host=0.0.0.0 --port=8000
-Static: static/index.html  (shadcn/ui + Alpine.js SPA)
+UI:     frontend/dist (React + Vite) — set FILE2EDI_UI=legacy for static/index.html only
 API:    /api/*
 """
 from __future__ import annotations
@@ -1133,9 +1133,24 @@ try:
 except Exception as _f2e_exc:
     log.warning("File2EDI router not mounted: %s", _f2e_exc)
 
-# ── SPA static assets ─────────────────────────────────────────────────────────
+# ── SPA static assets (React primary; legacy Alpine UI opt-in only) ───────────
 _FRONTEND_DIST = APP_ROOT / "frontend" / "dist"
-STATIC_DIR = _FRONTEND_DIST if (_FRONTEND_DIST / "index.html").exists() else APP_ROOT / "static"
+_LEGACY_STATIC = APP_ROOT / "static"
+_FILE2EDI_UI = os.environ.get("FILE2EDI_UI", "react").strip().lower()
+
+if _FILE2EDI_UI == "legacy":
+    STATIC_DIR = _LEGACY_STATIC
+    log.info("UI mode: legacy (static/index.html Alpine.js)")
+elif (_FRONTEND_DIST / "index.html").exists():
+    STATIC_DIR = _FRONTEND_DIST
+    log.info("UI mode: react (frontend/dist)")
+else:
+    STATIC_DIR = _FRONTEND_DIST
+    log.warning(
+        "UI mode: react requested but frontend/dist missing — "
+        "run: cd frontend && npm install && npm run build"
+    )
+
 INDEX_HTML = STATIC_DIR / "index.html"
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -2994,19 +3009,34 @@ def api_notification_templates():
 
 @app.get("/", response_class=HTMLResponse)
 def spa_root():
+    return _spa_index_response()
+
+
+def _spa_index_response() -> HTMLResponse:
     if INDEX_HTML.exists():
         return HTMLResponse(INDEX_HTML.read_text(encoding="utf-8"))
-    return HTMLResponse("<h2>Frontend building... Run: cd frontend && npm run build</h2>", status_code=503)
+    return HTMLResponse(
+        "<h2>Frontend building... Run: cd frontend && npm run build</h2>",
+        status_code=503,
+    )
 
-# Mount Vite assets (/assets/*) and legacy /static/*
+# Mount Vite assets (/assets/*). Legacy static/ only in FILE2EDI_UI=legacy mode.
 if STATIC_DIR.exists():
     assets_dir = STATIC_DIR / "assets"
     if assets_dir.exists():
         app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="assets")
-if (APP_ROOT / "static").exists() and STATIC_DIR != APP_ROOT / "static":
-    app.mount("/static", StaticFiles(directory=str(APP_ROOT / "static")), name="static")
+if _FILE2EDI_UI == "legacy" and _LEGACY_STATIC.exists():
+    app.mount("/static", StaticFiles(directory=str(_LEGACY_STATIC)), name="static")
 elif STATIC_DIR.exists() and not (STATIC_DIR / "assets").exists():
     app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+
+
+@app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)
+def spa_fallback(full_path: str):
+    """React Router paths (/revue, /convertir, …) — serve index.html on direct URL access."""
+    if full_path.startswith(("api/", "assets/", "static/")):
+        raise HTTPException(404)
+    return _spa_index_response()
 
 
 # ── Dev entry ──────────────────────────────────────────────────────────────────

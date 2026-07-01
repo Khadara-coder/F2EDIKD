@@ -1,60 +1,55 @@
 # File2EDI React frontend
 
-Interface SaaS pour convertir des commandes PDF en fichiers EDIFACT `.tst`.
+Interface **React + TypeScript + Tailwind** (sidebar, Cockpit, Convertir, Revue, etc.).
 
-## Stack unifiée (production)
+> L’ancienne UI monolithique (`static/index.html`, Alpine.js) reste dans le dépôt pour référence mais **n’est plus servie par défaut**. Utilisez `FILE2EDI_UI=legacy` uniquement si besoin.
 
-Le frontend React est servi par **`server.py`** (FastAPI Python) — même déploiement sur Databricks Apps et Docker.
+## Stack de production
 
 ```
-frontend/dist  →  server.py  →  src/file2edi/  →  moteur EDIFACT + Databricks
+frontend/dist  →  server.py (FILE2EDI_UI=react)  →  src/file2edi/  →  moteur EDIFACT
 ```
 
-Voir [docs/FILE2EDI_DEPLOYMENT.md](../docs/FILE2EDI_DEPLOYMENT.md) pour le guide complet.
-
-## Démarrage rapide
-
-### Docker Compose (recommandé)
-
-```powershell
-.\scripts\build_file2edi.ps1 -Docker
-```
-
-→ http://localhost:8080
-
-### Local (Python + build React)
+## Démarrage
 
 ```powershell
 cd frontend && npm install && npm run build && cd ..
-uvicorn server:app --host 0.0.0.0 --port 8000
+python -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
 → http://localhost:8000
 
-### Dev hot-reload
+## Routes React
+
+| URL | Page |
+|-----|------|
+| `/` | Cockpit |
+| `/convertir` | Upload + aperçu extraction |
+| `/revue` | Liste de toutes les commandes converties |
+| `/revue/:orderId` | Revue éditable (PDF, lignes, EDIFACT) |
+| `/historique` | Historique |
+| `/donnees-maitres` | Données maîtres |
+| `/parametres` | Paramètres |
+
+Les URLs directes (`/revue`, `/revue/ord-…`) fonctionnent après rechargement (fallback SPA dans `server.py`).
+
+## Dev hot-reload
 
 ```powershell
 # Terminal 1
-uvicorn server:app --reload --port 8000
+python -m uvicorn server:app --reload --port 8000
 
 # Terminal 2
 cd frontend && npm run dev
 ```
 
-→ http://localhost:5173 (proxy API → :8000)
+→ http://localhost:5173 (proxy `/api` → :8000)
 
-## Pages
+## Ancienne UI (désactivée par défaut)
 
-| Route | Description |
-|-------|-------------|
-| `/` | Cockpit |
-| `/convertir` | Upload PDF |
-| `/revue/:orderId` | Revue éditable |
-| `/historique` | Historique |
-| `/donnees-maitres` | Master data |
-| `/parametres` | Configuration |
+```powershell
+$env:FILE2EDI_UI="legacy"
+python -m uvicorn server:app --port 8000
+```
 
-## Note sur `backend/` (Node)
-
-Le dossier `backend/` Node/Express reste disponible pour tests isolés en mode mock.
-**La stack de production utilise uniquement `server.py` (Python).**
+Voir [docs/FILE2EDI_DEPLOYMENT.md](../docs/FILE2EDI_DEPLOYMENT.md).
