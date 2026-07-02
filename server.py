@@ -116,6 +116,24 @@ def _parse_csv_env(name: str) -> set[str]:
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
 
 
+def _extract_actor_from_request(req: Request | None) -> str:
+    """Extract actor from trusted upstream headers only (no fallback)."""
+    if req is None:
+        return ""
+    for hk in (
+        "x-forwarded-user",
+        "x-auth-request-user",
+        "x-forwarded-email",
+        "x-ms-client-principal-name",
+        "x-databricks-user",
+        "x-user",
+    ):
+        hv = (req.headers.get(hk) or "").strip()
+        if hv:
+            return hv
+    return ""
+
+
 def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> str:
     """Resolve actor identity from payload, headers, then environment fallback."""
     p = payload or {}
@@ -123,18 +141,9 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
     if actor:
         return actor
 
-    if req is not None:
-        for hk in (
-            "x-forwarded-user",
-            "x-auth-request-user",
-            "x-forwarded-email",
-            "x-ms-client-principal-name",
-            "x-databricks-user",
-            "x-user",
-        ):
-            hv = (req.headers.get(hk) or "").strip()
-            if hv:
-                return hv
+    actor_hdr = _extract_actor_from_request(req)
+    if actor_hdr:
+        return actor_hdr
 
     return os.environ.get("DEFAULT_APP_ACTOR", "operator")
 
@@ -478,6 +487,25 @@ app = FastAPI(title="EDIFACT Generator", version="4.0.0",
               docs_url="/api/docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
+
+_APP_REQUIRE_AUTH = os.environ.get("APP_REQUIRE_AUTH", "true").strip().lower() in {"1", "true", "yes", "on"}
+_PUBLIC_API_PATHS = {
+    "/api/health",
+    "/api/health/system",
+    "/api/proxy/health",
+    "/health",
+    "/healthz",
+}
+
+
+@app.middleware("http")
+async def _require_authenticated_user(request: Request, call_next):
+    """Enforce authenticated user for API routes when APP_REQUIRE_AUTH is enabled."""
+    path = request.url.path or ""
+    if _APP_REQUIRE_AUTH and path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
+        if not _extract_actor_from_request(request):
+            return JSONResponse(status_code=401, content={"detail": "Authentification requise"})
+    return await call_next(request)
 
 
 

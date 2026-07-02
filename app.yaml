@@ -45,6 +45,8 @@ env:
     value: ""
   - name: APP_READONLY_USERS
     value: ""
+  - name: APP_REQUIRE_AUTH
+    value: "true"
   # ── Persistence Tier 2 (Workspace JSONL) — no admin required ─────────────
   # Grant app SP CAN_EDIT on chosen Workspace folder (if Tier 2 is enabled)
   # - name: DATABRICKS_PERSIST_PATH
