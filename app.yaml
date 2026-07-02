@@ -40,7 +40,7 @@ env:
   - name: DEFAULT_APP_ACTOR
     value: "operator"
   - name: APP_ADMIN_USERS
-    value: "dik1dy@bosch.com"
+    value: "dik1dy@bosch.com,dik1dy,khadara"
   - name: APP_REVIEW_USERS
     value: ""
   - name: APP_READONLY_USERS
