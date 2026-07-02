@@ -40,7 +40,6 @@ logs/
 
 # Large master data (bundled/downloaded at deploy)
 data/masterdata/*.csv
-F2EDI/data/masterdata/*.csv
 
 # Sample / uploaded PDFs
 *.pdf
