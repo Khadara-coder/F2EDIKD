@@ -716,11 +716,8 @@ async def _startup_sync_masterdata() -> None:
     # ── File2EDI SQLite schema ────────────────────────────────────────────
     try:
         from src.file2edi.store import get_store
-        from src.file2edi.demo_seed import seed_demo_orders, refresh_demo_pdf
-        store = get_store()  # initializes file2edi_* tables
-        seed_demo_orders(store)
-        refresh_demo_pdf(store)
-        log.info("startup file2edi: order schema ready (demo seed if empty)")
+        get_store()  # initializes file2edi_* tables
+        log.info("startup file2edi: order schema ready")
     except Exception as exc:
         log.warning("startup file2edi schema: %s", exc)
     # ── Masterdata ────────────────────────────────────────────────────────
@@ -2329,6 +2326,107 @@ def _run_edi_checklist(msg: str) -> list[dict]:
 #  Priority 1: Re-run EDIFACT generation with operator corrections
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _build_resolved_lines(cor: dict, orig_lines: dict) -> tuple[list[dict], list[str]]:
+    """Build EDIFACT line dicts from review corrections (priority) or extraction fallback."""
+    line_corrections = cor.get("lines") or []
+    from_review = bool(cor.get("lines_from_review"))
+    resolved_lines: list[dict] = []
+    skipped_lines: list[str] = []
+
+    def _append_from_correction(lc: dict) -> None:
+        art = str(
+            lc.get("matnr")
+            or lc.get("code_article")
+            or lc.get("boschArticle")
+            or ""
+        ).strip()
+        if not art or art.upper().startswith("ARTICLE_MANQUANT"):
+            skipped_lines.append(art or f"line_{lc.get('line_number', '?')}")
+            return
+        qty = lc.get("quantity")
+        price = lc.get("unit_price")
+        if price is None:
+            price = lc.get("unitPrice")
+        resolved_lines.append({
+            "matnr": art,
+            "description": str(lc.get("description") or lc.get("designation") or ""),
+            "quantity": qty if qty is not None and qty != "" else "1",
+            "unit_price": price if price is not None and price != "" else "",
+            "unit": str(lc.get("unit") or "PCE").strip() or "PCE",
+            "original_article": art,
+        })
+
+    if from_review or line_corrections:
+        for lc in line_corrections:
+            _append_from_correction(lc)
+        return resolved_lines, skipped_lines
+
+    items = orig_lines.get("items") or orig_lines.get("lignes") or []
+    for i, it in enumerate(items):
+        art = str(
+            it.get("code_article")
+            or it.get("Article Bosch")
+            or it.get("matnr")
+            or ""
+        ).strip()
+        if i < len(line_corrections):
+            lc = line_corrections[i]
+            art = str(lc.get("matnr") or lc.get("code_article") or art or "").strip()
+        if not art or art.upper().startswith("ARTICLE_MANQUANT"):
+            skipped_lines.append(art or f"line_{i}")
+            continue
+        qty = it.get("quantite", it.get("quantity", ""))
+        price = it.get("prix_unitaire_ht", it.get("unit_price", ""))
+        if i < len(line_corrections):
+            lc = line_corrections[i]
+            if lc.get("quantity") is not None:
+                qty = lc.get("quantity")
+            if lc.get("unit_price") is not None:
+                price = lc.get("unit_price")
+            elif lc.get("unitPrice") is not None:
+                price = lc.get("unitPrice")
+        resolved_lines.append({
+            "matnr": art,
+            "description": str(
+                (line_corrections[i].get("description") if i < len(line_corrections) else None)
+                or it.get("description")
+                or it.get("Designation")
+                or ""
+            ),
+            "quantity": qty,
+            "unit_price": price,
+            "unit": str(
+                (line_corrections[i].get("unit") if i < len(line_corrections) else None)
+                or it.get("unit")
+                or it.get("Unite")
+                or "PCE"
+            ).strip() or "PCE",
+            "original_article": art,
+        })
+
+    return resolved_lines, skipped_lines
+
+
+def _merge_partner_override(base: dict, override: dict | None, id_key: str, code: str) -> dict:
+    """Apply operator-edited partner fields over masterdata lookup (review wins)."""
+    row = dict(base or {})
+    if code:
+        row[id_key] = code
+    if not override:
+        return row
+    for src, dst in (
+        ("name", "name"),
+        ("street", "street"),
+        ("postal_code", "postal_code"),
+        ("city", "city"),
+        ("country", "country"),
+    ):
+        val = override.get(src)
+        if val is not None and str(val).strip():
+            row[dst] = str(val).strip()
+    return row
+
+
 @app.post("/api/conversions/{cid}/generate")
 async def api_generate(cid: str, req: Request):
     """Regenerate EDIFACT using stored extraction + operator corrections.
@@ -2427,45 +2525,42 @@ async def api_generate(cid: str, req: Request):
         blockers.append({"code": "SHIPTO_NO_STRONG_MATCH", "message": "Code SHIPTO manquant"})
 
     # ── Build resolved_lines ─────────────────────────────────────────────
-    items = orig_lines.get("items", [])
-    # Apply per-line corrections if passed
-    line_corrections = cor.get("lines", [])
-    resolved_lines = []
-    skipped_lines  = []
-    for i, it in enumerate(items):
-        art = it.get("code_article", "")
-        # Apply inline correction if present
-        if i < len(line_corrections):
-            lc = line_corrections[i]
-            art = lc.get("code_article", art) or art
-        art = art.strip()
-        if not art or art.upper().startswith("ARTICLE_MANQUANT"):
-            skipped_lines.append(art or f"line_{i}")
-            continue
-        resolved_lines.append({
-            "matnr":            art,
-            "description":      it.get("description", ""),
-            "quantity":         it.get("quantite", ""),
-            "unit_price":       it.get("prix_unitaire_ht", ""),
-            "original_article": art,
-        })
+    resolved_lines, skipped_lines = _build_resolved_lines(cor, orig_lines)
 
     if not resolved_lines:
         blockers.append({"code": "NO_LINE_ITEMS",
                          "message": f"Aucune ligne article valide ({len(skipped_lines)} ignorée(s))"})
 
     if blockers:
+        blocker_messages = [
+            b.get("message") or b.get("code") or str(b)
+            for b in blockers
+            if isinstance(b, dict)
+        ]
         return {
             "conversion_id": cid,
             "status": "REVIEW_REQUIRED",
             "blockers": blockers,
+            "errors": blocker_messages,
             "generated": False,
-            "message": "Blocages restants — corrigez les champs avant de générer.",
+            "message": " — ".join(blocker_messages) if blocker_messages else (
+                "Blocages restants — corrigez les champs avant de générer."
+            ),
         }
 
     # ── Masterdata lookup ─────────────────────────────────────────────────
-    soldto_row = _get_soldto_row(soldto_code)
-    shipto_row = _get_shipto_row(shipto_code)
+    soldto_row = _merge_partner_override(
+        _get_soldto_row(soldto_code),
+        cor.get("soldto_partner"),
+        "soldto",
+        soldto_code,
+    )
+    shipto_row = _merge_partner_override(
+        _get_shipto_row(shipto_code),
+        cor.get("shipto_partner"),
+        "shipto",
+        shipto_code,
+    )
 
     # ── Call EDIFACT builder ──────────────────────────────────────────────
     try:

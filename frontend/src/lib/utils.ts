@@ -43,3 +43,13 @@ export function confidenceColor(confidence: number): string {
   if (confidence >= 75) return "text-amber-600";
   return "text-red-600";
 }
+
+export function downloadTextFile(content: string, fileName: string): void {
+  const blob = new Blob([content], { type: "application/edifact;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

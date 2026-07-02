@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Eye, ArrowRight, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
-import { mockExtractionPreview } from "@/lib/mockData";
 import type { ExtractionPreview } from "@/types";
 import { Header } from "@/components/layout/Header";
 import { UploadDropzone } from "@/components/file2edi/UploadDropzone";
@@ -15,7 +14,7 @@ import { Button } from "@/components/ui/button";
 export function ConvertirPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
-  const [preview, setPreview] = useState<ExtractionPreview>(mockExtractionPreview);
+  const [preview, setPreview] = useState<ExtractionPreview | null>(null);
 
   const extractMutation = useMutation({
     mutationFn: async (file: File) => {
@@ -64,7 +63,13 @@ export function ConvertirPage() {
             </CardTitle>
           </CardHeader>
           <CardContent className="overflow-x-auto">
-            <ProgressStepper steps={preview.steps} orientation="horizontal" />
+            {preview ? (
+              <ProgressStepper steps={preview.steps} orientation="horizontal" />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                La progression apparaîtra après l'extraction d'un PDF.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -75,7 +80,13 @@ export function ConvertirPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ExtractedDataTable preview={preview} />
+            {preview ? (
+              <ExtractedDataTable preview={preview} />
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Aucun aperçu disponible. Importez un PDF pour lancer l'extraction.
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -83,14 +94,16 @@ export function ConvertirPage() {
           <Button
             variant="outline"
             className="gap-2"
-            onClick={() => navigate(`/revue/${preview.orderId}`)}
+            onClick={() => preview && navigate(`/revue/${preview.orderId}`)}
+            disabled={!preview}
           >
             <Eye className="h-4 w-4" />
             Voir le détail des lignes
           </Button>
           <Button
             className="gap-2"
-            onClick={() => navigate(`/revue/${preview.orderId}`)}
+            onClick={() => preview && navigate(`/revue/${preview.orderId}`)}
+            disabled={!preview}
           >
             Aller à la revue
             <ArrowRight className="h-4 w-4" />

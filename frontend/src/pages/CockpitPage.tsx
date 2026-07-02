@@ -62,126 +62,122 @@ export function CockpitPage() {
         ))}
       </div>
 
-      <div className="mb-6 grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
-            <CardTitle className="text-base">
-              File d'attente — revue requise
-              <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
-                {reviewQueue.data?.length ?? 0}
-              </span>
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Fichier</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Confiance</TableHead>
-                  <TableHead>Problématique</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Statut</TableHead>
-                  <TableHead />
+      <Card className="mb-6">
+        <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
+          <CardTitle className="text-base">
+            File d'attente — revue requise
+            <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
+              {reviewQueue.data?.length ?? 0}
+            </span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Fichier</TableHead>
+                <TableHead>Client</TableHead>
+                <TableHead>Confiance</TableHead>
+                <TableHead>Problématique</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Statut</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {reviewQueue.data?.map((row) => (
+                <TableRow
+                  key={row.orderId}
+                  className="cursor-pointer"
+                  onClick={() => navigate(`/revue/${row.orderId}`)}
+                >
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <FileIcon className="h-4 w-4 text-red-500" />
+                      <span className="max-w-[140px] truncate text-sm">{row.fileName}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{row.clientName}</TableCell>
+                  <TableCell className={confidenceColor(row.confidence)}>
+                    {row.confidence}%
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>
+                  <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={row.status} />
+                  </TableCell>
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        navigate(`/revue/${row.orderId}`);
+                      }}
+                    >
+                      Ouvrir
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {reviewQueue.data?.map((row) => (
-                  <TableRow
-                    key={row.orderId}
-                    className="cursor-pointer"
-                    onClick={() => navigate(`/revue/${row.orderId}`)}
-                  >
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <FileIcon className="h-4 w-4 text-red-500" />
-                        <span className="max-w-[140px] truncate text-sm">{row.fileName}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{row.clientName}</TableCell>
-                    <TableCell className={confidenceColor(row.confidence)}>
-                      {row.confidence}%
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>
-                    <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={row.status} />
-                    </TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/revue/${row.orderId}`);
-                        }}
-                      >
-                        Ouvrir
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="border-t p-3">
-              <Button variant="link" className="text-primary" onClick={() => navigate("/revue")}>
-                Voir toutes les revues requises →
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="border-t p-3">
+            <Button variant="link" className="text-primary" onClick={() => navigate("/revue")}>
+              Voir toutes les revues requises →
+            </Button>
+          </div>
+        </CardContent>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Dernières conversions</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Fichier</TableHead>
-                  <TableHead>Client</TableHead>
-                  <TableHead>Statut</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Actions</TableHead>
+        <CardHeader className="border-t py-4">
+          <CardTitle className="text-base">Dernières conversions</CardTitle>
+        </CardHeader>
+        <CardContent className="p-0">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Fichier</TableHead>
+                <TableHead>Client</TableHead>
+                <TableHead>Statut</TableHead>
+                <TableHead>Date</TableHead>
+                <TableHead>Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {recentConversions.data?.map((row) => (
+                <TableRow key={row.conversionId}>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <FileIcon className="h-4 w-4 text-red-500" />
+                      <span className="max-w-[140px] truncate text-sm">{row.fileName}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell>{row.clientName}</TableCell>
+                  <TableCell>
+                    <StatusBadge status={row.status} />
+                  </TableCell>
+                  <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
+                  <TableCell>
+                    <div className="flex gap-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(`/revue/${row.orderId}`)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8">
+                        <Download className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentConversions.data?.map((row) => (
-                  <TableRow key={row.conversionId}>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <FileIcon className="h-4 w-4 text-red-500" />
-                        <span className="max-w-[140px] truncate text-sm">{row.fileName}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell>{row.clientName}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={row.status} />
-                    </TableCell>
-                    <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
-                    <TableCell>
-                      <div className="flex gap-1">
-                        <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(`/revue/${row.orderId}`)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <Download className="h-4 w-4" />
-                        </Button>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="border-t p-3">
-              <Button variant="link" className="text-primary" onClick={() => navigate("/historique")}>
-                Voir tout l'historique →
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="border-t p-3">
+            <Button variant="link" className="text-primary" onClick={() => navigate("/historique")}>
+              Voir tout l'historique →
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card>

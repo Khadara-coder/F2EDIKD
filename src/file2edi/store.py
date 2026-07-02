@@ -50,6 +50,14 @@ class File2EdiStore:
         sql = _SCHEMA_PATH.read_text(encoding="utf-8")
         conn = self._conn()
         conn.executescript(sql)
+        cols = {
+            r[1]
+            for r in conn.execute("PRAGMA table_info(file2edi_order_partners)").fetchall()
+        }
+        if "edited_fields_json" not in cols:
+            conn.execute(
+                "ALTER TABLE file2edi_order_partners ADD COLUMN edited_fields_json TEXT"
+            )
         conn.commit()
         conn.close()
 
@@ -207,13 +215,14 @@ class File2EdiStore:
                     conn.execute(
                         """INSERT INTO file2edi_order_partners
                         (partner_id,order_id,partner_function,partner_code,partner_name,
-                         address_line_1,postal_code,city,country,confidence,manually_edited)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                         address_line_1,postal_code,city,country,confidence,manually_edited,edited_fields_json)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
                         [
                             p["partnerId"], p["orderId"], p["partnerFunction"], p["partnerCode"],
                             p["partnerName"], p.get("addressLine1"), p.get("postalCode"),
                             p.get("city"), p.get("country", "FR"), p.get("confidence", 0),
                             1 if p.get("manuallyEdited") else 0,
+                            json.dumps(p.get("editedFields") or {}),
                         ],
                     )
                 for ln in review.get("lines", []):
@@ -312,7 +321,7 @@ class File2EdiStore:
             "partner_id": "partnerId", "order_id": "orderId", "partner_function": "partnerFunction",
             "partner_code": "partnerCode", "partner_name": "partnerName", "address_line_1": "addressLine1",
             "postal_code": "postalCode", "city": "city", "country": "country", "confidence": "confidence",
-            "manually_edited": "manuallyEdited",
+            "manually_edited": "manuallyEdited", "edited_fields_json": "editedFieldsJson",
         }
         l_map = {
             "line_id": "lineId", "order_id": "orderId", "line_number": "lineNumber",
@@ -360,12 +369,41 @@ class File2EdiStore:
         ]
         return {
             "order": order,
-            "partners": [camel(dict(p), p_map) for p in partners],
+            "partners": [self._partner_to_api(dict(p)) for p in partners],
             "lines": [camel(dict(l), l_map) for l in lines],
             "anomalies": [camel(dict(a), a_map) for a in anomalies],
             "traceability": trace,
             "edifactReady": bool(row.get("edifact_content") or row.get("edifact_filename")),
             "pdfUrl": f"/api/orders/{order['orderId']}/pdf",
+        }
+
+    def _partner_to_api(self, partner: dict) -> dict:
+        raw = partner.get("edited_fields_json")
+        edited_fields: dict[str, str] = {}
+        if raw:
+            try:
+                parsed = json.loads(raw)
+                if isinstance(parsed, dict):
+                    edited_fields = {
+                        str(k): v
+                        for k, v in parsed.items()
+                        if v in ("manual", "auto")
+                    }
+            except json.JSONDecodeError:
+                pass
+        return {
+            "partnerId": partner.get("partner_id"),
+            "orderId": partner.get("order_id"),
+            "partnerFunction": partner.get("partner_function"),
+            "partnerCode": partner.get("partner_code"),
+            "partnerName": partner.get("partner_name"),
+            "addressLine1": partner.get("address_line_1"),
+            "postalCode": partner.get("postal_code"),
+            "city": partner.get("city"),
+            "country": partner.get("country"),
+            "confidence": partner.get("confidence"),
+            "manuallyEdited": bool(partner.get("manually_edited")),
+            "editedFields": edited_fields,
         }
 
     def list_orders_summary(self) -> list[dict]:
@@ -384,10 +422,8 @@ class File2EdiStore:
         return [dict(r) for r in rows]
 
     def update_order_header(self, order_id: str, payload: dict) -> dict | None:
-        review = self.load_order_review(order_id)
-        if not review:
+        if not self.load_order_review(order_id):
             return None
-        o = review["order"]
         field_map = {
             "clientName": "client_name", "customerOrderNumber": "customer_order_number",
             "documentReference": "document_reference", "orderDate": "order_date",
@@ -398,7 +434,6 @@ class File2EdiStore:
         sets, vals = [], []
         for k, col in field_map.items():
             if k in payload:
-                o[k] = payload[k]
                 sets.append(f"{col}=?")
                 vals.append(payload[k])
         if sets:
@@ -410,41 +445,70 @@ class File2EdiStore:
             )
             conn.commit()
         conn.close()
-        review["order"] = o
-        review["order"]["updatedAt"] = _now()
-        self.save_order_review(review)
         return self.load_order_review(order_id)
 
     def update_partner(self, partner_id: str, payload: dict) -> dict | None:
+        payload = dict(payload)
+        edit_sources = payload.pop("editSources", None) or {}
+        default_source = payload.pop("editSource", "manual")
+        if default_source not in ("manual", "auto"):
+            default_source = "manual"
+
         conn = self._conn()
         row = conn.execute(
-            "SELECT order_id FROM file2edi_order_partners WHERE partner_id=?", [partner_id]
+            "SELECT order_id, partner_function, edited_fields_json FROM file2edi_order_partners WHERE partner_id=?",
+            [partner_id],
         ).fetchone()
         if not row:
             conn.close()
             return None
+        order_id = row["order_id"]
+        edited_fields: dict[str, str] = {}
+        if row["edited_fields_json"]:
+            try:
+                parsed = json.loads(row["edited_fields_json"])
+                if isinstance(parsed, dict):
+                    edited_fields = {
+                        str(k): v for k, v in parsed.items() if v in ("manual", "auto")
+                    }
+            except json.JSONDecodeError:
+                pass
+
         field_map = {
             "partnerCode": "partner_code",
             "partnerName": "partner_name",
-            "addressLine1": "address_line1",
+            "addressLine1": "address_line_1",
             "postalCode": "postal_code",
             "city": "city",
             "country": "country",
         }
-        sets, vals = ["manually_edited=1"], []
+        sets, vals = [], []
         for key, col in field_map.items():
             if key in payload:
+                source = edit_sources.get(key, default_source)
+                if source not in ("manual", "auto"):
+                    source = default_source
+                edited_fields[key] = source
                 sets.append(f"{col}=?")
                 vals.append(payload[key])
         if sets:
+            sets.append("edited_fields_json=?")
+            vals.append(json.dumps(edited_fields))
+            sets.append("manually_edited=?")
+            vals.append(1 if any(v == "manual" for v in edited_fields.values()) else 0)
             vals.append(partner_id)
             conn.execute(
                 f"UPDATE file2edi_order_partners SET {', '.join(sets)} WHERE partner_id=?",
                 vals,
             )
+            if row["partner_function"] == "shipto" and payload.get("partnerName"):
+                conn.execute(
+                    "UPDATE file2edi_orders SET client_name=?, updated_at=? WHERE order_id=?",
+                    [payload["partnerName"], _now(), order_id],
+                )
             conn.commit()
         conn.close()
-        return self.load_order_review(row["order_id"])
+        return self.load_order_review(order_id)
 
     def update_line(self, line_id: str, payload: dict) -> dict | None:
         conn = self._conn()
@@ -560,6 +624,20 @@ class File2EdiStore:
         )
         conn.commit()
         conn.close()
+
+    def get_edifact_export(self, order_id: str) -> dict | None:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT edifact_filename, edifact_content FROM file2edi_orders WHERE order_id=?",
+            [order_id],
+        ).fetchone()
+        conn.close()
+        if not row or not row["edifact_content"]:
+            return None
+        return {
+            "fileName": row["edifact_filename"] or f"ORDERS_{order_id}.tst",
+            "content": row["edifact_content"],
+        }
 
 
 _store: File2EdiStore | None = None

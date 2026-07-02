@@ -5,12 +5,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
+import type { PartnerEditSource } from "@/types";
+
 interface EditableFieldProps {
   label: string;
   value: string;
   onSave?: (value: string) => Promise<void> | void;
   type?: "text" | "date" | "number";
   manuallyEdited?: boolean;
+  editFlag?: PartnerEditSource;
   className?: string;
   invalid?: boolean;
   readOnly?: boolean;
@@ -22,6 +25,7 @@ export function EditableField({
   onSave,
   type = "text",
   manuallyEdited,
+  editFlag,
   className,
   invalid,
   readOnly = false,
@@ -50,13 +54,20 @@ export function EditableField({
     setEditing(false);
   };
 
+  const flag = editFlag ?? (manuallyEdited ? "manual" : undefined);
+
   return (
     <div className={cn("group space-y-1", className)}>
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        {Boolean(manuallyEdited) && (
+        {flag === "manual" && (
           <Badge variant="info" className="text-[10px] px-1.5 py-0">
             Modifié manuellement
+          </Badge>
+        )}
+        {flag === "auto" && (
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+            Modifié automatiquement
           </Badge>
         )}
       </div>

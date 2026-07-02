@@ -6,8 +6,8 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse, Response
 
 from .mapper import (
     dashboard_metrics_from_db,
@@ -207,15 +207,21 @@ def create_router() -> APIRouter:
         return _serve_order_pdf(order_id)
 
     @router.patch("/orders/{order_id}")
-    async def patch_order(order_id: str, payload: dict):
-        review = get_store().update_order_header(order_id, payload)
+    async def patch_order(order_id: str, payload: dict = Body(...)):
+        try:
+            review = get_store().update_order_header(order_id, payload)
+        except Exception as exc:
+            raise HTTPException(500, f"Mise à jour commande échouée: {exc}") from exc
         if not review:
             raise HTTPException(404)
         return review
 
     @router.patch("/orders/partners/{partner_id}")
-    async def patch_partner(partner_id: str, payload: dict):
-        review = get_store().update_partner(partner_id, payload)
+    async def patch_partner(partner_id: str, payload: dict = Body(...)):
+        try:
+            review = get_store().update_partner(partner_id, payload)
+        except Exception as exc:
+            raise HTTPException(500, f"Mise à jour partenaire échouée: {exc}") from exc
         if not review:
             raise HTTPException(404)
         return review
@@ -255,23 +261,12 @@ def create_router() -> APIRouter:
         review = store.load_order_review(order_id)
         if not review:
             raise HTTPException(404)
-        blocking = [
-            a for a in review.get("anomalies", [])
-            if a.get("status") in ("Ouverte", "Bloquante") and a.get("severity") in ("error", "blocking")
-        ]
-        if blocking:
-            return {"success": False, "errors": [a["message"] for a in blocking]}
-        soldto = next((p for p in review["partners"] if p["partnerFunction"] == "soldto"), None)
-        shipto = next((p for p in review["partners"] if p["partnerFunction"] == "shipto"), None)
-        if not soldto or not soldto.get("partnerCode"):
-            return {"success": False, "errors": ["Sold-to manquant"]}
-        if not shipto or not shipto.get("partnerCode"):
-            return {"success": False, "errors": ["Ship-to manquant"]}
-        if not review["order"].get("orderDate"):
-            return {"success": False, "errors": ["Date commande invalide"]}
-        for ln in review.get("lines", []):
-            if not ln.get("boschArticle") or not ln.get("quantity") or not ln.get("unit"):
-                return {"success": False, "errors": [f"Ligne {ln.get('lineNumber')} incomplète"]}
+
+        mandatory_errors = _mandatory_review_errors(review)
+        if mandatory_errors:
+            return {"success": False, "errors": mandatory_errors}
+
+        _ensure_conversion_for_generate(order_id, review)
 
         import server as srv
         from starlette.requests import Request
@@ -283,16 +278,32 @@ def create_router() -> APIRouter:
 
         result = await srv.api_generate(order_id, _FakeRequest())
         if hasattr(result, "status_code"):
-            return {"success": False, "errors": ["Génération échouée"]}
+            body = getattr(result, "body", b"") or b""
+            try:
+                detail = json.loads(body).get("error", "Conversion introuvable")
+            except Exception:
+                detail = "Conversion introuvable"
+            return {"success": False, "errors": [detail]}
         if isinstance(result, dict) and result.get("generated"):
             fname = result.get("tst_filename") or f"ORDERS_{order_id}.tst"
             content = result.get("edifact_content") or ""
             store.mark_edifact_generated(order_id, fname, content)
-            return {"success": True, "fileName": fname}
-        errors = []
+            return {"success": True, "fileName": fname, "content": content}
         if isinstance(result, dict):
-            errors = [result.get("message") or str(result.get("blockers", result))]
-        return {"success": False, "errors": errors or ["Génération échouée"]}
+            return {"success": False, "errors": _extract_generate_errors(result)}
+        return {"success": False, "errors": ["Génération échouée"]}
+
+    @router.get("/orders/{order_id}/edifact")
+    def download_edifact(order_id: str):
+        export = get_store().get_edifact_export(order_id)
+        if not export:
+            raise HTTPException(404, "Aucun fichier EDIFACT généré pour cette commande")
+        fname = export["fileName"]
+        return Response(
+            content=export["content"],
+            media_type="application/edifact",
+            headers={"Content-Disposition": f'attachment; filename="{fname}"'},
+        )
 
     # ── History ─────────────────────────────────────────────────────────────
     @router.get("/conversions/history")
@@ -539,6 +550,47 @@ def _engine_from_conversion(conv: dict, ext: dict) -> dict:
     }
 
 
+def _mandatory_review_errors(review: dict) -> list[str]:
+    """French validation messages for fields required before EDIFACT generation."""
+    errors: list[str] = []
+    order = review.get("order") or {}
+    partners = review.get("partners") or []
+    lines = review.get("lines") or []
+
+    soldto = next((p for p in partners if p.get("partnerFunction") == "soldto"), {})
+    shipto = next((p for p in partners if p.get("partnerFunction") == "shipto"), {})
+
+    if not str(order.get("customerOrderNumber") or "").strip():
+        errors.append("N° de commande client manquant")
+    if not order.get("orderDate"):
+        errors.append("Date de commande manquante")
+    if not str(soldto.get("partnerCode") or "").strip():
+        errors.append("Code sold-to SAP manquant (section Sold-to / AG)")
+    if not str(shipto.get("partnerCode") or "").strip():
+        errors.append("Code ship-to SAP manquant")
+    if not lines:
+        errors.append("Aucune ligne de commande — ajoutez au moins une ligne")
+    else:
+        for ln in lines:
+            if not str(ln.get("boschArticle") or "").strip():
+                errors.append(f"Ligne {ln.get('lineNumber')} : article Bosch manquant")
+            elif not ln.get("quantity"):
+                errors.append(f"Ligne {ln.get('lineNumber')} : quantité manquante")
+
+    pending = [
+        a for a in (review.get("anomalies") or [])
+        if str(a.get("status") or "") in ("Ouverte", "Bloquante")
+    ]
+    if pending:
+        errors.append(
+            f"{len(pending)} anomalie(s) en attente — validez ou ignorez chacune avant de valider la commande"
+        )
+        for anomaly in pending:
+            errors.append(f"Anomalie : {anomaly.get('message', '—')}")
+
+    return errors
+
+
 def _corrections_from_review(review: dict) -> dict:
     o = review["order"]
     soldto = next((p for p in review["partners"] if p["partnerFunction"] == "soldto"), {})
@@ -549,13 +601,104 @@ def _corrections_from_review(review: dict) -> dict:
         "delivery_date": o.get("requestedDeliveryDate"),
         "soldto": soldto.get("partnerCode"),
         "shipto": shipto.get("partnerCode"),
+        "lines_from_review": True,
+        "soldto_partner": {
+            "name": soldto.get("partnerName"),
+            "street": soldto.get("addressLine1"),
+            "postal_code": soldto.get("postalCode"),
+            "city": soldto.get("city"),
+            "country": soldto.get("country"),
+        },
+        "shipto_partner": {
+            "name": shipto.get("partnerName"),
+            "street": shipto.get("addressLine1"),
+            "postal_code": shipto.get("postalCode"),
+            "city": shipto.get("city"),
+            "country": shipto.get("country"),
+            "manually_edited": bool(shipto.get("manuallyEdited")),
+        },
         "lines": [
             {
                 "line_number": ln.get("lineNumber"),
                 "matnr": ln.get("boschArticle"),
                 "quantity": ln.get("quantity"),
-                "unit": ln.get("unit"),
+                "unit": ln.get("unit") or "PCE",
+                "unit_price": ln.get("unitPrice"),
+                "description": ln.get("designation"),
             }
             for ln in review.get("lines", [])
         ],
     }
+
+
+def _ensure_conversion_for_generate(order_id: str, review: dict) -> None:
+    """Create a conversions row when missing (legacy/demo orders)."""
+    import server as srv
+
+    srv._init_db()
+    if srv.load_conversion(order_id):
+        return
+
+    o = review["order"]
+    soldto = next((p for p in review["partners"] if p["partnerFunction"] == "soldto"), {})
+    shipto = next((p for p in review["partners"] if p["partnerFunction"] == "shipto"), {})
+
+    ext: dict = {}
+    try:
+        conn = get_store()._conn()
+        row = conn.execute(
+            "SELECT extraction_json FROM file2edi_orders WHERE order_id=?",
+            [order_id],
+        ).fetchone()
+        conn.close()
+        if row and row["extraction_json"]:
+            ext = json.loads(row["extraction_json"])
+    except Exception:
+        ext = {}
+
+    if not ext.get("order"):
+        ext = _engine_from_conversion(
+            {
+                "source_filename": o.get("fileName"),
+                "pdf_hash": order_id,
+                "po_number": o.get("customerOrderNumber"),
+                "order_date": o.get("orderDate"),
+                "delivery_date": o.get("requestedDeliveryDate"),
+                "soldto": soldto.get("partnerCode"),
+                "shipto": shipto.get("partnerCode"),
+                "customer_name": o.get("clientName"),
+                "confidence": o.get("globalConfidence", 0),
+            },
+            ext if ext else {"lines": {"count": len(review.get("lines", [])), "items": []}},
+        )
+
+    ext["pdf_hash"] = order_id
+    ext["filename"] = o.get("fileName") or ext.get("filename") or ""
+    ext["correlation_id"] = o.get("uploadId")
+    ext.setdefault("order", {})
+    ext["order"].setdefault("po_number", o.get("customerOrderNumber"))
+    ext["order"].setdefault("order_date", o.get("orderDate"))
+    ext["order"].setdefault("delivery_date", o.get("requestedDeliveryDate"))
+    ext.setdefault("customer", {})
+    ext["customer"].setdefault("soldto", soldto.get("partnerCode"))
+    ext["customer"].setdefault("shipto", shipto.get("partnerCode"))
+    ext["customer"].setdefault("name", o.get("clientName"))
+    ext.setdefault("lines", {"count": len(review.get("lines", [])), "items": []})
+    ext.setdefault("rejection", {"decision": "REVIEW_REQUIRED"})
+    ext.setdefault("edifact", {"generated": False})
+
+    srv._upsert_conversion(ext)
+
+
+def _extract_generate_errors(result: dict) -> list[str]:
+    blockers = result.get("blockers")
+    if isinstance(blockers, list) and blockers:
+        return [
+            b.get("message") or b.get("code") or str(b)
+            for b in blockers
+            if isinstance(b, dict)
+        ]
+    msg = result.get("message") or result.get("error")
+    if msg:
+        return [str(msg)]
+    return ["Génération échouée"]

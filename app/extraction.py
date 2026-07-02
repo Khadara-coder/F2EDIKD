@@ -29,6 +29,22 @@ def candidate_lines(text: str, keywords: list[str], limit: int = 8) -> list[str]
     return unique(matches, limit=limit)
 
 
+def _to_float(value):
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip().replace(" ", "").replace("\u00a0", "")
+    if "," in s and "." in s:
+        s = s.replace(".", "").replace(",", ".")
+    else:
+        s = s.replace(",", ".")
+    try:
+        return float(s)
+    except (ValueError, TypeError):
+        return None
+
+
 def extract_structured_fields(
     text: str,
     fields: dict,
@@ -217,12 +233,32 @@ def extract_structured_fields(
     # Use LLM order number as primary, regex as fallback
     final_order_number = llm_order_number or order_number
 
-    # --- LLM ORDER LINES: extract article lines with Sonnet 4 ---
+    # --- ORDER LINES: LLM first, deterministic engine fallback ---
     order_lines = []
     try:
         order_lines = llm_extract_orderlines(text)
     except Exception:
         pass  # Non-blocking
+
+    if not order_lines:
+        try:
+            engine_lines = OrderLinesEngine().extract(text, layout=layout).get("lines", [])
+            for idx, ln in enumerate(engine_lines, start=1):
+                article = (ln.get("article") or "").strip()
+                if not article:
+                    continue
+                order_lines.append({
+                    "numero_ligne": idx * 10,
+                    "code_article": article,
+                    "code_article_raw": article,
+                    "description": (ln.get("designation") or "").strip(),
+                    "quantite": _to_float(ln.get("quantity")),
+                    "prix_unitaire_ht": _to_float(ln.get("unit_price")),
+                    "montant_ligne_ht": _to_float(ln.get("amount")),
+                    "date_livraison": ln.get("delivery_date"),
+                })
+        except Exception:
+            pass
 
     # --- SHIPTO RESOLUTION VIA SCORING ENGINE ---
     # Replaces the old Level 0/1/2 cascade with evidence-based scoring.

@@ -11,6 +11,8 @@ import type {
   MasterDataPartnerRow,
   MasterDataSummary,
   OrderReview,
+  PartnerEditSource,
+  PartnerFieldKey,
   ReviewQueueItem,
   SystemHealth,
   UpdateOrderHeaderPayload,
@@ -29,8 +31,21 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.message ?? body.detail ?? `HTTP ${res.status}`);
+    const text = await res.text();
+    let detail: unknown;
+    try {
+      const body = JSON.parse(text) as Record<string, unknown>;
+      detail = body.message ?? body.detail ?? body.error;
+    } catch {
+      detail = text.trim().slice(0, 400) || undefined;
+    }
+    const msg =
+      typeof detail === "string"
+        ? detail
+        : Array.isArray(detail)
+          ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join(", ")
+          : `HTTP ${res.status}`;
+    throw new Error(msg || `HTTP ${res.status}`);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
@@ -80,14 +95,10 @@ export const api = {
 
   updateOrderPartner: (
     partnerId: string,
-    payload: Partial<{
-      partnerCode: string;
-      partnerName: string;
-      addressLine1: string;
-      postalCode: string;
-      city: string;
-      country: string;
-    }>,
+    payload: Partial<Record<PartnerFieldKey, string>> & {
+      editSource?: PartnerEditSource;
+      editSources?: Partial<Record<PartnerFieldKey, PartnerEditSource>>;
+    },
   ) =>
     request(`/orders/partners/${partnerId}`, {
       method: "PATCH",
@@ -135,6 +146,8 @@ export const api = {
     request<GenerateEdifactResult>(`/orders/${orderId}/generate-edifact`, {
       method: "POST",
     }),
+
+  getEdifactDownloadUrl: (orderId: string) => `${API_BASE}/orders/${orderId}/edifact`,
 
   getHistory: (filters: HistoryFilters) => {
     const params = new URLSearchParams();

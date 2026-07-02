@@ -225,6 +225,7 @@ def build_orders_message(
         raise EdifactBuildError("EDIFACT_NO_ORDER_NUMBER")
 
     order_date = _parse_date_ccyymmdd((order.get("order_date") or "").strip())
+    delivery_date = _parse_date_ccyymmdd((order.get("delivery_date") or "").strip())
     ctrl_ref = _control_ref(order_number, ts)
 
     segments: list[str] = []
@@ -256,6 +257,10 @@ def build_orders_message(
     # --- DTM ---
     if order_date:
         segments.append(f"DTM+137:{_safe(order_date)}:102")
+        seg_count += 1
+
+    if delivery_date:
+        segments.append(f"DTM+2:{_safe(delivery_date)}:102")
         seg_count += 1
 
     # --- NAD+BY (Sold-to) ---
@@ -298,6 +303,7 @@ def build_orders_message(
         except (ValueError, TypeError):
             qty_clean = "1"
         unit_price_raw = _parse_decimal_fr(line.get("unit_price", ""))
+        unit_code = _safe(str(line.get("unit") or "PCE").strip() or "PCE", 3)
 
         # LIN
         segments.append(f"LIN+{line_number}")
@@ -315,8 +321,8 @@ def build_orders_message(
         segments.append(f"IMD+A+++{description}")
         seg_count += 1
 
-        # QTY+21 PCE
-        segments.append(f"QTY+21:{qty_clean}:PCE")
+        # QTY+21
+        segments.append(f"QTY+21:{qty_clean}:{unit_code}")
         seg_count += 1
 
         # PRI - only when unit price present

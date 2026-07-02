@@ -44,10 +44,33 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
     total = 0.0
     for i, ln in enumerate(line_items, start=1):
         if isinstance(ln, dict):
-            qty = float(ln.get("Quantite") or ln.get("quantity") or ln.get("qty") or 0)
-            price = float(ln.get("Prix unitaire") or ln.get("unit_price") or ln.get("price") or 0)
-            amount = float(ln.get("Montant") or ln.get("amount") or qty * price)
-            art = str(ln.get("Article Bosch") or ln.get("bosch_article") or ln.get("matnr") or "")
+            qty = float(
+                ln.get("Quantite")
+                or ln.get("quantite")
+                or ln.get("quantity")
+                or ln.get("qty")
+                or 0
+            )
+            price = float(
+                ln.get("Prix unitaire")
+                or ln.get("prix_unitaire_ht")
+                or ln.get("unit_price")
+                or ln.get("price")
+                or 0
+            )
+            amount = float(
+                ln.get("Montant")
+                or ln.get("montant_ligne_ht")
+                or ln.get("amount")
+                or qty * price
+            )
+            art = str(
+                ln.get("Article Bosch")
+                or ln.get("code_article")
+                or ln.get("bosch_article")
+                or ln.get("matnr")
+                or ""
+            )
             line_status = "OK"
             line_conf = int(ln.get("Confiance") or ln.get("confidence") or 90)
             if "?" in art or line_conf < 80:
@@ -56,9 +79,18 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 "lineId": ln.get("line_id") or f"ln-{order_id}-{i}",
                 "orderId": order_id,
                 "lineNumber": i,
-                "customerReference": str(ln.get("Reference client") or ln.get("customer_reference") or ""),
+                "customerReference": str(
+                    ln.get("Reference client")
+                    or ln.get("customer_reference")
+                    or ""
+                ),
                 "boschArticle": art,
-                "designation": str(ln.get("Designation") or ln.get("designation") or ""),
+                "designation": str(
+                    ln.get("Designation")
+                    or ln.get("description")
+                    or ln.get("designation")
+                    or ""
+                ),
                 "quantity": qty,
                 "unit": str(ln.get("Unite") or ln.get("unit") or "PCE"),
                 "unitPrice": price,

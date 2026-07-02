@@ -25,7 +25,7 @@ export function OrderLinesSummaryTable({
       <TableHeader>
         <TableRow>
           <TableHead>Ligne</TableHead>
-          <TableHead>Article Bosch</TableHead>
+          <TableHead>Code article</TableHead>
           <TableHead>Désignation</TableHead>
           <TableHead>Qté</TableHead>
           <TableHead>P.U.</TableHead>

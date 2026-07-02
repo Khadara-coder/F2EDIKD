@@ -76,6 +76,16 @@ export interface PdfUpload {
   pageCount?: number;
 }
 
+export type PartnerEditSource = "manual" | "auto";
+
+export type PartnerFieldKey =
+  | "partnerCode"
+  | "partnerName"
+  | "addressLine1"
+  | "postalCode"
+  | "city"
+  | "country";
+
 export interface OrderPartner {
   partnerId: string;
   orderId: string;
@@ -89,6 +99,7 @@ export interface OrderPartner {
   country: string;
   confidence: number;
   manuallyEdited?: boolean;
+  editedFields?: Partial<Record<PartnerFieldKey, PartnerEditSource>>;
   previousValue?: string;
 }
 
@@ -299,6 +310,7 @@ export interface UpdateOrderLinePayload {
 export interface GenerateEdifactResult {
   success: boolean;
   fileName?: string;
+  content?: string;
   message?: string;
   errors?: string[];
 }
@@ -310,6 +322,7 @@ export interface MasterDataCustomerRow {
   ORT01?: string;
   PSTLZ?: string;
   LAND1?: string;
+  VAT_NR?: string;
 }
 
 export interface MasterDataPartnerRow {

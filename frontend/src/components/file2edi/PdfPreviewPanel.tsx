@@ -1,5 +1,6 @@
 import { Download, FileText, Printer, ZoomIn, ZoomOut } from "lucide-react";
 import { useMemo, useState } from "react";
+import { REVIEW_PANEL_BODY_MIN_HEIGHT } from "@/lib/reviewLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -18,7 +19,7 @@ export function PdfPreviewPanel({ fileName, orderId, pdfUrl }: PdfPreviewPanelPr
     return `${base}#toolbar=1&navpanes=0&view=FitH`;
   }, [pdfUrl, orderId]);
 
-  const height = Math.round(480 * (zoom / 100));
+  const height = Math.round(REVIEW_PANEL_BODY_MIN_HEIGHT * (zoom / 100));
 
   const handleDownload = () => {
     if (!src) return;
@@ -35,7 +36,7 @@ export function PdfPreviewPanel({ fileName, orderId, pdfUrl }: PdfPreviewPanelPr
   };
 
   return (
-    <Card className="h-full">
+    <Card className="flex h-full flex-col">
       <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
         <CardTitle className="text-base font-semibold">
           Aperçu PDF / Extraction
@@ -80,10 +81,10 @@ export function PdfPreviewPanel({ fileName, orderId, pdfUrl }: PdfPreviewPanelPr
           </Button>
         </div>
       </CardHeader>
-      <CardContent>
+      <CardContent className="flex flex-1 flex-col pt-0">
         <div
-          className="overflow-auto rounded-lg border bg-slate-200 p-2"
-          style={{ minHeight: 480 }}
+          className="flex-1 overflow-auto rounded-lg border bg-slate-200 p-2"
+          style={{ minHeight: REVIEW_PANEL_BODY_MIN_HEIGHT }}
         >
           {src ? (
             <object
@@ -101,7 +102,10 @@ export function PdfPreviewPanel({ fileName, orderId, pdfUrl }: PdfPreviewPanelPr
               />
             </object>
           ) : (
-            <div className="flex min-h-[480px] flex-col items-center justify-center gap-3 rounded bg-white p-8 text-center text-sm text-muted-foreground">
+            <div
+              className="flex flex-col items-center justify-center gap-3 rounded bg-white p-8 text-center text-sm text-muted-foreground"
+              style={{ minHeight: REVIEW_PANEL_BODY_MIN_HEIGHT }}
+            >
               <FileText className="h-10 w-10 text-slate-400" />
               <p className="font-medium text-slate-700">{fileName}</p>
               <p>PDF non disponible pour cette commande.</p>

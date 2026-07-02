@@ -10,6 +10,7 @@ interface StatCardProps {
   iconClassName?: string;
   valueClassName?: string;
   className?: string;
+  compact?: boolean;
 }
 
 export function StatCard({
@@ -20,13 +21,23 @@ export function StatCard({
   iconClassName,
   valueClassName,
   className,
+  compact = false,
 }: StatCardProps) {
   return (
     <Card className={cn("border shadow-sm", className)}>
-      <CardContent className="flex items-start justify-between p-4">
-        <div className="space-y-1">
+      <CardContent className={cn("flex items-start justify-between", compact ? "p-3" : "p-4")}>
+        <div className="min-w-0 space-y-1">
           <p className="text-xs font-medium text-muted-foreground">{label}</p>
-          <p className={cn("text-2xl font-bold tracking-tight", valueClassName)}>{value}</p>
+          <p
+            className={cn(
+              compact
+                ? "truncate text-sm font-semibold leading-tight"
+                : "text-2xl font-bold tracking-tight",
+              valueClassName,
+            )}
+          >
+            {value}
+          </p>
           {sublabel && (
             <p className="text-xs text-muted-foreground">{sublabel}</p>
           )}

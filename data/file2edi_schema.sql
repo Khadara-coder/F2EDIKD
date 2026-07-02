@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS file2edi_order_partners (
   country           TEXT DEFAULT 'FR',
   confidence        REAL DEFAULT 0,
   manually_edited   INTEGER DEFAULT 0,
+  edited_fields_json TEXT,
   previous_value    TEXT,
   FOREIGN KEY(order_id) REFERENCES file2edi_orders(order_id)
 );

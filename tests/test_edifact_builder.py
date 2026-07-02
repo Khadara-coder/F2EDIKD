@@ -139,3 +139,24 @@ class TestEdifactBuilder:
             _minimal_order(), _minimal_lines(3), _minimal_soldto(), _minimal_shipto()
         )
         assert "CNT+2:3" in msg
+
+    def test_delivery_date_dtm2(self):
+        order = {"order_number": "TEST001", "order_date": "20260624", "delivery_date": "20260715"}
+        msg = build_orders_message(
+            order, _minimal_lines(), _minimal_soldto(), _minimal_shipto()
+        )
+        assert "DTM+137:20260624:102" in msg
+        assert "DTM+2:20260715:102" in msg
+
+    def test_line_unit_from_review(self):
+        lines = [{
+            "matnr": "7099018",
+            "description": "Test",
+            "quantity": "5",
+            "unit_price": "10.00",
+            "unit": "PCE",
+        }]
+        msg = build_orders_message(
+            _minimal_order(), lines, _minimal_soldto(), _minimal_shipto()
+        )
+        assert "QTY+21:5:PCE" in msg

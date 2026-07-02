@@ -1,8 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { EditableField } from "@/components/file2edi/EditableField";
+import { ShiptoNameSelectField } from "@/components/file2edi/ShiptoNameSelectField";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { MasterDataCustomerRow, MasterDataPartnerRow, Order, OrderPartner, UpdateOrderHeaderPayload } from "@/types";
+import type { MasterDataCustomerRow, MasterDataPartnerRow, Order, OrderPartner, PartnerEditSource, PartnerFieldKey, UpdateOrderHeaderPayload } from "@/types";
 
 interface OrderGeneralInfoPanelProps {
   order: Order;
@@ -10,14 +11,11 @@ interface OrderGeneralInfoPanelProps {
   shipto?: OrderPartner;
   onUpdateHeader: (payload: UpdateOrderHeaderPayload) => Promise<void> | void;
   onUpdateShipto: (
-    payload: Partial<{
-      partnerCode: string;
-      partnerName: string;
-      addressLine1: string;
-      postalCode: string;
-      city: string;
-      country: string;
-    }>,
+    payload: Partial<Record<PartnerFieldKey, string>>,
+    options?: {
+      editSource?: PartnerEditSource;
+      editSources?: Partial<Record<PartnerFieldKey, PartnerEditSource>>;
+    },
   ) => Promise<void> | void;
 }
 
@@ -45,6 +43,24 @@ function cleanDisplay(value: string | null | undefined): string {
     .filter((line) => line && line !== "0")
     .join(" ");
   return cleaned === "0" ? "" : cleaned;
+}
+
+function shiptoFieldFlag(
+  shipto: OrderPartner | undefined,
+  field: PartnerFieldKey,
+): PartnerEditSource | undefined {
+  return shipto?.editedFields?.[field];
+}
+
+const ADDRESS_FIELDS: PartnerFieldKey[] = [
+  "addressLine1",
+  "postalCode",
+  "city",
+  "country",
+];
+
+function autoSources(fields: PartnerFieldKey[]): Partial<Record<PartnerFieldKey, PartnerEditSource>> {
+  return Object.fromEntries(fields.map((field) => [field, "auto" as const]));
 }
 
 export function OrderGeneralInfoPanel({
@@ -76,8 +92,26 @@ export function OrderGeneralInfoPanel({
   const soldtoSapId = cleanDisplay(soldtoMd?.SOLDTO ?? soldtoCode);
   const soldtoName = cleanDisplay(soldtoMd?.NAME ?? soldto?.partnerName ?? "—");
   const clientName = cleanDisplay(
-    shiptoMd?.NAME ?? shipto?.partnerName ?? order.clientName ?? "—",
+    shipto?.partnerName || shiptoMd?.NAME || order.clientName || "—",
   );
+
+  const handleShiptoSelect = async (md: MasterDataPartnerRow) => {
+    const payload = {
+      partnerCode: cleanDisplay(md.SHIPTO),
+      partnerName: cleanDisplay(md.NAME),
+      addressLine1: cleanDisplay(md.STRAS),
+      postalCode: cleanDisplay(md.PSTLZ),
+      city: cleanDisplay(md.ORT01),
+      country: cleanDisplay(md.LAND1),
+    };
+    await onUpdateShipto(payload, {
+      editSources: {
+        partnerName: "manual",
+        partnerCode: "auto",
+        ...autoSources(ADDRESS_FIELDS),
+      },
+    });
+  };
 
   const handleShiptoCodeSave = async (code: string) => {
     const res = await api.searchPartners(code);
@@ -90,10 +124,13 @@ export function OrderGeneralInfoPanel({
       city: cleanDisplay(md?.ORT01 ?? shipto?.city),
       country: cleanDisplay(md?.LAND1 ?? shipto?.country),
     };
-    await onUpdateShipto(payload);
-    if (md?.NAME) {
-      await onUpdateHeader({ clientName: md.NAME });
-    }
+    await onUpdateShipto(payload, {
+      editSources: {
+        partnerCode: "manual",
+        partnerName: "auto",
+        ...autoSources(ADDRESS_FIELDS),
+      },
+    });
   };
 
   return (
@@ -113,7 +150,7 @@ export function OrderGeneralInfoPanel({
         </section>
 
         <section className="border-t pt-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <EditableField
               label="N° commande client"
               value={cleanDisplay(order.customerOrderNumber)}
@@ -125,10 +162,26 @@ export function OrderGeneralInfoPanel({
             <EditableField
               label="Compte client ship-to SAP"
               value={cleanDisplay(shiptoCode)}
-              manuallyEdited={shipto?.manuallyEdited}
+              editFlag={shiptoFieldFlag(shipto, "partnerCode")}
               onSave={handleShiptoCodeSave}
             />
-            <EditableField label="Nom du client" value={clientName} readOnly />
+            <ShiptoNameSelectField
+              label="Nom du client"
+              value={clientName}
+              soldtoCode={soldtoCode || soldtoSapId}
+              currentShiptoCode={shiptoCode}
+              soldtoVat={soldtoMd?.VAT_NR}
+              editFlag={shiptoFieldFlag(shipto, "partnerName")}
+              className="sm:col-span-2 lg:col-span-2"
+              onSelect={handleShiptoSelect}
+            />
+            <EditableField
+              label="Date de la commande"
+              type="date"
+              value={toDateInput(order.orderDate)}
+              manuallyEdited={order.manuallyEditedFields?.includes("orderDate")}
+              onSave={(v) => onUpdateHeader({ orderDate: v || null })}
+            />
             <EditableField
               label="Date de livraison"
               type="date"
@@ -148,26 +201,32 @@ export function OrderGeneralInfoPanel({
               label="Rue"
               value={cleanDisplay(shipto?.addressLine1)}
               className="sm:col-span-2"
-              manuallyEdited={shipto?.manuallyEdited}
-              onSave={(v) => onUpdateShipto({ addressLine1: cleanDisplay(v) })}
+              editFlag={shiptoFieldFlag(shipto, "addressLine1")}
+              onSave={(v) =>
+                onUpdateShipto({ addressLine1: cleanDisplay(v) }, { editSource: "manual" })
+              }
             />
             <EditableField
               label="Code postal"
               value={cleanDisplay(shipto?.postalCode)}
-              manuallyEdited={shipto?.manuallyEdited}
-              onSave={(v) => onUpdateShipto({ postalCode: cleanDisplay(v) })}
+              editFlag={shiptoFieldFlag(shipto, "postalCode")}
+              onSave={(v) =>
+                onUpdateShipto({ postalCode: cleanDisplay(v) }, { editSource: "manual" })
+              }
             />
             <EditableField
               label="Ville"
               value={cleanDisplay(shipto?.city)}
-              manuallyEdited={shipto?.manuallyEdited}
-              onSave={(v) => onUpdateShipto({ city: cleanDisplay(v) })}
+              editFlag={shiptoFieldFlag(shipto, "city")}
+              onSave={(v) => onUpdateShipto({ city: cleanDisplay(v) }, { editSource: "manual" })}
             />
             <EditableField
               label="Pays"
               value={cleanDisplay(shipto?.country)}
-              manuallyEdited={shipto?.manuallyEdited}
-              onSave={(v) => onUpdateShipto({ country: cleanDisplay(v) })}
+              editFlag={shiptoFieldFlag(shipto, "country")}
+              onSave={(v) =>
+                onUpdateShipto({ country: cleanDisplay(v) }, { editSource: "manual" })
+              }
             />
           </div>
         </section>
