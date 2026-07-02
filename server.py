@@ -111,6 +111,13 @@ IS_LOCAL = not IS_DATABRICKS
 # Optional dev identity so local runs mirror the Databricks SSO actor/role flow
 # (respects APP_ADMIN_USERS / APP_REVIEW_USERS RBAC instead of bypassing it).
 DEV_ACTOR = (os.environ.get("DEV_ACTOR") or "").strip().lower()
+_profile_login_default = "false" if IS_DATABRICKS else "true"
+ENABLE_PROFILE_LOGIN = os.environ.get("ENABLE_PROFILE_LOGIN", _profile_login_default).strip().lower() in {
+    "1", "true", "yes", "on"
+}
+SESSION_COOKIE_NAME = "f2edi_profile_session"
+SESSION_TTL_SECONDS = int(os.environ.get("PROFILE_SESSION_TTL_SECONDS", "28800") or "28800")
+_PROFILE_SESSIONS: dict[str, dict] = {}
 log.info("environment: %s (databricks=%s dev_actor=%s)",
          "DATABRICKS" if IS_DATABRICKS else "LOCAL", IS_DATABRICKS, DEV_ACTOR or "-")
 
@@ -142,6 +149,79 @@ def _parse_csv_env(name: str) -> set[str]:
     """Parse a comma-separated env var into a lowercase set."""
     raw = os.environ.get(name, "")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def _normalize_actor_identity(value: str | None) -> str:
+    """Normalize actor identifiers for role lookups and persistence."""
+    v = (value or "").strip().strip('"').strip("'")
+    if not v:
+        return ""
+    lower = v.lower()
+    if "@" in v:
+        return v.lower()
+    if "/" in v:
+        tail = v.replace("\\", "/").split("/")[-1].strip()
+        return tail.lower()
+    if lower.startswith("users:"):
+        return lower.split(":", 1)[1].strip()
+    if lower.startswith("user:"):
+        return lower.split(":", 1)[1].strip()
+    return lower
+
+
+def _db_role_override(actor: str) -> str | None:
+    """Return explicit DB role assignment for actor when present and active."""
+    a = _normalize_actor_identity(actor)
+    if not a:
+        return None
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        row = conn.execute(
+            "SELECT role FROM user_roles WHERE actor=? AND is_active=1 LIMIT 1",
+            [a],
+        ).fetchone()
+        conn.close()
+        if not row or not row[0]:
+            return None
+        role = str(row[0]).strip().lower()
+        return role if role in {"admin", "adv"} else None
+    except Exception:
+        return None
+
+
+def _profile_session_data(req: Request | None) -> dict | None:
+    """Return active profile session payload from signed cookie registry."""
+    if not ENABLE_PROFILE_LOGIN or req is None:
+        return None
+    try:
+        token = (req.cookies.get(SESSION_COOKIE_NAME) or "").strip()
+        if not token:
+            return None
+        row = _PROFILE_SESSIONS.get(token)
+        if not row:
+            return None
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        if int(row.get("exp", 0)) <= now_ts:
+            _PROFILE_SESSIONS.pop(token, None)
+            return None
+        return row
+    except Exception:
+        return None
+
+
+def _profile_session_actor(req: Request | None) -> str:
+    data = _profile_session_data(req)
+    if not data:
+        return ""
+    return _normalize_actor_identity(str(data.get("actor") or ""))
+
+
+def _profile_session_role(req: Request | None) -> str:
+    data = _profile_session_data(req)
+    if not data:
+        return ""
+    role = str(data.get("role") or "").strip().lower()
+    return role if role in {"admin", "adv"} else ""
 
 
 def _extract_actor_from_request(req: Request | None) -> str:
@@ -199,7 +279,11 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
     p = payload or {}
     actor = (p.get("operator") or p.get("actor") or "").strip()
     if actor:
-        return actor
+        return _normalize_actor_identity(actor)
+
+    actor_session = _profile_session_actor(req)
+    if actor_session:
+        return actor_session
 
     actor_hdr = _extract_actor_from_request(req)
     if actor_hdr:
@@ -210,7 +294,10 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
     if IS_LOCAL and DEV_ACTOR:
         return DEV_ACTOR
 
-    return os.environ.get("DEFAULT_APP_ACTOR", "operator")
+    default_actor = _normalize_actor_identity(os.environ.get("DEFAULT_APP_ACTOR", "operator"))
+    if _APP_REQUIRE_AUTH:
+        return ""
+    return default_actor or "operator"
 
 
 def _actor_folder_name(actor: str | None) -> str:
@@ -229,7 +316,10 @@ def _resolve_role(actor: str) -> str:
 
     Legacy vars APP_REVIEW_USERS / APP_READONLY_USERS are treated as adv.
     """
-    a = (actor or "").strip().lower()
+    a = _normalize_actor_identity(actor)
+    db_role = _db_role_override(a)
+    if db_role:
+        return db_role
     if a in _parse_csv_env("APP_ADMIN_USERS"):
         return "admin"
     # Keep short-term backward compatibility for existing env configs.
@@ -239,13 +329,29 @@ def _resolve_role(actor: str) -> str:
     return "adv"
 
 
+def _resolve_role_for_request(actor: str, req: Request | None = None) -> str:
+    """Resolve role with request-aware profile session override."""
+    session_role = _profile_session_role(req)
+    if session_role:
+        return session_role
+    return _resolve_role(actor)
+
+
 def _ensure_can_mutate(req: Request | None = None, payload: dict | None = None) -> tuple[str, str]:
     """Return (actor, role) for mutation endpoints.
 
     In the current 2-role model, both admin and adv can mutate domain data.
     """
     actor = _resolve_actor(req, payload)
-    role = _resolve_role(actor)
+    role = _resolve_role_for_request(actor, req)
+    return actor, role
+
+
+def _ensure_admin(req: Request | None = None, payload: dict | None = None) -> tuple[str, str]:
+    """Return (actor, role) and enforce admin-only endpoints."""
+    actor, role = _ensure_can_mutate(req, payload)
+    if role != "admin":
+        raise HTTPException(status_code=403, detail="Accès réservé aux administrateurs")
     return actor, role
 
 
@@ -563,6 +669,9 @@ _PUBLIC_API_PATHS = {
     "/api/health",
     "/api/health/system",
     "/api/proxy/health",
+    "/api/auth/modes",
+    "/api/auth/login",
+    "/api/auth/logout",
     "/health",
     "/healthz",
 }
@@ -576,12 +685,69 @@ async def _require_authenticated_user(request: Request, call_next):
     """Enforce authenticated user for API routes when APP_REQUIRE_AUTH is enabled."""
     path = request.url.path or ""
     if _APP_REQUIRE_AUTH and path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
-        actor = _extract_actor_from_request(request)
-        if not actor and IS_LOCAL and DEV_ACTOR:
-            actor = DEV_ACTOR  # local dev identity mirrors the SSO actor
+        actor = _resolve_actor(request)
         if not actor:
             return JSONResponse(status_code=401, content={"detail": "Authentification requise"})
     return await call_next(request)
+
+
+class ProfileLoginPayload(BaseModel):
+    actor: str
+    role: str
+
+
+@app.get("/api/auth/modes")
+def api_auth_modes():
+    """Expose available login mechanisms for the login page."""
+    return {
+        "profile_login_enabled": ENABLE_PROFILE_LOGIN,
+        "workspace_sso_available": True,
+        "allowed_roles": ["admin", "adv"],
+    }
+
+
+@app.post("/api/auth/login")
+def api_auth_login(payload: ProfileLoginPayload):
+    """Create a profile session cookie (local/dev oriented)."""
+    if not ENABLE_PROFILE_LOGIN:
+        raise HTTPException(status_code=403, detail="Connexion par profil désactivée")
+
+    actor = _normalize_actor_identity(payload.actor)
+    role = (payload.role or "").strip().lower()
+    if not actor:
+        raise HTTPException(status_code=400, detail="Identifiant utilisateur requis")
+    if role not in {"admin", "adv"}:
+        raise HTTPException(status_code=400, detail="Rôle invalide (admin|adv)")
+
+    token = uuid.uuid4().hex
+    now_ts = int(datetime.now(timezone.utc).timestamp())
+    _PROFILE_SESSIONS[token] = {
+        "actor": actor,
+        "role": role,
+        "exp": now_ts + SESSION_TTL_SECONDS,
+    }
+
+    resp = JSONResponse({"ok": True, "actor": actor, "role": role})
+    resp.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
+    return resp
+
+
+@app.post("/api/auth/logout")
+def api_auth_logout(req: Request):
+    token = (req.cookies.get(SESSION_COOKIE_NAME) or "").strip()
+    if token:
+        _PROFILE_SESSIONS.pop(token, None)
+    resp = JSONResponse({"ok": True})
+    resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    return resp
 
 
 
@@ -909,7 +1075,7 @@ def api_me(req: Request):
     authenticated = (not _APP_REQUIRE_AUTH) or bool(actor)
     return {
         "actor": actor,
-        "role": _resolve_role(actor),
+        "role": _resolve_role_for_request(actor, req),
         "authenticated": authenticated,
     }
 
@@ -1351,6 +1517,154 @@ def api_settings():
         "outbox":            OUTBOX_DIR,
     }
 
+
+class RoleUpsertPayload(BaseModel):
+    actor: str
+    role: str
+
+
+@app.get("/api/admin/roles")
+def api_admin_roles(req: Request):
+    """List current RBAC assignments (DB overrides + env admins)."""
+    _ensure_admin(req)
+    _init_db()
+
+    env_admins = sorted(_parse_csv_env("APP_ADMIN_USERS"))
+    env_rows = {
+        a: {
+            "actor": a,
+            "role": "admin",
+            "source": "env",
+            "is_active": True,
+            "updated_at": None,
+            "updated_by": "env",
+        }
+        for a in env_admins
+    }
+
+    db_rows: list[dict] = []
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT actor, role, is_active, updated_at, updated_by
+            FROM user_roles
+            WHERE is_active=1
+            ORDER BY actor ASC
+            """
+        ).fetchall()
+        conn.close()
+        for r in rows:
+            db_rows.append(
+                {
+                    "actor": str(r["actor"]),
+                    "role": str(r["role"]),
+                    "source": "db",
+                    "is_active": bool(r["is_active"]),
+                    "updated_at": r["updated_at"],
+                    "updated_by": r["updated_by"] or "system",
+                }
+            )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Lecture des rôles impossible: {exc}")
+
+    # DB overrides take precedence in effective role display.
+    merged: dict[str, dict] = dict(env_rows)
+    for row in db_rows:
+        merged[row["actor"]] = row
+
+    items = []
+    for actor_key in sorted(merged.keys()):
+        row = merged[actor_key]
+        items.append(
+            {
+                **row,
+                "effective_role": _resolve_role(actor_key),
+            }
+        )
+
+    return {
+        "items": items,
+        "env_admin_count": len(env_admins),
+        "db_assignment_count": len(db_rows),
+    }
+
+
+@app.put("/api/admin/roles")
+def api_admin_upsert_role(req: Request, payload: RoleUpsertPayload):
+    """Create or update one RBAC assignment in DB (admin/adv)."""
+    admin_actor, _ = _ensure_admin(req, payload.model_dump())
+    _init_db()
+
+    actor = _normalize_actor_identity(payload.actor)
+    role = (payload.role or "").strip().lower()
+    if not actor:
+        raise HTTPException(status_code=400, detail="Actor requis")
+    if role not in {"admin", "adv"}:
+        raise HTTPException(status_code=400, detail="Rôle invalide (admin|adv)")
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.execute(
+            """
+            INSERT INTO user_roles (actor, role, is_active, updated_by, created_at, updated_at)
+            VALUES (?, ?, 1, ?, datetime('now'), datetime('now'))
+            ON CONFLICT(actor) DO UPDATE SET
+              role=excluded.role,
+              is_active=1,
+              updated_by=excluded.updated_by,
+              updated_at=datetime('now')
+            """,
+            [actor, role, admin_actor],
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Mise à jour du rôle impossible: {exc}")
+
+    save_audit_event("__roles__", "role_upsert", admin_actor, {"actor": actor, "role": role}, "ok")
+    return {
+        "ok": True,
+        "actor": actor,
+        "role": role,
+        "effective_role": _resolve_role(actor),
+    }
+
+
+@app.delete("/api/admin/roles/{actor:path}")
+def api_admin_delete_role(actor: str, req: Request):
+    """Deactivate one DB role assignment (fallback to env/default mapping)."""
+    admin_actor, _ = _ensure_admin(req)
+    _init_db()
+
+    target = _normalize_actor_identity(actor)
+    if not target:
+        raise HTTPException(status_code=400, detail="Actor requis")
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        cur = conn.execute(
+            """
+            UPDATE user_roles
+            SET is_active=0, updated_by=?, updated_at=datetime('now')
+            WHERE actor=?
+            """,
+            [admin_actor, target],
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Suppression du rôle impossible: {exc}")
+
+    save_audit_event("__roles__", "role_delete", admin_actor, {"actor": target}, "ok")
+    return {
+        "ok": True,
+        "actor": target,
+        "removed": cur.rowcount > 0,
+        "effective_role": _resolve_role(target),
+    }
+
 @app.post("/api/settings/sftp-test")
 def api_sftp_test():
     ok, msg = _test_sftp()
@@ -1446,6 +1760,17 @@ CREATE TABLE IF NOT EXISTS audit_events (
 );
 CREATE INDEX IF NOT EXISTS idx_audit_conv_id   ON audit_events(conversion_id);
 CREATE INDEX IF NOT EXISTS idx_audit_event     ON audit_events(event_type);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    actor      TEXT PRIMARY KEY,
+    role       TEXT NOT NULL CHECK (role IN ('admin','adv')),
+    is_active  INTEGER NOT NULL DEFAULT 1,
+    updated_by TEXT DEFAULT 'system',
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_user_roles_role   ON user_roles(role);
+CREATE INDEX IF NOT EXISTS idx_user_roles_active ON user_roles(is_active);
 """
 
 def _init_db() -> None:

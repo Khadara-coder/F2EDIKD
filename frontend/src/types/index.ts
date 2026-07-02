@@ -28,6 +28,22 @@ export interface CurrentUser {
   authenticated: boolean;
 }
 
+export interface AccessRoleItem {
+  actor: string;
+  role: AppRole;
+  source: "env" | "db";
+  is_active: boolean;
+  updated_at: string | null;
+  updated_by: string;
+  effective_role: AppRole;
+}
+
+export interface AccessRolesResponse {
+  items: AccessRoleItem[];
+  env_admin_count: number;
+  db_assignment_count: number;
+}
+
 export interface SystemHealth {
   api: ConnectorStatus;
   database: ConnectorStatus;

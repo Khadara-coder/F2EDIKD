@@ -1,8 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useMutation } from "@tanstack/react-query";
-import { Database, FileSpreadsheet, Save, Server, Wifi } from "lucide-react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Database, FileSpreadsheet, Save, Server, Shield, Trash2, UserPlus, Wifi } from "lucide-react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/hooks/useFile2Edi";
 import { appSettingsSchema, type AppSettingsForm } from "@/schemas";
@@ -21,6 +21,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { mergeSettings, DEFAULT_APP_SETTINGS } from "@/lib/defaultSettings";
+import { Input } from "@/components/ui/input";
 
 const SECTIONS = [
   { id: "profil", label: "Profil EDI" },
@@ -32,8 +33,18 @@ const SECTIONS = [
 ];
 
 export function ParametresPage() {
+  const queryClient = useQueryClient();
   const { data: settingsRaw, isLoading } = useSettings();
   const settings = mergeSettings(settingsRaw);
+  const [newActor, setNewActor] = useState("");
+  const [newRole, setNewRole] = useState<"admin" | "adv">("adv");
+  const [roleError, setRoleError] = useState("");
+
+  const rolesQuery = useQuery({
+    queryKey: ["admin", "roles"],
+    queryFn: api.getAccessRoles,
+    retry: 1,
+  });
   const form = useForm<AppSettingsForm>({
     resolver: zodResolver(appSettingsSchema),
     defaultValues: {
@@ -67,6 +78,31 @@ export function ParametresPage() {
   const saveMutation = useMutation({
     mutationFn: (payload: AppSettingsForm) => api.updateSettings(payload),
   });
+
+  const roleUpsertMutation = useMutation({
+    mutationFn: (payload: { actor: string; role: "admin" | "adv" }) => api.upsertAccessRole(payload),
+    onSuccess: async () => {
+      setNewActor("");
+      setRoleError("");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "roles"] });
+    },
+    onError: (err) => {
+      setRoleError(err instanceof Error ? err.message : "Échec de l'attribution du rôle");
+    },
+  });
+
+  const roleDeleteMutation = useMutation({
+    mutationFn: (actor: string) => api.deleteAccessRole(actor),
+    onSuccess: async () => {
+      setRoleError("");
+      await queryClient.invalidateQueries({ queryKey: ["admin", "roles"] });
+    },
+    onError: (err) => {
+      setRoleError(err instanceof Error ? err.message : "Échec de la révocation du rôle");
+    },
+  });
+
+  const roleItems = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data]);
 
   const connectors = [
     { key: "apiExtraction", label: "API extraction", icon: Wifi, status: settings.connectors.apiExtraction },
@@ -180,6 +216,115 @@ export function ParametresPage() {
               </CardContent>
             </Card>
           </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Gestion des profils et droits d&apos;accès</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-[1fr_180px_auto]">
+                <div className="space-y-1.5">
+                  <Label>Identifiant utilisateur</Label>
+                  <Input
+                    placeholder="prenom.nom@bosch.com"
+                    value={newActor}
+                    onChange={(e) => setNewActor(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Rôle</Label>
+                  <Select value={newRole} onValueChange={(v: "admin" | "adv") => setNewRole(v)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="adv">ADV</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-end">
+                  <Button
+                    className="w-full gap-2"
+                    onClick={() => {
+                      const actor = newActor.trim();
+                      if (!actor) {
+                        setRoleError("Identifiant utilisateur requis");
+                        return;
+                      }
+                      roleUpsertMutation.mutate({ actor, role: newRole });
+                    }}
+                    disabled={roleUpsertMutation.isPending}
+                  >
+                    <UserPlus className="h-4 w-4" />
+                    Attribuer
+                  </Button>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                <Badge variant="outline">Admins env: {rolesQuery.data?.env_admin_count ?? 0}</Badge>
+                <Badge variant="outline">Affectations DB: {rolesQuery.data?.db_assignment_count ?? 0}</Badge>
+              </div>
+
+              {roleError && <p className="text-sm text-destructive">{roleError}</p>}
+
+              <div className="overflow-x-auto rounded-lg border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/50">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium">Utilisateur</th>
+                      <th className="px-3 py-2 text-left font-medium">Rôle</th>
+                      <th className="px-3 py-2 text-left font-medium">Source</th>
+                      <th className="px-3 py-2 text-left font-medium">Maj par</th>
+                      <th className="px-3 py-2 text-right font-medium">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rolesQuery.isLoading && (
+                      <tr>
+                        <td className="px-3 py-4 text-muted-foreground" colSpan={5}>Chargement des profils...</td>
+                      </tr>
+                    )}
+                    {!rolesQuery.isLoading && roleItems.length === 0 && (
+                      <tr>
+                        <td className="px-3 py-4 text-muted-foreground" colSpan={5}>Aucun profil configuré.</td>
+                      </tr>
+                    )}
+                    {!rolesQuery.isLoading && roleItems.map((item) => (
+                      <tr key={`${item.actor}-${item.source}`} className="border-t">
+                        <td className="px-3 py-2">{item.actor}</td>
+                        <td className="px-3 py-2">
+                          <Badge variant={item.effective_role === "admin" ? "default" : "secondary"} className="gap-1">
+                            <Shield className="h-3 w-3" />
+                            {item.effective_role.toUpperCase()}
+                          </Badge>
+                        </td>
+                        <td className="px-3 py-2">{item.source === "env" ? "ENV" : "DB"}</td>
+                        <td className="px-3 py-2">{item.updated_by || "system"}</td>
+                        <td className="px-3 py-2 text-right">
+                          {item.source === "db" ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="gap-1 text-destructive"
+                              onClick={() => roleDeleteMutation.mutate(item.actor)}
+                              disabled={roleDeleteMutation.isPending}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                              Révoquer
+                            </Button>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">Géré par app.yaml</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
 
           <div className="flex justify-end gap-3">
             <Button variant="outline" onClick={() => form.reset()}>

@@ -1,4 +1,5 @@
 import type {
+  AccessRolesResponse,
   CurrentUser,
   AppSettings,
   ConversionHistoryItem,
@@ -65,6 +66,16 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getAuthModes: () => request<{ profile_login_enabled: boolean; workspace_sso_available: boolean; allowed_roles: string[] }>("/auth/modes"),
+
+  loginWithProfile: (payload: { actor: string; role: "admin" | "adv" }) =>
+    request<{ ok: boolean; actor: string; role: "admin" | "adv" }>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST" }),
+
   getCurrentUser: () => request<CurrentUser>("/me"),
 
   getSystemHealth: () => request<SystemHealth>("/health/system"),
@@ -192,4 +203,21 @@ export const api = {
     request<{ status: string }>(`/settings/test-connector/${connector}`, {
       method: "POST",
     }),
+
+  getAccessRoles: () => request<AccessRolesResponse>("/admin/roles"),
+
+  upsertAccessRole: (payload: { actor: string; role: "admin" | "adv" }) =>
+    request<{ ok: boolean; actor: string; role: "admin" | "adv"; effective_role: "admin" | "adv" }>(
+      "/admin/roles",
+      {
+        method: "PUT",
+        body: JSON.stringify(payload),
+      },
+    ),
+
+  deleteAccessRole: (actor: string) =>
+    request<{ ok: boolean; actor: string; removed: boolean; effective_role: "admin" | "adv" }>(
+      `/admin/roles/${encodeURIComponent(actor)}`,
+      { method: "DELETE" },
+    ),
 };
