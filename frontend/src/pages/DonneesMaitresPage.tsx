@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Building2, Database, Package, RefreshCw, Shield, Plus, Upload } from "lucide-react";
 import { useMasterData } from "@/hooks/useFile2Edi";
 import { Header } from "@/components/layout/Header";
@@ -24,10 +24,25 @@ export function DonneesMaitresPage() {
   const [tab, setTab] = useState("clients");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<MasterDataClient | null>(null);
+  const [page, setPage] = useState(1);
+  const pageSize = 8;
   const { data } = useMasterData(tab, search);
 
   const summary = data?.summary;
   const clients = data?.clients ?? [];
+  const totalPages = Math.max(1, Math.ceil(clients.length / pageSize));
+  const paginatedClients = useMemo(
+    () => clients.slice((page - 1) * pageSize, page * pageSize),
+    [clients, page],
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [tab, search, clients.length]);
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
 
   return (
     <>
@@ -100,7 +115,7 @@ export function DonneesMaitresPage() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {clients.map((c) => (
+                      {paginatedClients.map((c) => (
                         <TableRow
                           key={c.clientId}
                           className="cursor-pointer"
@@ -126,13 +141,44 @@ export function DonneesMaitresPage() {
                       ))}
                     </TableBody>
                   </Table>
+                  <div className="flex items-center justify-between border-t px-4 py-3 text-sm">
+                    <span className="text-muted-foreground">
+                      {clients.length === 0
+                        ? "0 résultat"
+                        : `${(page - 1) * pageSize + 1}-${Math.min(
+                            page * pageSize,
+                            clients.length,
+                          )} sur ${clients.length}`}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        disabled={page <= 1}
+                      >
+                        Précédent
+                      </Button>
+                      <span className="w-20 text-center text-muted-foreground">
+                        Page {page}/{totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={page >= totalPages}
+                      >
+                        Suivant
+                      </Button>
+                    </div>
+                  </div>
                 </CardContent>
               </Card>
             </TabsContent>
           </div>
 
           <div className="lg:col-span-3">
-            {selected ? (
+            {selected && (
               <Card>
                 <CardHeader className="flex flex-row items-start justify-between space-y-0">
                   <div>
@@ -171,12 +217,6 @@ export function DonneesMaitresPage() {
                     Voir toutes les informations
                     <ExternalLink className="h-4 w-4" />
                   </Button>
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardContent className="flex h-64 items-center justify-center text-sm text-muted-foreground">
-                  Sélectionnez un client
                 </CardContent>
               </Card>
             )}

@@ -302,3 +302,22 @@ export interface GenerateEdifactResult {
   message?: string;
   errors?: string[];
 }
+
+export interface MasterDataCustomerRow {
+  SOLDTO?: string;
+  NAME?: string;
+  STRAS?: string;
+  ORT01?: string;
+  PSTLZ?: string;
+  LAND1?: string;
+}
+
+export interface MasterDataPartnerRow {
+  SOLDTO?: string;
+  SHIPTO?: string;
+  NAME?: string;
+  STRAS?: string;
+  ORT01?: string;
+  PSTLZ?: string;
+  LAND1?: string;
+}

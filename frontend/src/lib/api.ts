@@ -7,6 +7,8 @@ import type {
   HistoryFilters,
   HistoryResponse,
   MasterDataClient,
+  MasterDataCustomerRow,
+  MasterDataPartnerRow,
   MasterDataSummary,
   OrderReview,
   ReviewQueueItem,
@@ -16,6 +18,7 @@ import type {
 } from "@/types";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
+const MD_API_BASE = API_BASE.replace(/\/api\/?$/, "") + "/api/masterdata";
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
@@ -77,12 +80,29 @@ export const api = {
 
   updateOrderPartner: (
     partnerId: string,
-    payload: Partial<{ partnerCode: string; partnerName: string }>,
+    payload: Partial<{
+      partnerCode: string;
+      partnerName: string;
+      addressLine1: string;
+      postalCode: string;
+      city: string;
+      country: string;
+    }>,
   ) =>
     request(`/orders/partners/${partnerId}`, {
       method: "PATCH",
       body: JSON.stringify(payload),
     }),
+
+  searchCustomers: (q: string, limit = 20) =>
+    fetch(`${MD_API_BASE}/customers/search?q=${encodeURIComponent(q)}&limit=${limit}`).then(
+      (res) => res.json() as Promise<{ results: MasterDataCustomerRow[] }>,
+    ),
+
+  searchPartners: (q: string, limit = 20) =>
+    fetch(`${MD_API_BASE}/partners/search?q=${encodeURIComponent(q)}&limit=${limit}`).then(
+      (res) => res.json() as Promise<{ results: MasterDataPartnerRow[] }>,
+    ),
 
   updateOrderLine: (lineId: string, payload: UpdateOrderLinePayload) =>
     request(`/orders/lines/${lineId}`, {

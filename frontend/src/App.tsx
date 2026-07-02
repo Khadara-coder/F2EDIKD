@@ -1,4 +1,4 @@
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Outlet, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { PageContainer } from "@/components/layout/PageContainer";
 import { CockpitPage } from "@/pages/CockpitPage";
@@ -26,9 +26,10 @@ export function App() {
           <Routes>
             <Route path="/" element={<CockpitPage />} />
             <Route path="/convertir" element={<ConvertirPage />} />
-            <Route path="/revue" element={<RevueListPage />} />
-            <Route path="/revue/" element={<Navigate to="/revue" replace />} />
-            <Route path="/revue/:orderId" element={<RevuePage />} />
+            <Route path="/revue" element={<Outlet />}>
+              <Route index element={<RevueListPage />} />
+              <Route path=":orderId" element={<RevuePage />} />
+            </Route>
             <Route path="/historique" element={<HistoriquePage />} />
             <Route path="/donnees-maitres" element={<DonneesMaitresPage />} />
             <Route path="/parametres" element={<ParametresPage />} />

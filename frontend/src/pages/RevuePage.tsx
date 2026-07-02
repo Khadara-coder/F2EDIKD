@@ -8,15 +8,14 @@ import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/file2edi/StatCard";
 import { StatusBadge } from "@/components/file2edi/StatusBadge";
 import { PdfPreviewPanel } from "@/components/file2edi/PdfPreviewPanel";
-import { ValidationPanel } from "@/components/file2edi/ValidationPanel";
-import { EditableField } from "@/components/file2edi/EditableField";
-import { EditableOrderLinesTable } from "@/components/file2edi/EditableOrderLinesTable";
+import { OrderGeneralInfoPanel } from "@/components/file2edi/OrderGeneralInfoPanel";
+import { OrderLinesEditPanel } from "@/components/file2edi/OrderLinesEditPanel";
+import { OrderLinesSummaryTable } from "@/components/file2edi/OrderLinesSummaryTable";
 import { ProgressStepper } from "@/components/file2edi/ProgressStepper";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { formatCurrency, formatDate } from "@/lib/utils";
-import type { OrderPartner } from "@/types";
 
 export function RevuePage() {
   const { orderId = MOCK_ORDER_ID } = useParams();
@@ -74,8 +73,6 @@ export function RevuePage() {
   const { order, partners, lines, anomalies, traceability } = data;
   const soldto = partners.find((p) => p.partnerFunction === "soldto");
   const shipto = partners.find((p) => p.partnerFunction === "shipto");
-  const billto = partners.find((p) => p.partnerFunction === "billto");
-  const payer = partners.find((p) => p.partnerFunction === "payer");
   const invalidDate = !order.orderDate;
 
   const handleValidate = () => {
@@ -145,60 +142,47 @@ export function RevuePage() {
         <StatCard label="Statut traitement" value={order.status} valueClassName="text-violet-600 text-lg" />
       </div>
 
+      <OrderGeneralInfoPanel
+        order={order}
+        soldto={soldto}
+        shipto={shipto}
+        onUpdateHeader={async (payload) => {
+          await updateHeader.mutateAsync(payload);
+        }}
+        onUpdateShipto={async (payload) => {
+          if (!shipto) return;
+          await api.updateOrderPartner(shipto.partnerId, payload);
+          invalidate();
+        }}
+      />
+
       <div className="mb-6 grid gap-6 lg:grid-cols-2">
         <PdfPreviewPanel fileName={order.fileName} orderId={order.orderId} pdfUrl={data.pdfUrl} />
 
-        <div className="space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold">Informations générales</CardTitle>
-            </CardHeader>
-            <CardContent className="grid grid-cols-2 gap-4">
-              <EditableField label="Type de message" value={order.messageType} onSave={() => {}} />
-              <EditableField label="Vendeur" value={order.vendor} onSave={async () => { updateHeader.mutate({}); }} />
-              <EditableField label="Devise" value={order.currency} onSave={(v) => updateHeader.mutate({ currency: v })} />
-              <EditableField label="Incoterm" value={order.incoterm} onSave={(v) => updateHeader.mutate({ incoterm: v })} />
-              <EditableField label="Mode de livraison" value={order.deliveryMode} onSave={(v) => updateHeader.mutate({ deliveryMode: v })} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold">Partenaires</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <PartnerRow label="Sold-to / AG" partner={soldto} onSave={async (v) => { if (soldto) await api.updateOrderPartner(soldto.partnerId, { partnerCode: v }); }} />
-              <PartnerRow label="Ship-to / WE" partner={shipto} onSave={async (v) => { if (shipto) await api.updateOrderPartner(shipto.partnerId, { partnerCode: v }); }} />
-              <PartnerRow label="Bill-to / RE" partner={billto} onSave={async (v) => { if (billto) await api.updateOrderPartner(billto.partnerId, { partnerCode: v }); }} />
-              <PartnerRow label="Payer / RG" partner={payer} onSave={async (v) => { if (payer) await api.updateOrderPartner(payer.partnerId, { partnerCode: v }); }} />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-semibold">Adresses</CardTitle>
-            </CardHeader>
-            <CardContent className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">Adresse de facturation</p>
-                <p className="text-sm">{formatAddress(billto)}</p>
-              </div>
-              <div>
-                <p className="text-xs font-medium text-muted-foreground mb-1">Adresse de livraison</p>
-                <p className="text-sm">{formatAddress(shipto)}</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <ValidationPanel
-            items={[
-              { label: "Date invalide", status: invalidDate ? "error" : "ok" },
-              { label: "Ship-to identifié", status: shipto ? "ok" : "error", detail: shipto ? `confiance ${shipto.confidence}%` : undefined },
-              { label: "Articles partiellement reconnus", status: "warning", detail: `${lines.filter((l) => l.status === "OK").length}/${lines.length}` },
-              { label: "Quantités cohérentes", status: "ok" },
-            ]}
-          />
-        </div>
+        <Card className="h-full">
+          <CardHeader>
+            <CardTitle className="text-base">Lignes de commande</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <OrderLinesEditPanel
+              lines={lines}
+              onUpdateLine={async (lineId, payload) => {
+                await updateLine.mutateAsync({ lineId, payload });
+              }}
+              onDeleteLine={async (lineId) => {
+                await deleteLine.mutateAsync(lineId);
+              }}
+              onAddLine={() => {
+                api.addOrderLine(orderId, {
+                  boschArticle: "",
+                  quantity: 1,
+                  unit: "PCE",
+                  unitPrice: 0,
+                }).then(invalidate);
+              }}
+            />
+          </CardContent>
+        </Card>
       </div>
 
       <Card className="mb-6">
@@ -206,27 +190,7 @@ export function RevuePage() {
           <CardTitle className="text-base">Lignes de commande</CardTitle>
         </CardHeader>
         <CardContent>
-          <EditableOrderLinesTable
-            lines={lines}
-            currency={order.currency}
-            onUpdateLine={async (lineId, payload) => {
-              await updateLine.mutateAsync({ lineId, payload });
-            }}
-            onDeleteLine={async (lineId) => {
-              await deleteLine.mutateAsync(lineId);
-            }}
-            onAddLine={() => {
-              api.addOrderLine(orderId, {
-                boschArticle: "",
-                quantity: 1,
-                unit: "PCE",
-                unitPrice: 0,
-              }).then(invalidate);
-            }}
-            onValidateLine={async (lineId) => {
-              await updateLine.mutateAsync({ lineId, payload: { status: "OK" } });
-            }}
-          />
+          <OrderLinesSummaryTable lines={lines} currency={order.currency} />
         </CardContent>
       </Card>
 
@@ -268,31 +232,4 @@ export function RevuePage() {
       </div>
     </>
   );
-}
-
-function PartnerRow({
-  label,
-  partner,
-  onSave,
-}: {
-  label: string;
-  partner?: OrderPartner;
-  onSave: (v: string) => Promise<void> | void;
-}) {
-  if (!partner) return null;
-  return (
-    <EditableField
-      label={label}
-      value={partner.partnerCode}
-      onSave={async (v) => { await onSave(v); }}
-      manuallyEdited={partner.manuallyEdited}
-    />
-  );
-}
-
-function formatAddress(p?: OrderPartner): string {
-  if (!p) return "—";
-  return [p.partnerName, p.addressLine1, `${p.postalCode} ${p.city}`, p.country]
-    .filter(Boolean)
-    .join(", ");
 }

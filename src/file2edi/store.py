@@ -423,10 +423,24 @@ class File2EdiStore:
         if not row:
             conn.close()
             return None
-        if "partnerCode" in payload:
+        field_map = {
+            "partnerCode": "partner_code",
+            "partnerName": "partner_name",
+            "addressLine1": "address_line1",
+            "postalCode": "postal_code",
+            "city": "city",
+            "country": "country",
+        }
+        sets, vals = ["manually_edited=1"], []
+        for key, col in field_map.items():
+            if key in payload:
+                sets.append(f"{col}=?")
+                vals.append(payload[key])
+        if sets:
+            vals.append(partner_id)
             conn.execute(
-                "UPDATE file2edi_order_partners SET partner_code=?, partner_name=COALESCE(?, partner_name), manually_edited=1 WHERE partner_id=?",
-                [payload["partnerCode"], payload.get("partnerName"), partner_id],
+                f"UPDATE file2edi_order_partners SET {', '.join(sets)} WHERE partner_id=?",
+                vals,
             )
             conn.commit()
         conn.close()

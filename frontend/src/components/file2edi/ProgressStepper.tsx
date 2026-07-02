@@ -20,13 +20,13 @@ export function ProgressStepper({
 }: ProgressStepperProps) {
   if (orientation === "horizontal") {
     return (
-      <div className={cn("flex items-center gap-2", className)}>
+      <div className={cn("flex w-full min-w-max items-center justify-between gap-2", className)}>
         {steps.map((step, i) => (
-          <div key={step.id} className="flex items-center gap-2">
+          <div key={step.id} className="flex flex-1 items-center gap-2">
             <StepCircle step={step} />
             <span
               className={cn(
-                "text-xs whitespace-nowrap",
+                "text-xs",
                 step.status === "current" && "font-semibold text-primary",
                 step.status === "completed" && "text-emerald-600",
                 step.status === "pending" && "text-muted-foreground",
@@ -35,7 +35,7 @@ export function ProgressStepper({
               {step.label}
             </span>
             {i < steps.length - 1 && (
-              <div className="mx-1 h-px w-6 bg-border" />
+              <div className="mx-1 hidden h-px flex-1 bg-border sm:block" />
             )}
           </div>
         ))}

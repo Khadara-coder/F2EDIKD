@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Check, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,11 +8,12 @@ import { cn } from "@/lib/utils";
 interface EditableFieldProps {
   label: string;
   value: string;
-  onSave: (value: string) => Promise<void> | void;
+  onSave?: (value: string) => Promise<void> | void;
   type?: "text" | "date" | "number";
   manuallyEdited?: boolean;
   className?: string;
   invalid?: boolean;
+  readOnly?: boolean;
 }
 
 export function EditableField({
@@ -23,12 +24,18 @@ export function EditableField({
   manuallyEdited,
   className,
   invalid,
+  readOnly = false,
 }: EditableFieldProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
 
+  useEffect(() => {
+    if (!editing) setDraft(value);
+  }, [value, editing]);
+
   const handleSave = async () => {
+    if (!onSave) return;
     setSaving(true);
     try {
       await onSave(draft);
@@ -47,13 +54,13 @@ export function EditableField({
     <div className={cn("group space-y-1", className)}>
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
-        {manuallyEdited && (
+        {Boolean(manuallyEdited) && (
           <Badge variant="info" className="text-[10px] px-1.5 py-0">
             Modifié manuellement
           </Badge>
         )}
       </div>
-      {editing ? (
+      {editing && !readOnly ? (
         <div className="flex items-center gap-2">
           <Input
             type={type}
@@ -75,20 +82,23 @@ export function EditableField({
             className={cn(
               "text-sm font-medium",
               invalid && "text-red-600",
+              readOnly && "text-muted-foreground",
             )}
           >
             {value || "—"}
           </span>
-          <button
-            type="button"
-            onClick={() => {
-              setDraft(value);
-              setEditing(true);
-            }}
-            className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-muted"
-          >
-            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
+          {!readOnly && onSave && (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(value);
+                setEditing(true);
+              }}
+              className="opacity-0 group-hover:opacity-100 transition-opacity rounded p-1 hover:bg-muted"
+            >
+              <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+            </button>
+          )}
         </div>
       )}
     </div>

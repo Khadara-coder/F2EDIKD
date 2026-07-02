@@ -19,7 +19,7 @@ export function RevueListPage() {
   const navigate = useNavigate();
   const { reviewQueue } = useDashboard();
   const ordersList = useOrdersList();
-  const items = ordersList.data ?? [];
+  const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
 
   return (
