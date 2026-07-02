@@ -1,5 +1,5 @@
-import { NavLink } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { NavLink, useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { useCurrentUser, hasAtLeastRole } from "@/hooks/useCurrentUser";
 import type { AppRole } from "@/types";
@@ -8,6 +8,7 @@ import {
   Database,
   FileText,
   Home,
+  LogOut,
   Settings,
   Upload,
 } from "lucide-react";
@@ -25,6 +26,8 @@ const navItems = [
 
 export function Sidebar() {
   const { data: me } = useCurrentUser();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { data: queue } = useQuery({
     queryKey: ["dashboard", "review-queue"],
     queryFn: api.getReviewQueue,
@@ -39,6 +42,17 @@ export function Sidebar() {
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("") || "OP";
+
+  async function handleLogout() {
+    try {
+      await api.logout();
+    } catch {
+      // ignore errors — clear state anyway
+    }
+    queryClient.clear();
+    navigate("/login");
+    window.location.assign("/login");
+  }
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-[260px] flex-col bg-sidebar text-sidebar-foreground">
@@ -92,10 +106,17 @@ export function Sidebar() {
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white">
             {initials}
           </div>
-          <div>
-            <p className="text-sm font-medium text-white">{me?.actor || "adv"}</p>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium text-white">{me?.actor || "adv"}</p>
             <p className="text-xs text-slate-400">{role.toUpperCase()} · File2EDI V2</p>
           </div>
+          <button
+            onClick={handleLogout}
+            title="Se déconnecter"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-500/20 hover:text-red-400"
+          >
+            <LogOut className="h-4 w-4" />
+          </button>
         </div>
       </div>
     </aside>

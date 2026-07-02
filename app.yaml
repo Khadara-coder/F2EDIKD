@@ -43,6 +43,8 @@ env:
     value: "dik1dy@bosch.com,dik1dy,khadara"
   - name: APP_REQUIRE_AUTH
     value: "true"
+  - name: ENABLE_PROFILE_LOGIN
+    value: "true"
   # ── Persistence Tier 2 (Workspace JSONL) — no admin required ─────────────
   # Grant app SP CAN_EDIT on chosen Workspace folder (if Tier 2 is enabled)
   # - name: DATABRICKS_PERSIST_PATH

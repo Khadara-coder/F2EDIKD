@@ -84,6 +84,7 @@ function AppContent() {
     <BrowserRouter>
       <PageContainer>
         <Routes>
+          <Route path="/login" element={<LoginPage />} />
           <Route
             path="/"
             element={meQuery.data?.role === "admin" ? <CockpitPage /> : <Navigate to="/convertir" replace />}

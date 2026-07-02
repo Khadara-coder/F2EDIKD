@@ -19,8 +19,15 @@ def _now() -> str:
 class File2EdiStore:
     def __init__(self, db_path: str, intake_dir: str) -> None:
         self.db_path = db_path
-        self.intake_dir = Path(intake_dir)
-        self.intake_dir.mkdir(parents=True, exist_ok=True)
+        requested_intake = Path(intake_dir)
+        try:
+            requested_intake.mkdir(parents=True, exist_ok=True)
+            self.intake_dir = requested_intake
+        except (PermissionError, OSError):
+            app_root = Path(__file__).resolve().parents[2]
+            local_intake = app_root / "data" / "intake"
+            local_intake.mkdir(parents=True, exist_ok=True)
+            self.intake_dir = local_intake
         self._init_schema()
 
     def _conn(self) -> sqlite3.Connection:
@@ -50,14 +57,29 @@ class File2EdiStore:
         sql = _SCHEMA_PATH.read_text(encoding="utf-8")
         conn = self._conn()
         conn.executescript(sql)
-        cols = {
-            r[1]
-            for r in conn.execute("PRAGMA table_info(file2edi_order_partners)").fetchall()
-        }
-        if "edited_fields_json" not in cols:
-            conn.execute(
-                "ALTER TABLE file2edi_order_partners ADD COLUMN edited_fields_json TEXT"
-            )
+
+        def _ensure_column(table: str, column: str, ddl: str) -> None:
+            cols = {
+                r[1]
+                for r in conn.execute(f"PRAGMA table_info({table})").fetchall()
+            }
+            if column not in cols:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+        # Legacy Databricks DBs can keep an older schema if the table already
+        # existed; add missing columns incrementally to keep reads/writes safe.
+        _ensure_column("file2edi_order_partners", "edited_fields_json", "edited_fields_json TEXT")
+
+        _ensure_column("file2edi_orders", "upload_id", "upload_id TEXT")
+        _ensure_column("file2edi_orders", "file_name", "file_name TEXT")
+        _ensure_column("file2edi_orders", "client_name", "client_name TEXT")
+        _ensure_column("file2edi_orders", "global_confidence", "global_confidence REAL DEFAULT 0")
+        _ensure_column("file2edi_orders", "status", "status TEXT DEFAULT 'Revue requise'")
+        _ensure_column("file2edi_orders", "created_at", "created_at TEXT")
+        _ensure_column("file2edi_orders", "updated_at", "updated_at TEXT")
+
+        _ensure_column("file2edi_pdf_uploads", "file_name", "file_name TEXT")
+
         conn.commit()
         conn.close()
 

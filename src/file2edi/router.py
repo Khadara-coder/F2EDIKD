@@ -64,28 +64,37 @@ def create_router() -> APIRouter:
 
     @router.get("/dashboard/review-queue")
     def review_queue():
-        store = get_store()
-        review_statuses = ("Revue requise", "À revoir", "À vérifier", "Bloqué")
-        items = [
-            _order_list_item(o)
-            for o in store.list_orders_summary()
-            if o.get("status") in review_statuses
-        ]
+        items: list[dict] = []
+        try:
+            store = get_store()
+            review_statuses = ("Revue requise", "À revoir", "À vérifier", "Bloqué")
+            items = [
+                _order_list_item(o)
+                for o in store.list_orders_summary()
+                if o.get("status") in review_statuses
+            ]
+        except Exception:
+            items = []
+
         if not items:
             try:
                 import server as srv
                 for c in srv.list_conversions(status="REVIEW_REQUIRED", limit=20):
+                    try:
+                        conf = int(float(c.get("confidence") or 0))
+                    except Exception:
+                        conf = 0
                     items.append({
                         "orderId": c.get("id"),
                         "fileName": c.get("source_filename"),
                         "clientName": c.get("customer_name") or "—",
-                        "confidence": int(c.get("confidence") or 0),
+                        "confidence": conf,
                         "issue": c.get("rejection_message") or c.get("rejection_code") or "Revue requise",
                         "date": c.get("created_at"),
                         "status": "À revoir",
                     })
             except Exception:
-                pass
+                return []
         return items[:20]
 
     @router.get("/dashboard/recent-conversions")

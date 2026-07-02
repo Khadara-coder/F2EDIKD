@@ -1080,6 +1080,41 @@ def api_me(req: Request):
     }
 
 
+@app.get("/api/me/debug")
+def api_me_debug(req: Request):
+    """Diagnostic: show raw SSO headers, resolved actor, and role chain.
+    Useful to confirm which header Databricks injects and why a role is resolved.
+    """
+    actor = _resolve_actor(req)
+    session_role = _profile_session_role(req)
+    db_role = _db_role_override(actor) if actor else None
+    admin_set = list(_parse_csv_env("APP_ADMIN_USERS"))
+    # Collect relevant auth headers (values truncated for safety)
+    auth_headers = {}
+    for hk in (
+        "x-forwarded-user", "x-forwarded-email", "x-forwarded-preferred-username",
+        "x-forwarded-username", "x-databricks-user", "x-auth-request-user",
+        "x-auth-request-email", "x-ms-client-principal-name", "x-user-email",
+        "x-remote-user", "remote-user", "x-end-user", "x-user",
+    ):
+        v = req.headers.get(hk, "")
+        if v:
+            auth_headers[hk] = v[:80]
+    return {
+        "actor": actor,
+        "role": _resolve_role_for_request(actor, req),
+        "role_source": "session" if session_role else ("db_override" if db_role else "env_match" if actor in _parse_csv_env("APP_ADMIN_USERS") else "default_adv"),
+        "session_role": session_role or None,
+        "db_role": db_role,
+        "in_admin_users": actor in _parse_csv_env("APP_ADMIN_USERS"),
+        "admin_users_set": admin_set,
+        "auth_headers_received": auth_headers,
+        "is_databricks": IS_DATABRICKS,
+        "require_auth": _APP_REQUIRE_AUTH,
+        "profile_login_enabled": ENABLE_PROFILE_LOGIN,
+    }
+
+
 @app.post("/api/proxy/convert")
 async def api_proxy_convert(req: Request, file: UploadFile = File(...)):
     """Run the local F2EDIV2 engine on an uploaded PDF."""
