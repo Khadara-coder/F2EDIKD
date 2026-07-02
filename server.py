@@ -120,17 +120,49 @@ def _extract_actor_from_request(req: Request | None) -> str:
     """Extract actor from trusted upstream headers only (no fallback)."""
     if req is None:
         return ""
+    candidates: list[str] = []
     for hk in (
         "x-forwarded-user",
-        "x-auth-request-user",
+        "x-forwarded-preferred-username",
+        "x-forwarded-username",
         "x-forwarded-email",
+        "x-forwarded-sub",
+        "x-auth-request-user",
+        "x-auth-request-email",
+        "x-auth-request-preferred-username",
         "x-ms-client-principal-name",
+        "x-ms-client-principal-idp",
         "x-databricks-user",
+        "x-user-email",
+        "x-remote-user",
+        "remote-user",
+        "x-end-user",
         "x-user",
     ):
         hv = (req.headers.get(hk) or "").strip()
         if hv:
-            return hv
+            candidates.append(hv)
+
+    for raw in candidates:
+        value = raw.strip().strip('"').strip("'")
+        if not value:
+            continue
+        lower = value.lower()
+        if "@" in value:
+            for token in value.replace(";", ",").replace(" ", ",").split(","):
+                token = token.strip().strip('"').strip("'")
+                if token and "@" in token:
+                    return token.lower()
+        if "/" in value:
+            tail = value.split("/")[-1].strip()
+            if tail:
+                return tail.lower()
+        if lower.startswith("users:"):
+            return lower.split(":", 1)[1].strip()
+        if lower.startswith("user:"):
+            return lower.split(":", 1)[1].strip()
+        if lower:
+            return lower
     return ""
 
 
@@ -830,10 +862,11 @@ def api_health_alias():
 def api_me(req: Request):
     """Return resolved actor + role for profile-aware UI routing."""
     actor = _resolve_actor(req)
+    authenticated = (not _APP_REQUIRE_AUTH) or bool(actor and actor != "operator")
     return {
         "actor": actor,
         "role": _resolve_role(actor),
-        "authenticated": bool(actor and actor != "operator"),
+        "authenticated": authenticated,
     }
 
 
