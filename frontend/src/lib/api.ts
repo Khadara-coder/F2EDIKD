@@ -23,6 +23,18 @@ import type {
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 const MD_API_BASE = API_BASE.replace(/\/api\/?$/, "") + "/api/masterdata";
 
+export class ApiError extends Error {
+  status: number;
+  detail?: unknown;
+
+  constructor(message: string, status: number, detail?: unknown) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
+  }
+}
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
     headers: {
@@ -46,7 +58,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
         : Array.isArray(detail)
           ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join(", ")
           : `HTTP ${res.status}`;
-    throw new Error(msg || `HTTP ${res.status}`);
+    throw new ApiError(msg || `HTTP ${res.status}`, res.status, detail);
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
