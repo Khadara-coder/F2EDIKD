@@ -95,19 +95,47 @@ AI_ENDPOINT_URL  = f"{DATABRICKS_HOST.rstrip('/')}/serving-endpoints/{MODEL_ENDP
 os.environ.setdefault("MASTER_DATA_DIR", MASTER_DATA_RUNTIME)
 
 
+# ── Environment detection (local dev vs Databricks Apps) ───────────────────────
+def _detect_databricks_runtime() -> bool:
+    """True when running inside a Databricks App / cluster, False for local dev."""
+    for var in ("DATABRICKS_APP_NAME", "DATABRICKS_APP_PORT",
+                "DATABRICKS_RUNTIME_VERSION", "DB_IS_DRIVER"):
+        if os.environ.get(var):
+            return True
+    # Databricks Apps mount code under /Workspace or expose FUSE volumes
+    return os.path.isdir("/Volumes") and os.path.isdir("/databricks")
+
+
+IS_DATABRICKS = _detect_databricks_runtime()
+IS_LOCAL = not IS_DATABRICKS
+# Optional dev identity so local runs mirror the Databricks SSO actor/role flow
+# (respects APP_ADMIN_USERS / APP_REVIEW_USERS RBAC instead of bypassing it).
+DEV_ACTOR = (os.environ.get("DEV_ACTOR") or "").strip().lower()
+log.info("environment: %s (databricks=%s dev_actor=%s)",
+         "DATABRICKS" if IS_DATABRICKS else "LOCAL", IS_DATABRICKS, DEV_ACTOR or "-")
+
+
 # ── Auth helper ────────────────────────────────────────────────────────────────
 def _auth_headers() -> dict:
-    """Bearer auth via app SP OAuth (no hardcoded token)."""
+    """Bearer auth: explicit token → Databricks CLI profile / SP OAuth.
+
+    Locally this resolves through DATABRICKS_CONFIG_PROFILE (e.g. `Khadara`)
+    so the LLM serving endpoint behaves the same as on Databricks Apps.
+    """
     token = os.environ.get("DATABRICKS_TOKEN", "")
     if token:
         return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
         from databricks.sdk import WorkspaceClient
-        h = WorkspaceClient().config.authenticate()
+        profile = os.environ.get("DATABRICKS_CONFIG_PROFILE", "").strip()
+        w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+        h = w.config.authenticate()
         h["Content-Type"] = "application/json"
         return h
     except Exception as exc:
-        return {"Content-Type": "application/json", "_auth_error": str(exc)}
+        hint = (" — set DATABRICKS_CONFIG_PROFILE (ex: Khadara) or DATABRICKS_TOKEN"
+                if IS_LOCAL else "")
+        return {"Content-Type": "application/json", "_auth_error": f"{exc}{hint}"}
 
 
 def _parse_csv_env(name: str) -> set[str]:
@@ -176,6 +204,11 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
     actor_hdr = _extract_actor_from_request(req)
     if actor_hdr:
         return actor_hdr
+
+    # Local dev: no SSO proxy injects headers, so fall back to DEV_ACTOR to
+    # mirror the authenticated identity/role you would have on Databricks.
+    if IS_LOCAL and DEV_ACTOR:
+        return DEV_ACTOR
 
     return os.environ.get("DEFAULT_APP_ACTOR", "operator")
 
@@ -520,7 +553,10 @@ app = FastAPI(title="EDIFACT Generator", version="4.0.0",
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
 
-_APP_REQUIRE_AUTH = os.environ.get("APP_REQUIRE_AUTH", "true").strip().lower() in {"1", "true", "yes", "on"}
+# Auth defaults to ON in Databricks (SSO proxy present) and OFF locally unless
+# a DEV_ACTOR is provided, so `uvicorn server:app` just works on a dev machine.
+_auth_default = "true" if (IS_DATABRICKS or DEV_ACTOR) else "false"
+_APP_REQUIRE_AUTH = os.environ.get("APP_REQUIRE_AUTH", _auth_default).strip().lower() in {"1", "true", "yes", "on"}
 _PUBLIC_API_PATHS = {
     "/api/health",
     "/api/health/system",
@@ -535,7 +571,10 @@ async def _require_authenticated_user(request: Request, call_next):
     """Enforce authenticated user for API routes when APP_REQUIRE_AUTH is enabled."""
     path = request.url.path or ""
     if _APP_REQUIRE_AUTH and path.startswith("/api/") and path not in _PUBLIC_API_PATHS:
-        if not _extract_actor_from_request(request):
+        actor = _extract_actor_from_request(request)
+        if not actor and IS_LOCAL and DEV_ACTOR:
+            actor = DEV_ACTOR  # local dev identity mirrors the SSO actor
+        if not actor:
             return JSONResponse(status_code=401, content={"detail": "Authentification requise"})
     return await call_next(request)
 
