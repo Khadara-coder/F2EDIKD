@@ -20,6 +20,7 @@ import configparser
 import csv
 import os
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -31,7 +32,10 @@ _AUTHORISED_SENDER_ID = "4399901876613"
 _AUTHORISED_RECEIVER_ID = "3015981600108"
 _FORBIDDEN_IDS = {"3020810000707", "54209794400681"}
 
-_MASTERDATA_ROOT = "/Workspace/Users/rsr1dy@bosch.com/masterdata"
+_MASTERDATA_ROOT = os.environ.get(
+    "MASTERDATA_SOURCE_DIR",
+    "data/masterdata",
+)
 _MANDATORY_CSVs = [
     "10564_Customers.csv",
     "10564_Partners.csv",
@@ -182,6 +186,19 @@ def check_n8n_folder() -> None:
 
 def check_masterdata_folder() -> None:
     print("\n[5] Checking masterdata folder and mandatory files...")
+    if _MASTERDATA_ROOT.startswith("/Volumes/") and not os.path.exists(_MASTERDATA_ROOT):
+        try:
+            cmd = ["databricks", "fs", "ls", f"dbfs:{_MASTERDATA_ROOT}"]
+            proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if proc.returncode == 0:
+                PASS("masterdata volume accessible via Databricks CLI", _MASTERDATA_ROOT)
+            else:
+                WARN("masterdata volume check", f"Local path not mounted. Verify in Databricks: dbfs:{_MASTERDATA_ROOT}")
+            return
+        except Exception:
+            WARN("masterdata volume check", f"Local path not mounted. Verify in Databricks: dbfs:{_MASTERDATA_ROOT}")
+            return
+
     if os.path.exists(_MASTERDATA_ROOT):
         PASS("masterdata folder exists", _MASTERDATA_ROOT)
     else:

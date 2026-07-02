@@ -1,6 +1,8 @@
 import { NavLink } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useCurrentUser, hasAtLeastRole } from "@/hooks/useCurrentUser";
+import type { AppRole } from "@/types";
 import {
   Clock,
   Database,
@@ -13,21 +15,30 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
 const navItems = [
-  { to: "/", icon: Home, label: "Cockpit" },
-  { to: "/convertir", icon: Upload, label: "Convertir" },
-  { to: "/revue", icon: FileText, label: "Revue", badgeFromApi: true },
-  { to: "/historique", icon: Clock, label: "Historique" },
-  { to: "/donnees-maitres", icon: Database, label: "Données maîtres" },
-  { to: "/parametres", icon: Settings, label: "Paramètres" },
+  { to: "/", icon: Home, label: "Cockpit", minRole: "readonly" as AppRole },
+  { to: "/convertir", icon: Upload, label: "Convertir", minRole: "operator" as AppRole },
+  { to: "/revue", icon: FileText, label: "Revue", badgeFromApi: true, minRole: "reviewer" as AppRole },
+  { to: "/historique", icon: Clock, label: "Historique", minRole: "readonly" as AppRole },
+  { to: "/donnees-maitres", icon: Database, label: "Données maîtres", minRole: "reviewer" as AppRole },
+  { to: "/parametres", icon: Settings, label: "Paramètres", minRole: "admin" as AppRole },
 ];
 
 export function Sidebar() {
+  const { data: me } = useCurrentUser();
   const { data: queue } = useQuery({
     queryKey: ["dashboard", "review-queue"],
     queryFn: api.getReviewQueue,
     refetchInterval: 60_000,
   });
   const reviewCount = queue?.length ?? 0;
+  const role = me?.role ?? "operator";
+  const visibleNavItems = navItems.filter((item) => hasAtLeastRole(role, item.minRole));
+  const initials = (me?.actor || "OP")
+    .split(/[\s@._-]+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((p) => p[0]?.toUpperCase() ?? "")
+    .join("") || "OP";
 
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-[260px] flex-col bg-sidebar text-sidebar-foreground">
@@ -37,7 +48,7 @@ export function Sidebar() {
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-4">
-        {navItems.map(({ to, icon: Icon, label, badgeFromApi }) => (
+        {visibleNavItems.map(({ to, icon: Icon, label, badgeFromApi }) => (
           <NavLink
             key={to}
             to={to}
@@ -79,11 +90,11 @@ export function Sidebar() {
         </div>
         <div className="mt-4 flex items-center gap-3">
           <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white">
-            OP
+            {initials}
           </div>
           <div>
-            <p className="text-sm font-medium text-white">Opérateur</p>
-            <p className="text-xs text-slate-400">File2EDI V2</p>
+            <p className="text-sm font-medium text-white">{me?.actor || "operator"}</p>
+            <p className="text-xs text-slate-400">{role.toUpperCase()} · File2EDI V2</p>
           </div>
         </div>
       </div>

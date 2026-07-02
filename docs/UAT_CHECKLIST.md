@@ -82,8 +82,59 @@
 - **Result**: [ ] PASS / [ ] FAIL
 
 ### TC-14: Masterdata Folder Availability
-- **Check**: `/Workspace/Users/rsr1dy@bosch.com/masterdata/` accessible
+- **Check**: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/` accessible
 - **Files**: `10564_Customers.csv`, `10564_Partners.csv`, `10564_Materials.csv` all present
+- **Result**: [ ] PASS / [ ] FAIL
+
+---
+
+## Role and Audit UAT (Short-term Production)
+
+### RC-01: Identity Resolution Endpoint
+- **Input**: `GET /api/me` with header `x-forwarded-user: khadara@bosch.com`
+- **Expected**: HTTP 200 with `actor=khadara@bosch.com` and a non-empty `role`
+- **Result**: [ ] PASS / [ ] FAIL
+
+### RC-02: Readonly Cannot Approve
+- **Precondition**: `APP_READONLY_USERS` contains the test user
+- **Input**: `POST /api/conversions/{id}/approve`
+- **Expected**: HTTP 403, message `Votre profil est en lecture seule`
+- **Result**: [ ] PASS / [ ] FAIL
+
+### RC-03: Readonly Cannot Reject
+- **Precondition**: `APP_READONLY_USERS` contains the test user
+- **Input**: `POST /api/conversions/{id}/reject`
+- **Expected**: HTTP 403
+- **Result**: [ ] PASS / [ ] FAIL
+
+### RC-04: Reviewer Can Save Review
+- **Precondition**: `APP_REVIEW_USERS` contains the test user
+- **Input**: `POST /api/conversions/{id}/review` with corrections payload
+- **Expected**: HTTP 200 and conversion updated
+- **Result**: [ ] PASS / [ ] FAIL
+
+### RC-05: Operator Can Generate EDIFACT
+- **Precondition**: `APP_REVIEW_USERS` or `APP_ADMIN_USERS` contains the test user
+- **Input**: `POST /api/conversions/{id}/generate`
+- **Expected**: HTTP 200, `generated=true` (if blockers resolved)
+- **Result**: [ ] PASS / [ ] FAIL
+
+### RC-06: Audit Contains Actor on Approval
+- **Input**: Execute approve action, then `GET /api/conversions/{id}/audit`
+- **Expected**: Event `user_approved` with `actor=<connected user>`
+- **Result**: [ ] PASS / [ ] FAIL
+
+### RC-07: Audit Contains Actor on SFTP Send
+- **Input**: Execute `POST /api/conversions/{id}/send-sftp`
+- **Expected**: Event `sftp_sent` or `sftp_failed` with `actor=<connected user>`
+- **Result**: [ ] PASS / [ ] FAIL
+
+### RC-08: Frontend Navigation by Role
+- **Input**: Open UI as readonly, reviewer, admin
+- **Expected**:
+	- readonly: no access to Convertir/Revue/Paramètres actions
+	- reviewer: access to Revue and Données maîtres
+	- admin: access to all pages including Paramètres
 - **Result**: [ ] PASS / [ ] FAIL
 
 ---
@@ -92,3 +143,4 @@
 
 All TC-01 through TC-12 must PASS before production cutover.
 TC-13 and TC-14 are required for operational readiness.
+RC-01 through RC-08 must PASS for role-based traceability readiness.

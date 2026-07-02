@@ -16,29 +16,37 @@ env:
   - name: UNB_RECEIVER_GLN
     value: "3015981600108"
   - name: MASTERDATA_SOURCE_DIR
-    value: "/Workspace/Users/rsr1dy@bosch.com/masterdata"
-  - name: APP_ROOT
-    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT"
-  - name: ENGINE_DIR
-    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT"
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/"
   - name: MASTERDATA_RUNTIME_DIR
-    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/masterdata"
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata_runtime"
   - name: OUTBOX_DIR
-    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/outbox"
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox"
   - name: LOG_DIR
-    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/logs"
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs"
   - name: DB_PATH
-    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/edifact_standalone.db"
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db"
   - name: INTAKE_DIR
-    value: "/Workspace/Users/rsr1dy@bosch.com/EDIFACT/data/intake"
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf"
+  - name: PDF_STORAGE_DIR
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf"
   - name: DATABRICKS_MODEL_ENDPOINT
     value: "databricks-gpt-oss-120b"
   - name: EDIFACT_CATALOG
-    value: "hive_metastore"
+    value: "hcdap_prod"
   - name: EDIFACT_SCHEMA
-    value: "file2edi"
+    value: "silver_hcfrdashlog"
+  - name: DATABRICKS_WAREHOUSE_ID
+    value: "607eec0346978542"
+  - name: DEFAULT_APP_ACTOR
+    value: "operator"
+  - name: APP_ADMIN_USERS
+    value: ""
+  - name: APP_REVIEW_USERS
+    value: ""
+  - name: APP_READONLY_USERS
+    value: ""
   # ── Persistence Tier 2 (Workspace JSONL) — no admin required ─────────────
-  # Grant app SP CAN_EDIT on /Users/rsr1dy@bosch.com/EDIFACT/data/persist
+  # Grant app SP CAN_EDIT on chosen Workspace folder (if Tier 2 is enabled)
   # - name: DATABRICKS_PERSIST_PATH
   #   value: "/Users/rsr1dy@bosch.com/EDIFACT/data/persist"
   #

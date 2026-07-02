@@ -20,6 +20,14 @@ export type PartnerFunction = "soldto" | "shipto" | "billto" | "payer";
 
 export type ConnectorStatus = "connected" | "disconnected";
 
+export type AppRole = "admin" | "reviewer" | "readonly" | "operator";
+
+export interface CurrentUser {
+  actor: string;
+  role: AppRole;
+  authenticated: boolean;
+}
+
 export interface SystemHealth {
   api: ConnectorStatus;
   database: ConnectorStatus;

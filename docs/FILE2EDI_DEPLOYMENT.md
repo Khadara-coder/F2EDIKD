@@ -57,8 +57,22 @@ docker compose -f docker-compose.file2edi.yml up --build -d
 ## 4. Databricks Apps deployment
 
 1. Build frontend: `cd frontend && npm run build`
-2. Sync project to workspace: `/Workspace/Users/rsr1dy@bosch.com/EDIFACT`
-3. Deploy via `app.yaml` (command: `uvicorn server:app --port 8000`)
+2. Push to Bosch GitHub repository (main branch)
+3. In Databricks Workspace terminal, clone once then pull updates:
+
+```bash
+git clone https://github.boschdevcloud.com/DIK1DY/F2EDIDK.git
+cd F2EDIDK
+git pull origin main
+```
+
+4. Deploy via `app.yaml` (command: `uvicorn server:app --port 8000`)
+5. Ensure Unity Catalog Volume paths are available:
+    - Masterdata source: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
+    - PDF storage: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf/`
+    - SQLite fallback DB: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db`
+    - Outbox: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox/`
+    - Logs: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs/`
 
 ### Persistence tiers
 
@@ -66,7 +80,7 @@ docker compose -f docker-compose.file2edi.yml up --build -d
 |------|--------|------------|
 | 1 Delta | `DATABRICKS_WAREHOUSE_ID` + UC catalog | Production |
 | 2 JSONL | `DATABRICKS_PERSIST_PATH` | Staging |
-| 3 SQLite | default | Ephemeral (redeploy) |
+| 3 SQLite | `DB_PATH` on UC Volume | Persistent fallback |
 
 Run `scripts/create_delta_tables.sql` once (replace `${CATALOG}` / `${SCHEMA}`).
 
@@ -79,6 +93,12 @@ GRANT CREATE, USAGE ON SCHEMA bci_rbs_prod.file2edi TO `<app-service-principal>`
 ### Required grants (Tier 2)
 
 Workspace folder `/Users/.../EDIFACT/data/persist` → CAN_EDIT for app SP.
+
+### Required grants (UC Volume)
+
+Grant the Databricks App service principal read/write access on:
+
+- `hcdap_prod.silver_hcfrdashlog.f2edi`
 
 ## 5. API endpoints (React frontend)
 

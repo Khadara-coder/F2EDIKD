@@ -2,7 +2,9 @@ version: "3.9"
 
 services:
   api:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.py
     ports:
       - "${APP_PORT:-8088}:8088"
     volumes:
@@ -22,7 +24,9 @@ services:
       start_period: 10s
 
   worker:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.py
     command: python run_worker.py
     volumes:
       - edifact_data:/data

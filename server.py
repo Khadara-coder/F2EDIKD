@@ -68,10 +68,19 @@ LOG_DIR = _ensure_dir(
     os.environ.get("LOG_DIR", str(APP_ROOT / "data" / "logs")),
     "logs",
 )
+PDF_STORAGE_DIR = _ensure_dir(
+    os.environ.get("PDF_STORAGE_DIR", os.environ.get("INTAKE_DIR", str(APP_ROOT / "data" / "intake"))),
+    "intake",
+)
 # DB_PATH must be FUSE-safe: prefer ENGINE_DIR/data, fallback to APP_ROOT/data
 # (matches the same pattern used by OUTBOX_DIR/LOG_DIR)
-_db_dir = _ensure_dir(os.path.join(ENGINE_DIR, "data"), "db")
-DB_PATH = os.path.join(_db_dir, "edifact_standalone.db")
+_db_path_env = (os.environ.get("DB_PATH") or "").strip()
+if _db_path_env:
+    _db_parent = _ensure_dir(str(Path(_db_path_env).parent), "db")
+    DB_PATH = str(Path(_db_parent) / Path(_db_path_env).name)
+else:
+    _db_dir = _ensure_dir(os.path.join(ENGINE_DIR, "data"), "db")
+    DB_PATH = os.path.join(_db_dir, "edifact_standalone.db")
 CONFIG_INI       = os.path.join(ENGINE_DIR, "config.ini")
 UNB_SENDER_GLN   = os.environ.get("UNB_SENDER_GLN",   "4399901876613")
 UNB_RECEIVER_GLN = os.environ.get("UNB_RECEIVER_GLN", "3015981600108")
@@ -99,6 +108,69 @@ def _auth_headers() -> dict:
         return h
     except Exception as exc:
         return {"Content-Type": "application/json", "_auth_error": str(exc)}
+
+
+def _parse_csv_env(name: str) -> set[str]:
+    """Parse a comma-separated env var into a lowercase set."""
+    raw = os.environ.get(name, "")
+    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> str:
+    """Resolve actor identity from payload, headers, then environment fallback."""
+    p = payload or {}
+    actor = (p.get("operator") or p.get("actor") or "").strip()
+    if actor:
+        return actor
+
+    if req is not None:
+        for hk in (
+            "x-forwarded-user",
+            "x-auth-request-user",
+            "x-forwarded-email",
+            "x-ms-client-principal-name",
+            "x-databricks-user",
+            "x-user",
+        ):
+            hv = (req.headers.get(hk) or "").strip()
+            if hv:
+                return hv
+
+    return os.environ.get("DEFAULT_APP_ACTOR", "operator")
+
+
+def _actor_folder_name(actor: str | None) -> str:
+    """Normalize actor into a filesystem-safe folder name."""
+    raw = (actor or "").strip().lower()
+    if not raw:
+        return "operator"
+    raw = raw.replace("\\", "/").split("/")[-1]
+    safe = "".join(ch if (ch.isalnum() or ch in ("-", "_", ".")) else "_" for ch in raw)
+    safe = safe.strip("._-")
+    return safe[:80] or "operator"
+
+
+def _resolve_role(actor: str) -> str:
+    """Resolve a coarse-grained role from env lists for UI routing and auditing."""
+    a = (actor or "").strip().lower()
+    if not a:
+        return "operator"
+    if a in _parse_csv_env("APP_ADMIN_USERS"):
+        return "admin"
+    if a in _parse_csv_env("APP_REVIEW_USERS"):
+        return "reviewer"
+    if a in _parse_csv_env("APP_READONLY_USERS"):
+        return "readonly"
+    return "operator"
+
+
+def _ensure_can_mutate(req: Request | None = None, payload: dict | None = None) -> tuple[str, str]:
+    """Return (actor, role) and raise 403 for roles that cannot mutate state."""
+    actor = _resolve_actor(req, payload)
+    role = _resolve_role(actor)
+    if role == "readonly":
+        raise HTTPException(status_code=403, detail="Votre profil est en lecture seule")
+    return actor, role
 
 
 # ── FILE2EDI engine conversion ─────────────────────────────────────────────────
@@ -199,12 +271,19 @@ def _load_history() -> list[list]:
             ).fetchall()
         except sqlite3.OperationalError:
             try:
+                # Standalone schema variant (src/database.py): source_filename + soldto
                 rows = conn.execute(
-                    "SELECT correlation_id,source_filename,status,order_key,'','',created_at,rejection_code "
-                    "FROM order_ledger ORDER BY created_at DESC LIMIT 100"
+                    "SELECT id,source_filename,status,po_number,soldto,'' as ship_to,created_at,rejection_reason "
+                    "FROM jobs ORDER BY created_at DESC LIMIT 100"
                 ).fetchall()
             except Exception:
-                rows = []
+                try:
+                    rows = conn.execute(
+                        "SELECT correlation_id,source_filename,status,order_key,'','',created_at,rejection_code "
+                        "FROM order_ledger ORDER BY created_at DESC LIMIT 100"
+                    ).fetchall()
+                except Exception:
+                    rows = []
         conn.close()
         return [list(r) for r in rows]
     except Exception as exc:
@@ -318,16 +397,21 @@ def _sync_masterdata() -> list[list]:
     """Copy master data CSVs from source to runtime directory.
 
     Two modes:
-    - Local / Windows: MASTER_DATA_SRC is a readable FUSE/SMB path → shutil.copy2
-    - Container: /Workspace FUSE not mounted → Workspace export REST API
+    - Filesystem copy: local path, /Workspace mounted path, or /Volumes UC path → shutil.copy2
+    - Databricks Workspace API export fallback: only for /Workspace/* when FUSE is not mounted
     """
     rows = []
     src = Path(MASTER_DATA_SRC)
     dst = Path(MASTER_DATA_RUNTIME)
     dst.mkdir(parents=True, exist_ok=True)
 
-    # Detect container mode: /Workspace path is not accessible via FUSE
-    use_api = not (src / _MASTER_FILES[0]).exists()
+    first_source_file = src / _MASTER_FILES[0]
+    src_str = MASTER_DATA_SRC.strip()
+    is_workspace_path = src_str.startswith("/Workspace/")
+
+    # Use Workspace export API only for /Workspace paths when FUSE is unavailable.
+    # UC Volumes (/Volumes/...) must be accessed as regular filesystem paths.
+    use_api = is_workspace_path and not first_source_file.exists()
     log.info("masterdata sync: mode=%s src=%s dst=%s",
              "api" if use_api else "fs", src, dst)
 
@@ -503,11 +587,12 @@ def _f2edi_build_response(structured: dict, filename: str,
     }
 
 
-def _local_process_and_respond(payload: bytes, filename: str) -> dict:
+def _local_process_and_respond(payload: bytes, filename: str, actor: str | None = None) -> dict:
     """Run the full F2EDIV2 pipeline locally. Idempotent via SHA-256 cache."""
     global _f2edi_requests_processed
     import time as _t
     pdf_hash = hashlib.sha256(payload).hexdigest()
+    stored_pdf_path = _persist_uploaded_pdf(payload, filename, pdf_hash, actor=actor)
 
     # Idempotency cache
     hit = _f2edi_cache.get_or_none(pdf_hash)
@@ -515,6 +600,8 @@ def _local_process_and_respond(payload: bytes, filename: str) -> dict:
         r = hit.copy()
         r["cached"] = True
         r["processing_time_s"] = 0.0
+        if stored_pdf_path:
+            r["pdf_storage_path"] = stored_pdf_path
         return r
 
     t0 = _t.time()
@@ -554,8 +641,37 @@ def _local_process_and_respond(payload: bytes, filename: str) -> dict:
 
     if response["status"] == "OK":
         _f2edi_cache.put(pdf_hash, response.copy())
+    if stored_pdf_path:
+        response["pdf_storage_path"] = stored_pdf_path
     _f2edi_requests_processed += 1
     return response
+
+
+def _persist_uploaded_pdf(
+    payload: bytes,
+    filename: str,
+    pdf_hash: Optional[str] = None,
+    actor: str | None = None,
+) -> Optional[str]:
+    """Persist uploaded PDF payload to configured storage for traceability."""
+    if not payload:
+        return None
+    try:
+        original = Path(filename or "commande.pdf").name
+        stem = Path(original).stem or "document"
+        safe_stem = "".join(ch if (ch.isalnum() or ch in ("-", "_")) else "_" for ch in stem)[:80]
+        if not safe_stem:
+            safe_stem = "document"
+        digest = pdf_hash or hashlib.sha256(payload).hexdigest()
+        stamp = _datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        actor_dir = Path(PDF_STORAGE_DIR) / _actor_folder_name(actor)
+        actor_dir.mkdir(parents=True, exist_ok=True)
+        target = actor_dir / f"{stamp}_{digest[:12]}_{safe_stem}.pdf"
+        target.write_bytes(payload)
+        return str(target)
+    except Exception as exc:
+        log.warning("_persist_uploaded_pdf(%s): %s", filename, exc)
+        return None
 
 
 def _store_conversion_history(result: dict) -> None:
@@ -633,9 +749,10 @@ def api_proxy_health():
 
 
 @app.post("/api/proxy/convert-batch")
-async def api_proxy_convert_batch(files: list[UploadFile] = File(...)):
+async def api_proxy_convert_batch(req: Request, files: list[UploadFile] = File(...)):
     """Process multiple PDFs sequentially.  Max 20 files per batch (Issue 5)."""
     MAX_BATCH = 20
+    actor = _resolve_actor(req)
     if not files:
         return JSONResponse(status_code=400, content={"error": "Aucun fichier reçu"})
     if len(files) > MAX_BATCH:
@@ -658,11 +775,11 @@ async def api_proxy_convert_batch(files: list[UploadFile] = File(...)):
                 results.append({"filename": fname, "status": "ERROR",
                                  "error": "Fichier trop volumineux (max 20 Mo)"})
                 continue
-            result = _local_process_and_respond(payload, fname)
+            result = _local_process_and_respond(payload, fname, actor=actor)
             try:
                 _init_db()
                 _upsert_conversion(result)
-                _add_audit(result.get("pdf_hash", "?"), "conversion_created", "system",
+                _add_audit(result.get("pdf_hash", "?"), "conversion_created", actor,
                            {"filename": result.get("filename"), "batch": True})
             except Exception:
                 pass
@@ -675,14 +792,27 @@ async def api_proxy_convert_batch(files: list[UploadFile] = File(...)):
 
 @app.get("/health")
 @app.get("/api/health")
+@app.get("/api/health/system")
 def api_health_alias():
     """Alias for /api/proxy/health — satisfies health checks and legacy frontend calls."""
     return api_proxy_health()
 
 
+@app.get("/api/me")
+def api_me(req: Request):
+    """Return resolved actor + role for profile-aware UI routing."""
+    actor = _resolve_actor(req)
+    return {
+        "actor": actor,
+        "role": _resolve_role(actor),
+        "authenticated": bool(actor and actor != "operator"),
+    }
+
+
 @app.post("/api/proxy/convert")
-async def api_proxy_convert(file: UploadFile = File(...)):
+async def api_proxy_convert(req: Request, file: UploadFile = File(...)):
     """Run the local F2EDIV2 engine on an uploaded PDF."""
+    actor = _resolve_actor(req)
     payload = await file.read()
     if not payload:
         return JSONResponse(status_code=400,
@@ -690,11 +820,11 @@ async def api_proxy_convert(file: UploadFile = File(...)):
     if not (file.filename or "").lower().endswith(".pdf"):
         return JSONResponse(status_code=400,
             content={"status": "ERROR", "error": "Seuls les fichiers PDF sont acceptés"})
-    result = _local_process_and_respond(payload, file.filename or "commande.pdf")
+    result = _local_process_and_respond(payload, file.filename or "commande.pdf", actor=actor)
     try:
         _init_db()
         _upsert_conversion(result)
-        _add_audit(result.get("pdf_hash","?"), "conversion_created", "system",
+        _add_audit(result.get("pdf_hash","?"), "conversion_created", actor,
                    {"filename": result.get("filename"), "decision": result.get("rejection",{}).get("decision")})
     except Exception:
         pass
@@ -760,11 +890,15 @@ def healthz():
 # ── Convert ────────────────────────────────────────────────────────────────────
 @app.post("/api/convert")
 async def api_convert(
+    req: Request,
     file: UploadFile = File(...),
     send_sftp: str = Form("false"),
 ):
+    actor = _resolve_actor(req)
+    payload = await file.read()
+    stored_pdf_path = _persist_uploaded_pdf(payload, file.filename or "order.pdf", actor=actor)
     with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-        tmp.write(await file.read())
+        tmp.write(payload)
         tmp_path = Path(tmp.name)
 
     corr_id = str(uuid.uuid4())[:8]
@@ -815,6 +949,7 @@ async def api_convert(
                 "pdf_text_preview": text_preview,
                 "text_method": text_method,
                 "correlation_id": corr_id,
+                "pdf_storage_path": stored_pdf_path,
                 "rejection_reason": "",
             })
 
@@ -836,6 +971,7 @@ async def api_convert(
                 "pdf_text_preview": text_preview,
                 "text_method": text_method,
                 "correlation_id": corr_id,
+                "pdf_storage_path": stored_pdf_path,
                 "rejection_reason": "",
             })
 
@@ -849,6 +985,7 @@ async def api_convert(
             "pdf_text_preview": text_preview,
             "text_method": text_method,
             "correlation_id": corr_id,
+            "pdf_storage_path": stored_pdf_path,
             "rejection_reason": leg.get("error") or f2e.get("error",""),
         })
 
@@ -885,13 +1022,17 @@ class ExtractTextRequest(BaseModel):
 
 @app.post("/api/extract")
 async def api_extract(
+    req: Request,
     file: Optional[UploadFile] = File(None),
     request: Optional[ExtractTextRequest] = None,
 ):
     # PDF path takes priority
     if file is not None:
+        actor = _resolve_actor(req)
+        payload = await file.read()
+        stored_pdf_path = _persist_uploaded_pdf(payload, file.filename or "order.pdf", actor=actor)
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(await file.read())
+            tmp.write(payload)
             tmp_path = Path(tmp.name)
         try:
             f2e = _file2edi_convert(tmp_path)
@@ -899,6 +1040,7 @@ async def api_extract(
                 "ok": True,
                 "result": f2e["structured"],
                 "status": f"FILE2EDI FullCodeEngine | PO {f2e.get('po_number','?')} | SOLDTO {f2e.get('soldto','?')}",
+                "pdf_storage_path": stored_pdf_path,
             })
         finally:
             try:
@@ -2446,6 +2588,7 @@ async def api_generate(cid: str, req: Request):
         request = await req.json()
     except Exception:
         request = {}
+    actor, _ = _ensure_can_mutate(req, request)
 
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
@@ -2505,7 +2648,7 @@ async def api_generate(cid: str, req: Request):
             "message": "Cache articles vide — les codes MATNR ne peuvent pas être validés.",
         })
     if md_blockers:
-        save_audit_event(cid, "edifact_generation_failed", "system",
+        save_audit_event(cid, "edifact_generation_failed", actor,
                          {"reason": "masterdata_missing", "blockers": md_blockers})
         return {
             "conversion_id": cid,
@@ -2572,7 +2715,7 @@ async def api_generate(cid: str, req: Request):
         }
         edi_msg = build_orders_message(order_dict, resolved_lines, soldto_row, shipto_row)
     except Exception as e:
-        _add_audit(cid, "edifact_generation_failed", "system", {"error": str(e)}, "FAILED")
+        _add_audit(cid, "edifact_generation_failed", actor, {"error": str(e)}, "FAILED")
         return JSONResponse(status_code=422, content={
             "conversion_id": cid, "status": "FAILED",
             "generated": False, "error": str(e)
@@ -2612,7 +2755,7 @@ async def api_generate(cid: str, req: Request):
         log.warning("DB update after generate failed: %s", e)
 
     # ── Audit ─────────────────────────────────────────────────────────────
-    _add_audit(cid, "edifact_regenerated_from_review", "operator", {
+    _add_audit(cid, "edifact_regenerated_from_review", actor, {
         "po_number": po_number, "soldto": soldto_code, "shipto": shipto_code,
         "line_count": len(resolved_lines), "skipped": len(skipped_lines),
         "tst_filename": tst_fname, "checklist_passed": all_required_pass,
@@ -2752,17 +2895,18 @@ async def api_approve(cid: str, req: Request):
         request = await req.json()
     except Exception:
         request = {}
+    actor, _ = _ensure_can_mutate(req, request)
     _init_db()
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.execute(
             "UPDATE conversions SET status='ACCEPTED',delivery_status='READY_FOR_DOWNLOAD',"
             "operator=?,corrections_json=?,updated_at=datetime('now') WHERE id=?",
-            [request.get("operator","operator"),
+            [actor,
              _json.dumps(request.get("corrections",{})), cid]
         )
         conn.commit(); conn.close()
-        _add_audit(cid, "user_approved", request.get("operator","operator"),
+        _add_audit(cid, "user_approved", actor,
                    request, "ACCEPTED")
         return {"ok": True, "status": "ACCEPTED"}
     except Exception as e:
@@ -2777,6 +2921,7 @@ async def api_reject(cid: str, req: Request):
         request = await req.json()
     except Exception:
         request = {}
+    actor, _ = _ensure_can_mutate(req, request)
     _init_db()
     try:
         code = request.get("rejection_code","MANUAL_REJECTION")
@@ -2785,10 +2930,10 @@ async def api_reject(cid: str, req: Request):
         conn.execute(
             "UPDATE conversions SET status='REJECTED',rejection_code=?,rejection_message=?,"
             "operator=?,updated_at=datetime('now') WHERE id=?",
-            [code, msg, request.get("operator","operator"), cid]
+            [code, msg, actor, cid]
         )
         conn.commit(); conn.close()
-        _add_audit(cid, "user_rejected", request.get("operator","operator"),
+        _add_audit(cid, "user_rejected", actor,
                    request, "REJECTED")
         return {"ok": True, "status": "REJECTED"}
     except Exception as e:
@@ -2803,6 +2948,7 @@ async def api_save_review(cid: str, req: Request):
         request = await req.json()
     except Exception:
         request = {}
+    actor, _ = _ensure_can_mutate(req, request)
     _init_db()
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
@@ -2810,11 +2956,11 @@ async def api_save_review(cid: str, req: Request):
             "UPDATE conversions SET corrections_json=?,operator=?,"
             "po_number=COALESCE(?,po_number),updated_at=datetime('now') WHERE id=?",
             [_json.dumps(request.get("corrections",{})),
-             request.get("operator","operator"),
+             actor,
              request.get("po_number"), cid]
         )
         conn.commit(); conn.close()
-        _add_audit(cid, "user_corrected", request.get("operator","operator"), request)
+        _add_audit(cid, "user_corrected", actor, request)
         return {"ok": True}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -2858,9 +3004,10 @@ def api_sftp_status():
 
 
 @app.post("/api/conversions/{cid}/send-sftp")
-def api_send_sftp(cid: str):
+def api_send_sftp(cid: str, req: Request):
     """Send the .tst file for this conversion via SFTP."""
     _init_db()
+    actor, _ = _ensure_can_mutate(req)
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
         row = conn.execute(
@@ -2878,7 +3025,7 @@ def api_send_sftp(cid: str):
         ok, msg = _test_sftp()  # quick connectivity test
         if not ok:
             _upsert_sftp_status(cid, "SFTP_FAILED", msg)
-            _add_audit(cid, "sftp_failed", "system", {"tst_filename": tst_filename}, msg)
+            _add_audit(cid, "sftp_failed", actor, {"tst_filename": tst_filename}, msg)
             return {"ok": False, "error": msg}
         # Use paramiko to upload
         try:
@@ -2895,11 +3042,11 @@ def api_send_sftp(cid: str):
             sftp.put(str(tst_path), remote)
             sftp.close(); client.close()
             _upsert_sftp_status(cid, "SFTP_DELIVERED", remote)
-            _add_audit(cid, "sftp_sent", "system", {"remote": remote}, "SFTP_DELIVERED")
+            _add_audit(cid, "sftp_sent", actor, {"remote": remote}, "SFTP_DELIVERED")
             return {"ok": True, "remote_path": remote}
         except Exception as e:
             _upsert_sftp_status(cid, "SFTP_FAILED", str(e))
-            _add_audit(cid, "sftp_failed", "system", {}, str(e))
+            _add_audit(cid, "sftp_failed", actor, {}, str(e))
             return {"ok": False, "error": str(e)}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -2980,6 +3127,7 @@ async def api_send_rejection_email(cid: str, req: Request):
         request = await req.json()
     except Exception:
         request = {}
+    actor, _ = _ensure_can_mutate(req, request)
     _init_db()
     smtp_host = os.environ.get("SMTP_HOST","")
     if not smtp_host:
@@ -3002,10 +3150,10 @@ async def api_send_rejection_email(cid: str, req: Request):
             [cid]
         )
         conn.commit(); conn.close()
-        _add_audit(cid, "rejection_email_sent", "operator", request, "EMAIL_SENT")
+        _add_audit(cid, "rejection_email_sent", actor, request, "EMAIL_SENT")
         return {"ok": True, "status": "EMAIL_SENT"}
     except Exception as e:
-        _add_audit(cid, "rejection_email_failed", "system", {}, str(e))
+        _add_audit(cid, "rejection_email_failed", actor, {}, str(e))
         return {"ok": False, "status": "EMAIL_FAILED", "error": str(e)}
 
 
@@ -3069,10 +3217,11 @@ async def api_add_audit_event(cid: str, req: Request):
         body = await req.json()
     except Exception:
         body = {}
+    actor, _ = _ensure_can_mutate(req, body)
     save_audit_event(
         cid,
         body.get("event_type", "operator_action"),
-        body.get("actor", "operator"),
+        actor,
         body.get("payload"),
         body.get("result"),
     )

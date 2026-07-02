@@ -82,7 +82,7 @@ python src/edifact_orders_engine.py --analyse-n8n-only
 
 ## Master Data
 
-Authoritative source: `/Workspace/Users/rsr1dy@bosch.com/masterdata/`
+Authoritative source (Databricks prod): `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
 
 | File | Role |
 |---|---|

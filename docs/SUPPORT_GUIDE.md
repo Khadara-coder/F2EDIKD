@@ -25,7 +25,7 @@
 ## Master Data Refresh
 
 When master data is updated in the `RSR1DY/masterdata` repository:
-1. Sync files to `/Workspace/Users/rsr1dy@bosch.com/masterdata/`
+1. Sync files to `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
 2. The engine picks them up on next run automatically
 3. No restart required
 

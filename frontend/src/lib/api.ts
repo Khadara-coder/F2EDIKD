@@ -1,4 +1,5 @@
 import type {
+  CurrentUser,
   AppSettings,
   ConversionHistoryItem,
   DashboardMetrics,
@@ -52,6 +53,8 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getCurrentUser: () => request<CurrentUser>("/me"),
+
   getSystemHealth: () => request<SystemHealth>("/health/system"),
 
   getDashboardMetrics: () => request<DashboardMetrics>("/dashboard/metrics"),
