@@ -3,10 +3,8 @@ import { api } from "@/lib/api";
 import type { AppRole } from "@/types";
 
 export const ROLE_RANK: Record<AppRole, number> = {
-  readonly: 0,
-  reviewer: 1,
-  operator: 2,
-  admin: 3,
+  adv: 0,
+  admin: 1,
 };
 
 export function useCurrentUser() {

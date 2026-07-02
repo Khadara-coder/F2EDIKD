@@ -41,10 +41,6 @@ env:
     value: "operator"
   - name: APP_ADMIN_USERS
     value: "dik1dy@bosch.com,dik1dy,khadara"
-  - name: APP_REVIEW_USERS
-    value: ""
-  - name: APP_READONLY_USERS
-    value: ""
   - name: APP_REQUIRE_AUTH
     value: "true"
   # ── Persistence Tier 2 (Workspace JSONL) — no admin required ─────────────

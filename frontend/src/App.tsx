@@ -30,7 +30,7 @@ function GuardedRoute({ minRole, children }: { minRole: AppRole; children: JSX.E
   }
 
   if (!hasAtLeastRole(me?.role, minRole)) {
-    return <Navigate to="/" replace />;
+    return <Navigate to={me?.role === "admin" ? "/" : "/convertir"} replace />;
   }
 
   return children;
@@ -84,11 +84,14 @@ function AppContent() {
     <BrowserRouter>
       <PageContainer>
         <Routes>
-          <Route path="/" element={<CockpitPage />} />
+          <Route
+            path="/"
+            element={meQuery.data?.role === "admin" ? <CockpitPage /> : <Navigate to="/convertir" replace />}
+          />
           <Route
             path="/convertir"
             element={
-              <GuardedRoute minRole="operator">
+              <GuardedRoute minRole="adv">
                 <ConvertirPage />
               </GuardedRoute>
             }
@@ -96,7 +99,7 @@ function AppContent() {
           <Route
             path="/revue"
             element={
-              <GuardedRoute minRole="reviewer">
+              <GuardedRoute minRole="adv">
                 <Outlet />
               </GuardedRoute>
             }
@@ -104,11 +107,18 @@ function AppContent() {
             <Route index element={<RevueListPage />} />
             <Route path=":orderId" element={<RevuePage />} />
           </Route>
-          <Route path="/historique" element={<HistoriquePage />} />
+          <Route
+            path="/historique"
+            element={
+              <GuardedRoute minRole="adv">
+                <HistoriquePage />
+              </GuardedRoute>
+            }
+          />
           <Route
             path="/donnees-maitres"
             element={
-              <GuardedRoute minRole="reviewer">
+              <GuardedRoute minRole="admin">
                 <DonneesMaitresPage />
               </GuardedRoute>
             }

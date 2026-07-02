@@ -15,11 +15,11 @@ import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 
 const navItems = [
-  { to: "/", icon: Home, label: "Cockpit", minRole: "readonly" as AppRole },
-  { to: "/convertir", icon: Upload, label: "Convertir", minRole: "operator" as AppRole },
-  { to: "/revue", icon: FileText, label: "Revue", badgeFromApi: true, minRole: "reviewer" as AppRole },
-  { to: "/historique", icon: Clock, label: "Historique", minRole: "readonly" as AppRole },
-  { to: "/donnees-maitres", icon: Database, label: "Données maîtres", minRole: "reviewer" as AppRole },
+  { to: "/", icon: Home, label: "Cockpit", minRole: "admin" as AppRole },
+  { to: "/convertir", icon: Upload, label: "Convertir", minRole: "adv" as AppRole },
+  { to: "/revue", icon: FileText, label: "Revue", badgeFromApi: true, minRole: "adv" as AppRole },
+  { to: "/historique", icon: Clock, label: "Historique", minRole: "adv" as AppRole },
+  { to: "/donnees-maitres", icon: Database, label: "Données maîtres", minRole: "admin" as AppRole },
   { to: "/parametres", icon: Settings, label: "Paramètres", minRole: "admin" as AppRole },
 ];
 
@@ -31,7 +31,7 @@ export function Sidebar() {
     refetchInterval: 60_000,
   });
   const reviewCount = queue?.length ?? 0;
-  const role = me?.role ?? "operator";
+  const role = me?.role ?? "adv";
   const visibleNavItems = navItems.filter((item) => hasAtLeastRole(role, item.minRole));
   const initials = (me?.actor || "OP")
     .split(/[\s@._-]+/)
@@ -93,7 +93,7 @@ export function Sidebar() {
             {initials}
           </div>
           <div>
-            <p className="text-sm font-medium text-white">{me?.actor || "operator"}</p>
+            <p className="text-sm font-medium text-white">{me?.actor || "adv"}</p>
             <p className="text-xs text-slate-400">{role.toUpperCase()} · File2EDI V2</p>
           </div>
         </div>

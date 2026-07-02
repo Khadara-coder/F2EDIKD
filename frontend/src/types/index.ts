@@ -20,7 +20,7 @@ export type PartnerFunction = "soldto" | "shipto" | "billto" | "payer";
 
 export type ConnectorStatus = "connected" | "disconnected";
 
-export type AppRole = "admin" | "reviewer" | "readonly" | "operator";
+export type AppRole = "admin" | "adv";
 
 export interface CurrentUser {
   actor: string;

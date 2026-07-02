@@ -225,25 +225,27 @@ def _actor_folder_name(actor: str | None) -> str:
 
 
 def _resolve_role(actor: str) -> str:
-    """Resolve a coarse-grained role from env lists for UI routing and auditing."""
+    """Resolve role with the 2-role model: admin or adv.
+
+    Legacy vars APP_REVIEW_USERS / APP_READONLY_USERS are treated as adv.
+    """
     a = (actor or "").strip().lower()
-    if not a:
-        return "operator"
     if a in _parse_csv_env("APP_ADMIN_USERS"):
         return "admin"
-    if a in _parse_csv_env("APP_REVIEW_USERS"):
-        return "reviewer"
-    if a in _parse_csv_env("APP_READONLY_USERS"):
-        return "readonly"
-    return "operator"
+    # Keep short-term backward compatibility for existing env configs.
+    legacy_adv = _parse_csv_env("APP_REVIEW_USERS") | _parse_csv_env("APP_READONLY_USERS")
+    if not a or a in legacy_adv:
+        return "adv"
+    return "adv"
 
 
 def _ensure_can_mutate(req: Request | None = None, payload: dict | None = None) -> tuple[str, str]:
-    """Return (actor, role) and raise 403 for roles that cannot mutate state."""
+    """Return (actor, role) for mutation endpoints.
+
+    In the current 2-role model, both admin and adv can mutate domain data.
+    """
     actor = _resolve_actor(req, payload)
     role = _resolve_role(actor)
-    if role == "readonly":
-        raise HTTPException(status_code=403, detail="Votre profil est en lecture seule")
     return actor, role
 
 
@@ -564,6 +566,9 @@ _PUBLIC_API_PATHS = {
     "/health",
     "/healthz",
 }
+
+if os.environ.get("APP_REVIEW_USERS") or os.environ.get("APP_READONLY_USERS"):
+    log.warning("RBAC: APP_REVIEW_USERS / APP_READONLY_USERS are deprecated and now mapped to role=adv")
 
 
 @app.middleware("http")
@@ -901,7 +906,7 @@ def api_health_alias():
 def api_me(req: Request):
     """Return resolved actor + role for profile-aware UI routing."""
     actor = _resolve_actor(req)
-    authenticated = (not _APP_REQUIRE_AUTH) or bool(actor and actor != "operator")
+    authenticated = (not _APP_REQUIRE_AUTH) or bool(actor)
     return {
         "actor": actor,
         "role": _resolve_role(actor),
