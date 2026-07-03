@@ -21,11 +21,33 @@ def _now() -> str:
 
 class File2EdiStore:
     def __init__(self, db_path: str, intake_dir: str) -> None:
-        self.db_path = db_path
         allow_local_fallback = (
             os.environ.get("FILE2EDI_ALLOW_LOCAL_FALLBACK", "true").strip().lower()
             in {"1", "true", "yes", "on"}
         )
+        app_root = Path(__file__).resolve().parents[2]
+
+        requested_db = Path(db_path)
+        try:
+            requested_db.parent.mkdir(parents=True, exist_ok=True)
+            test_conn = sqlite3.connect(str(requested_db), timeout=5)
+            test_conn.close()
+            self.db_path = str(requested_db)
+        except (PermissionError, OSError, sqlite3.Error) as exc:
+            if not allow_local_fallback:
+                raise RuntimeError(
+                    f"File2EDI db path unavailable and local fallback disabled: {db_path}"
+                ) from exc
+            local_db = app_root / "data" / "file2edi.db"
+            local_db.parent.mkdir(parents=True, exist_ok=True)
+            self.db_path = str(local_db)
+            _LOG.warning(
+                "file2edi db fallback active: preferred=%s fallback=%s reason=%s",
+                db_path,
+                local_db,
+                exc,
+            )
+
         requested_intake = Path(intake_dir)
         try:
             requested_intake.mkdir(parents=True, exist_ok=True)
@@ -35,7 +57,6 @@ class File2EdiStore:
                 raise RuntimeError(
                     f"File2EDI intake path unavailable and local fallback disabled: {intake_dir}"
                 ) from exc
-            app_root = Path(__file__).resolve().parents[2]
             local_intake = app_root / "data" / "intake"
             local_intake.mkdir(parents=True, exist_ok=True)
             self.intake_dir = local_intake
