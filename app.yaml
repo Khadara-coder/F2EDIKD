@@ -32,9 +32,9 @@ env:
   - name: PDF_STORAGE_DIR
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf"
   - name: ALLOW_LOCAL_STORAGE_FALLBACK
-    value: "false"
+    value: "true"
   - name: FILE2EDI_ALLOW_LOCAL_FALLBACK
-    value: "false"
+    value: "true"
   - name: DATABRICKS_MODEL_ENDPOINT
     value: "databricks-gpt-oss-120b"
   - name: EDIFACT_CATALOG
