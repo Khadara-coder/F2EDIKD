@@ -40,15 +40,30 @@ for _p in (str(APP_ROOT), str(SRC_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
+_ALLOW_LOCAL_STORAGE_FALLBACK = (
+    os.environ.get("ALLOW_LOCAL_STORAGE_FALLBACK", "true").strip().lower()
+    in {"1", "true", "yes", "on"}
+)
+
 
 # ── Dir helper (FUSE-safe fallback for /Workspace paths in container) ──────────
 def _ensure_dir(preferred: str, fallback_name: str) -> str:
     try:
         Path(preferred).mkdir(parents=True, exist_ok=True)
         return preferred
-    except (PermissionError, OSError):
+    except (PermissionError, OSError) as exc:
+        if not _ALLOW_LOCAL_STORAGE_FALLBACK:
+            raise RuntimeError(
+                f"Storage path unavailable and local fallback disabled: {preferred}"
+            ) from exc
         local = APP_ROOT / "data" / fallback_name
         local.mkdir(parents=True, exist_ok=True)
+        log.warning(
+            "storage fallback active: preferred=%s fallback=%s reason=%s",
+            preferred,
+            local,
+            exc,
+        )
         return str(local)
 
 
@@ -93,6 +108,23 @@ AI_ENDPOINT_URL  = f"{DATABRICKS_HOST.rstrip('/')}/serving-endpoints/{MODEL_ENDP
 
 # Set MASTER_DATA_DIR for app/masterdata.py (read at import time)
 os.environ.setdefault("MASTER_DATA_DIR", MASTER_DATA_RUNTIME)
+
+
+def _storage_runtime_diagnostics() -> dict:
+    return {
+        "allow_local_storage_fallback": _ALLOW_LOCAL_STORAGE_FALLBACK,
+        "paths": {
+            "masterdata_source": MASTER_DATA_SRC,
+            "masterdata_runtime": MASTER_DATA_RUNTIME,
+            "outbox": OUTBOX_DIR,
+            "logs": LOG_DIR,
+            "pdf_storage": PDF_STORAGE_DIR,
+            "db_path_effective": DB_PATH,
+            "db_path_requested": _db_path_env or None,
+            "file2edi_db_path_env": os.environ.get("FILE2EDI_DB_PATH") or None,
+            "intake_dir_env": os.environ.get("INTAKE_DIR") or None,
+        },
+    }
 
 
 # ── Environment detection (local dev vs Databricks Apps) ───────────────────────
@@ -1007,6 +1039,7 @@ def api_proxy_health():
             "locked": True,
         },
         "storage_mode": storage,
+        "storage_runtime": _storage_runtime_diagnostics(),
         # ── Legacy flat fields (backward compat) ───────────────────────────
         "local":           {"status": "ok", "profile": "ELM_STANDARD",
                             "sender_gln": UNB_SENDER_GLN, "receiver_gln": UNB_RECEIVER_GLN},
@@ -1112,6 +1145,7 @@ def api_me_debug(req: Request):
         "is_databricks": IS_DATABRICKS,
         "require_auth": _APP_REQUIRE_AUTH,
         "profile_login_enabled": ENABLE_PROFILE_LOGIN,
+        "storage_runtime": _storage_runtime_diagnostics(),
     }
 
 
