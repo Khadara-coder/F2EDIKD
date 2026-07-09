@@ -8,6 +8,7 @@ API:    /api/*
 from __future__ import annotations
 
 import hashlib
+import hmac
 from collections import OrderedDict
 import json
 import logging
@@ -40,30 +41,15 @@ for _p in (str(APP_ROOT), str(SRC_ROOT)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 
-_ALLOW_LOCAL_STORAGE_FALLBACK = (
-    os.environ.get("ALLOW_LOCAL_STORAGE_FALLBACK", "true").strip().lower()
-    in {"1", "true", "yes", "on"}
-)
-
 
 # ── Dir helper (FUSE-safe fallback for /Workspace paths in container) ──────────
 def _ensure_dir(preferred: str, fallback_name: str) -> str:
     try:
         Path(preferred).mkdir(parents=True, exist_ok=True)
         return preferred
-    except (PermissionError, OSError) as exc:
-        if not _ALLOW_LOCAL_STORAGE_FALLBACK:
-            raise RuntimeError(
-                f"Storage path unavailable and local fallback disabled: {preferred}"
-            ) from exc
+    except (PermissionError, OSError):
         local = APP_ROOT / "data" / fallback_name
         local.mkdir(parents=True, exist_ok=True)
-        log.warning(
-            "storage fallback active: preferred=%s fallback=%s reason=%s",
-            preferred,
-            local,
-            exc,
-        )
         return str(local)
 
 
@@ -108,23 +94,6 @@ AI_ENDPOINT_URL  = f"{DATABRICKS_HOST.rstrip('/')}/serving-endpoints/{MODEL_ENDP
 
 # Set MASTER_DATA_DIR for app/masterdata.py (read at import time)
 os.environ.setdefault("MASTER_DATA_DIR", MASTER_DATA_RUNTIME)
-
-
-def _storage_runtime_diagnostics() -> dict:
-    return {
-        "allow_local_storage_fallback": _ALLOW_LOCAL_STORAGE_FALLBACK,
-        "paths": {
-            "masterdata_source": MASTER_DATA_SRC,
-            "masterdata_runtime": MASTER_DATA_RUNTIME,
-            "outbox": OUTBOX_DIR,
-            "logs": LOG_DIR,
-            "pdf_storage": PDF_STORAGE_DIR,
-            "db_path_effective": DB_PATH,
-            "db_path_requested": _db_path_env or None,
-            "file2edi_db_path_env": os.environ.get("FILE2EDI_DB_PATH") or None,
-            "intake_dir_env": os.environ.get("INTAKE_DIR") or None,
-        },
-    }
 
 
 # ── Environment detection (local dev vs Databricks Apps) ───────────────────────
@@ -181,6 +150,19 @@ def _parse_csv_env(name: str) -> set[str]:
     """Parse a comma-separated env var into a lowercase set."""
     raw = os.environ.get(name, "")
     return {x.strip().lower() for x in raw.split(",") if x.strip()}
+
+
+def _parse_secret_env(name: str) -> list[str]:
+    """Parse a comma-separated env var without altering secret casing."""
+    raw = os.environ.get(name, "")
+    if not raw:
+        return []
+    values: list[str] = []
+    for part in raw.replace(";", ",").split(","):
+        token = part.strip()
+        if token and token not in values:
+            values.append(token)
+    return values
 
 
 def _normalize_actor_identity(value: str | None) -> str:
@@ -256,6 +238,47 @@ def _profile_session_role(req: Request | None) -> str:
     return role if role in {"admin", "adv"} else ""
 
 
+def _api_key_values() -> list[str]:
+    """Return configured machine-to-machine API keys."""
+    values = _parse_secret_env("APP_API_KEYS")
+    if not values:
+        values = _parse_secret_env("N8N_API_KEY")
+    return values
+
+
+def _api_key_actor() -> str:
+    actor = _normalize_actor_identity(os.environ.get("APP_API_ACTOR", "n8n"))
+    return actor or "n8n"
+
+
+def _api_key_role() -> str:
+    role = (os.environ.get("APP_API_ROLE") or "adv").strip().lower()
+    return role if role in {"admin", "adv"} else "adv"
+
+
+def _extract_api_key(req: Request | None) -> str:
+    """Extract machine API key from headers."""
+    if req is None:
+        return ""
+    api_key = (req.headers.get("x-api-key") or "").strip()
+    if api_key:
+        return api_key
+    auth = (req.headers.get("authorization") or "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    return ""
+
+
+def _api_key_authenticated(req: Request | None) -> bool:
+    provided = _extract_api_key(req)
+    if not provided:
+        return False
+    for expected in _api_key_values():
+        if hmac.compare_digest(provided, expected):
+            return True
+    return False
+
+
 def _extract_actor_from_request(req: Request | None) -> str:
     """Extract actor from trusted upstream headers only (no fallback)."""
     if req is None:
@@ -321,6 +344,9 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
     if actor_hdr:
         return actor_hdr
 
+    if _api_key_authenticated(req):
+        return _api_key_actor()
+
     # Local dev: no SSO proxy injects headers, so fall back to DEV_ACTOR to
     # mirror the authenticated identity/role you would have on Databricks.
     if IS_LOCAL and DEV_ACTOR:
@@ -366,6 +392,8 @@ def _resolve_role_for_request(actor: str, req: Request | None = None) -> str:
     session_role = _profile_session_role(req)
     if session_role:
         return session_role
+    if _api_key_authenticated(req):
+        return _api_key_role()
     return _resolve_role(actor)
 
 
@@ -732,6 +760,7 @@ class ProfileLoginPayload(BaseModel):
 def api_auth_modes():
     """Expose available login mechanisms for the login page."""
     return {
+        "api_key_enabled": bool(_api_key_values()),
         "profile_login_enabled": ENABLE_PROFILE_LOGIN,
         "workspace_sso_available": True,
         "allowed_roles": ["admin", "adv"],
@@ -1039,7 +1068,6 @@ def api_proxy_health():
             "locked": True,
         },
         "storage_mode": storage,
-        "storage_runtime": _storage_runtime_diagnostics(),
         # ── Legacy flat fields (backward compat) ───────────────────────────
         "local":           {"status": "ok", "profile": "ELM_STANDARD",
                             "sender_gln": UNB_SENDER_GLN, "receiver_gln": UNB_RECEIVER_GLN},
@@ -1052,7 +1080,7 @@ def api_proxy_health():
 
 
 @app.post("/api/proxy/convert-batch")
-async def api_proxy_convert_batch(req: Request, files: list[UploadFile] = File(...)):
+async def api_proxy_convert_batch(req: Request, files: list[UploadFile] = File(...), callback_url: str = Form("")):
     """Process multiple PDFs sequentially.  Max 20 files per batch (Issue 5)."""
     MAX_BATCH = 20
     actor = _resolve_actor(req)
@@ -1063,6 +1091,7 @@ async def api_proxy_convert_batch(req: Request, files: list[UploadFile] = File(.
             content={"error": f"Maximum {MAX_BATCH} fichiers PDF par lot",
                      "count": len(files)})
     results = []
+    safe_callback_url = _sanitize_callback_url(callback_url)
     for f in files:
         fname = f.filename or "commande.pdf"
         try:
@@ -1081,9 +1110,11 @@ async def api_proxy_convert_batch(req: Request, files: list[UploadFile] = File(.
             result = _local_process_and_respond(payload, fname, actor=actor)
             try:
                 _init_db()
-                _upsert_conversion(result)
+                _upsert_conversion(result, callback_url=safe_callback_url)
                 _add_audit(result.get("pdf_hash", "?"), "conversion_created", actor,
                            {"filename": result.get("filename"), "batch": True})
+                _emit_conversion_callback(result.get("pdf_hash", "?"), "conversion_created", actor,
+                                          {"filename": result.get("filename"), "batch": True})
             except Exception:
                 pass
             results.append(result)
@@ -1136,8 +1167,9 @@ def api_me_debug(req: Request):
     return {
         "actor": actor,
         "role": _resolve_role_for_request(actor, req),
-        "role_source": "session" if session_role else ("db_override" if db_role else "env_match" if actor in _parse_csv_env("APP_ADMIN_USERS") else "default_adv"),
+        "role_source": "session" if session_role else ("api_key" if _api_key_authenticated(req) else ("db_override" if db_role else "env_match" if actor in _parse_csv_env("APP_ADMIN_USERS") else "default_adv")),
         "session_role": session_role or None,
+        "api_key_authenticated": _api_key_authenticated(req),
         "db_role": db_role,
         "in_admin_users": actor in _parse_csv_env("APP_ADMIN_USERS"),
         "admin_users_set": admin_set,
@@ -1145,12 +1177,11 @@ def api_me_debug(req: Request):
         "is_databricks": IS_DATABRICKS,
         "require_auth": _APP_REQUIRE_AUTH,
         "profile_login_enabled": ENABLE_PROFILE_LOGIN,
-        "storage_runtime": _storage_runtime_diagnostics(),
     }
 
 
 @app.post("/api/proxy/convert")
-async def api_proxy_convert(req: Request, file: UploadFile = File(...)):
+async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback_url: str = Form("")):
     """Run the local F2EDIV2 engine on an uploaded PDF."""
     actor = _resolve_actor(req)
     payload = await file.read()
@@ -1161,11 +1192,15 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...)):
         return JSONResponse(status_code=400,
             content={"status": "ERROR", "error": "Seuls les fichiers PDF sont acceptés"})
     result = _local_process_and_respond(payload, file.filename or "commande.pdf", actor=actor)
+    safe_callback_url = _sanitize_callback_url(callback_url)
     try:
         _init_db()
-        _upsert_conversion(result)
+        _upsert_conversion(result, callback_url=safe_callback_url)
         _add_audit(result.get("pdf_hash","?"), "conversion_created", actor,
                    {"filename": result.get("filename"), "decision": result.get("rejection",{}).get("decision")})
+        _emit_conversion_callback(result.get("pdf_hash", "?"), "conversion_created", actor,
+                                  {"filename": result.get("filename"),
+                                   "decision": result.get("rejection", {}).get("decision")})
     except Exception:
         pass
     return result
@@ -1787,6 +1822,7 @@ CONV_SCHEMA = """
 CREATE TABLE IF NOT EXISTS conversions (
   id                     TEXT PRIMARY KEY,
   correlation_id         TEXT,
+    callback_url           TEXT,
   source_filename        TEXT NOT NULL,
   pdf_hash               TEXT,
   status                 TEXT NOT NULL DEFAULT 'PROCESSING',
@@ -1848,6 +1884,9 @@ def _init_db() -> None:
         Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.executescript(CONV_SCHEMA)
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(conversions)").fetchall()}
+        if "callback_url" not in cols:
+            conn.execute("ALTER TABLE conversions ADD COLUMN callback_url TEXT")
         conn.commit()
         conn.close()
     except Exception as e:
@@ -1870,6 +1909,67 @@ def _add_audit(conversion_id: str, event_type: str,
         conn.close()
     except Exception as e:
         log.warning("_add_audit(%s,%s): %s", conversion_id, event_type, e)
+
+
+def _sanitize_callback_url(raw: str | None) -> str | None:
+    value = (raw or "").strip()
+    if not value:
+        return None
+    if value.startswith("http://") or value.startswith("https://"):
+        return value
+    return None
+
+
+def _load_conversion_callback_context(conversion_id: str) -> dict | None:
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.row_factory = sqlite3.Row
+        row = conn.execute(
+            "SELECT id,correlation_id,callback_url,source_filename,pdf_hash,status,business_status,"
+            "delivery_status,po_number,soldto,shipto,tst_filename,sftp_status,email_status,"
+            "rejection_code,rejection_message,created_at,updated_at "
+            "FROM conversions WHERE id=?",
+            [conversion_id],
+        ).fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception as exc:
+        log.warning("_load_conversion_callback_context(%s): %s", conversion_id, exc)
+        return None
+
+
+def _emit_conversion_callback(conversion_id: str, event_type: str, actor: str = "system",
+                              payload: dict | None = None) -> None:
+    context = _load_conversion_callback_context(conversion_id)
+    if not context:
+        return
+    callback_url = _sanitize_callback_url(context.get("callback_url"))
+    if not callback_url:
+        return
+    body = {
+        "event_type": event_type,
+        "actor": actor,
+        "conversion": context,
+        "payload": payload or {},
+        "emitted_at": datetime.now(timezone.utc).isoformat(),
+    }
+    try:
+        import requests as _req
+        resp = _req.post(callback_url, json=body, timeout=10)
+        resp.raise_for_status()
+    except Exception as exc:
+        log.warning("conversion callback failed for %s -> %s: %s", conversion_id, callback_url, exc)
+        _add_audit(conversion_id, "callback_failed", actor, {
+            "callback_url": callback_url,
+            "event_type": event_type,
+            "error": str(exc),
+        }, "CALLBACK_FAILED")
+    else:
+        _add_audit(conversion_id, "callback_sent", actor, {
+            "callback_url": callback_url,
+            "event_type": event_type,
+            "http_status": resp.status_code,
+        }, "CALLBACK_SENT")
 
 
 
@@ -2577,7 +2677,7 @@ def _ws_write_migration_sentinel(
 # ── end PERSISTENCE ADAPTER ───────────────────────────────────────────────────
 
 
-def _upsert_conversion(data: dict) -> None:
+def _upsert_conversion(data: dict, callback_url: str | None = None) -> None:
     """Insert or replace a conversion row from a proxy-convert result dict."""
     try:
         r   = data.get("rejection", {})
@@ -2596,14 +2696,15 @@ def _upsert_conversion(data: dict) -> None:
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.execute("""
           INSERT INTO conversions
-            (id, correlation_id, source_filename, pdf_hash, status,
+                        (id, correlation_id, callback_url, source_filename, pdf_hash, status,
              po_number, order_date, delivery_date, soldto, shipto,
              customer_name, confidence, line_count, missing_material_count,
              rejection_code, rejection_message,
              tst_filename, edifact_content, extraction_json,
              created_at, updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
+                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
           ON CONFLICT(id) DO UPDATE SET
+                        callback_url=COALESCE(excluded.callback_url, conversions.callback_url),
             status=excluded.status, po_number=excluded.po_number,
             soldto=excluded.soldto, shipto=excluded.shipto,
             rejection_code=excluded.rejection_code,
@@ -2614,6 +2715,7 @@ def _upsert_conversion(data: dict) -> None:
         """, [
             data.get("pdf_hash") or str(uuid.uuid4()),
             data.get("correlation_id"),
+            _sanitize_callback_url(callback_url),
             data.get("filename", ""),
             data.get("pdf_hash"),
             status,
@@ -3407,6 +3509,7 @@ async def api_approve(cid: str, req: Request):
         conn.commit(); conn.close()
         _add_audit(cid, "user_approved", actor,
                    request, "ACCEPTED")
+        _emit_conversion_callback(cid, "user_approved", actor, request)
         return {"ok": True, "status": "ACCEPTED"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -3434,6 +3537,7 @@ async def api_reject(cid: str, req: Request):
         conn.commit(); conn.close()
         _add_audit(cid, "user_rejected", actor,
                    request, "REJECTED")
+        _emit_conversion_callback(cid, "user_rejected", actor, request)
         return {"ok": True, "status": "REJECTED"}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -3460,6 +3564,7 @@ async def api_save_review(cid: str, req: Request):
         )
         conn.commit(); conn.close()
         _add_audit(cid, "user_corrected", actor, request)
+        _emit_conversion_callback(cid, "user_corrected", actor, request)
         return {"ok": True}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -3525,6 +3630,7 @@ def api_send_sftp(cid: str, req: Request):
         if not ok:
             _upsert_sftp_status(cid, "SFTP_FAILED", msg)
             _add_audit(cid, "sftp_failed", actor, {"tst_filename": tst_filename}, msg)
+            _emit_conversion_callback(cid, "sftp_failed", actor, {"tst_filename": tst_filename, "error": msg})
             return {"ok": False, "error": msg}
         # Use paramiko to upload
         try:
@@ -3542,10 +3648,12 @@ def api_send_sftp(cid: str, req: Request):
             sftp.close(); client.close()
             _upsert_sftp_status(cid, "SFTP_DELIVERED", remote)
             _add_audit(cid, "sftp_sent", actor, {"remote": remote}, "SFTP_DELIVERED")
+            _emit_conversion_callback(cid, "sftp_sent", actor, {"remote": remote})
             return {"ok": True, "remote_path": remote}
         except Exception as e:
             _upsert_sftp_status(cid, "SFTP_FAILED", str(e))
             _add_audit(cid, "sftp_failed", actor, {}, str(e))
+            _emit_conversion_callback(cid, "sftp_failed", actor, {"error": str(e)})
             return {"ok": False, "error": str(e)}
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})

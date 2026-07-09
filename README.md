@@ -16,6 +16,13 @@ copy .env.example .env
 pip install -r requirements.txt
 ```
 
+Cas recommande pour une VM Azure avec n8n sur la meme machine:
+
+```powershell
+copy .env.vm.example .env.vm
+notepad .env.vm
+```
+
 Copiez les CSV masterdata dans `data/masterdata/` (voir [data/masterdata/README.md](data/masterdata/README.md)).
 
 ```powershell
@@ -26,12 +33,20 @@ cd ..
 python -m uvicorn server:app --host 127.0.0.1 --port 8000
 ```
 
+Ou, sur une VM Azure clonee pour le flux Outlook -> n8n -> API:
+
+```powershell
+./run_vm.ps1
+```
+
 - **UI :** http://localhost:8000  
 - **API :** http://localhost:8000/api/health/system  
 
 Pages : Cockpit · Convertir · Revue · Historique · Données maîtres · Paramètres
 
 Déploiement Docker / Databricks : [docs/FILE2EDI_DEPLOYMENT.md](docs/FILE2EDI_DEPLOYMENT.md)
+
+Runbook VM Azure + n8n : [docs/N8N_API_INTEGRATION.md](docs/N8N_API_INTEGRATION.md)
 
 ---
 

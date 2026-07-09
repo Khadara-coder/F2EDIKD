@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import json
-import logging
-import os
 import sqlite3
 import time
 import uuid
@@ -12,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[2] / "data" / "file2edi_schema.sql"
-_LOG = logging.getLogger("edifact.file2edi.store")
 
 
 def _now() -> str:
@@ -21,51 +18,16 @@ def _now() -> str:
 
 class File2EdiStore:
     def __init__(self, db_path: str, intake_dir: str) -> None:
-        allow_local_fallback = (
-            os.environ.get("FILE2EDI_ALLOW_LOCAL_FALLBACK", "true").strip().lower()
-            in {"1", "true", "yes", "on"}
-        )
-        app_root = Path(__file__).resolve().parents[2]
-
-        requested_db = Path(db_path)
-        try:
-            requested_db.parent.mkdir(parents=True, exist_ok=True)
-            test_conn = sqlite3.connect(str(requested_db), timeout=5)
-            test_conn.close()
-            self.db_path = str(requested_db)
-        except (PermissionError, OSError, sqlite3.Error) as exc:
-            if not allow_local_fallback:
-                raise RuntimeError(
-                    f"File2EDI db path unavailable and local fallback disabled: {db_path}"
-                ) from exc
-            local_db = app_root / "data" / "file2edi.db"
-            local_db.parent.mkdir(parents=True, exist_ok=True)
-            self.db_path = str(local_db)
-            _LOG.warning(
-                "file2edi db fallback active: preferred=%s fallback=%s reason=%s",
-                db_path,
-                local_db,
-                exc,
-            )
-
+        self.db_path = db_path
         requested_intake = Path(intake_dir)
         try:
             requested_intake.mkdir(parents=True, exist_ok=True)
             self.intake_dir = requested_intake
-        except (PermissionError, OSError) as exc:
-            if not allow_local_fallback:
-                raise RuntimeError(
-                    f"File2EDI intake path unavailable and local fallback disabled: {intake_dir}"
-                ) from exc
+        except (PermissionError, OSError):
+            app_root = Path(__file__).resolve().parents[2]
             local_intake = app_root / "data" / "intake"
             local_intake.mkdir(parents=True, exist_ok=True)
             self.intake_dir = local_intake
-            _LOG.warning(
-                "file2edi intake fallback active: preferred=%s fallback=%s reason=%s",
-                intake_dir,
-                local_intake,
-                exc,
-            )
         self._init_schema()
 
     def _conn(self) -> sqlite3.Connection:
@@ -713,6 +675,8 @@ def get_store() -> File2EdiStore:
             "FILE2EDI_DB_PATH",
             os.environ.get("DB_PATH", str(app_root / "data" / "file2edi.db")),
         )
+        if db.endswith("edifact_standalone.db"):
+            db = str(app_root / "data" / "file2edi.db")
         intake = os.environ.get("INTAKE_DIR", str(app_root / "data" / "intake"))
         _store = File2EdiStore(db, intake)
     return _store

@@ -1,0 +1,356 @@
+{
+  "name": "F2EDI VM - Email PDF to API",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "manual-trigger-001",
+      "name": "DEV: Manual trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        180,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst out = [];\n\nfor (const item of items) {\n  const binary = item.binary || {};\n  for (const [key, value] of Object.entries(binary)) {\n    const fileName = String((value && value.fileName) || '').trim();\n    const mimeType = String((value && value.mimeType) || '').toLowerCase();\n    const isPdf = mimeType.includes('pdf') || /\\.pdf$/i.test(fileName);\n    if (!isPdf) {\n      continue;\n    }\n    out.push({\n      json: {\n        ...item.json,\n        sourceBinaryKey: key,\n        originalFileName: fileName || 'commande.pdf'\n      },\n      binary: {\n        document: value\n      }\n    });\n  }\n}\n\nreturn out;"
+      },
+      "id": "explode-pdf-001",
+      "name": "Explode PDF attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        420,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.EDIFACT_API_BASE || 'http://127.0.0.1:8000') + '/api/proxy/convert' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.EDIFACT_API_KEY || 'change-me-in-vm' }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "document"
+            },
+            {
+              "name": "callback_url",
+              "value": "={{ $env.EDIFACT_CALLBACK_URL || '' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "api-convert-001",
+      "name": "API: convert PDF",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        680,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "if-accepted-001",
+              "leftValue": "={{ $json.rejection ? $json.rejection.decision : '' }}",
+              "rightValue": "ACCEPTED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-accepted-node",
+      "name": "Decision is ACCEPTED?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        940,
+        260
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.EDIFACT_API_BASE || 'http://127.0.0.1:8000') + '/api/conversions/' + $json.pdf_hash + '/send-sftp' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-Key",
+              "value": "={{ $env.EDIFACT_API_KEY || 'change-me-in-vm' }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "api-send-sftp-001",
+      "name": "API: send SFTP",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1210,
+        160
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "if-review-001",
+              "leftValue": "={{ $json.rejection ? $json.rejection.decision : '' }}",
+              "rightValue": "REVIEW",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "if-review-node",
+      "name": "Decision is REVIEW?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1210,
+        360
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "workflow_status",
+              "type": "string",
+              "value": "manual_review_required"
+            },
+            {
+              "name": "conversion_id",
+              "type": "string",
+              "value": "={{ $json.pdf_hash }}"
+            },
+            {
+              "name": "decision",
+              "type": "string",
+              "value": "={{ $json.rejection ? $json.rejection.decision : '' }}"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Revue manuelle requise avant envoi SFTP"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "set-review-output-001",
+      "name": "Output: review required",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1470,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "workflow_status",
+              "type": "string",
+              "value": "rejected_or_failed"
+            },
+            {
+              "name": "conversion_id",
+              "type": "string",
+              "value": "={{ $json.pdf_hash || '' }}"
+            },
+            {
+              "name": "decision",
+              "type": "string",
+              "value": "={{ $json.rejection ? $json.rejection.decision : ($json.status || '') }}"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Commande rejetee ou en erreur"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "set-reject-output-001",
+      "name": "Output: rejected or failed",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1470,
+        440
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "name": "workflow_status",
+              "type": "string",
+              "value": "sftp_triggered"
+            },
+            {
+              "name": "conversion_id",
+              "type": "string",
+              "value": "={{ $json.pdf_hash || '' }}"
+            },
+            {
+              "name": "message",
+              "type": "string",
+              "value": "Commande acceptee et envoi SFTP declenche"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "set-sftp-output-001",
+      "name": "Output: SFTP triggered",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1470,
+        160
+      ]
+    }
+  ],
+  "connections": {
+    "DEV: Manual trigger": {
+      "main": [
+        [
+          {
+            "node": "Explode PDF attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Explode PDF attachments": {
+      "main": [
+        [
+          {
+            "node": "API: convert PDF",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API: convert PDF": {
+      "main": [
+        [
+          {
+            "node": "Decision is ACCEPTED?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision is ACCEPTED?": {
+      "main": [
+        [
+          {
+            "node": "API: send SFTP",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decision is REVIEW?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "API: send SFTP": {
+      "main": [
+        [
+          {
+            "node": "Output: SFTP triggered",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decision is REVIEW?": {
+      "main": [
+        [
+          {
+            "node": "Output: review required",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Output: rejected or failed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "f2edi-vm-template-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "pinData": {}
+}

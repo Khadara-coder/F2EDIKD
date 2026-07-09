@@ -25,16 +25,10 @@ env:
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs"
   - name: DB_PATH
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db"
-  - name: FILE2EDI_DB_PATH
-    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db"
   - name: INTAKE_DIR
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf"
   - name: PDF_STORAGE_DIR
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf"
-  - name: ALLOW_LOCAL_STORAGE_FALLBACK
-    value: "true"
-  - name: FILE2EDI_ALLOW_LOCAL_FALLBACK
-    value: "true"
   - name: DATABRICKS_MODEL_ENDPOINT
     value: "databricks-gpt-oss-120b"
   - name: EDIFACT_CATALOG

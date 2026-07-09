@@ -20,6 +20,7 @@ backend/node_modules/
 # Secrets & local config
 .env
 .env.local
+.env.vm
 .env.*.local
 config.ini
 *.pem
