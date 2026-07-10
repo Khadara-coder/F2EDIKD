@@ -14,7 +14,7 @@ function startWorkspaceLogin() {
 export function LoginPage() {
   const [actor, setActor] = useState("dik1dy@bosch.com");
   const [role, setRole] = useState<"admin" | "adv">("adv");
-  const [password, setPassword] = useState("admin123");
+  const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [profileLoginEnabled, setProfileLoginEnabled] = useState(false);
