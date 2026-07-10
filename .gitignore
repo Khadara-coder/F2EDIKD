@@ -48,6 +48,8 @@ data/masterdata/*.csv
 # Uploads & generated artifacts
 *.tst
 *.edi
+.deploy_bundle/
+deployed_app.yaml
 
 # IDE & OS
 .cursor/

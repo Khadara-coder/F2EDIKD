@@ -68,12 +68,19 @@ Un template importable n8n est aussi disponible dans le repo:
 n8n_vm_email_to_edifact.json
 ```
 
+Un second workflow importable sert de recepteur de callback pour `callback_url`:
+
+```text
+n8n_vm_status_callback_receiver.json
+```
+
 Usage recommande:
 
 1. importer `n8n_vm_email_to_edifact.json` dans n8n;
-2. remplacer le premier node `DEV: Manual trigger` par ton trigger Outlook reel;
-3. verifier que la piece jointe PDF arrive bien en binaire;
-4. definir `EDIFACT_API_BASE`, `EDIFACT_API_KEY` et si besoin `EDIFACT_CALLBACK_URL` dans n8n.
+2. remplacer le premier node `DEV: Manual trigger` par ton trigger Outlook reel si tu veux un vrai declenchement mail;
+3. importer `n8n_vm_status_callback_receiver.json` si tu veux un callback entrant dedie;
+4. verifier que la piece jointe PDF arrive bien en binaire;
+5. definir `EDIFACT_API_BASE`, `EDIFACT_API_KEY` et `EDIFACT_CALLBACK_URL` dans n8n.
 
 ## Authentification sur VM Azure
 
@@ -411,12 +418,14 @@ APP_API_ROLE=adv
 
 ## Si tu veux un vrai callback vers n8n
 
-Il faudra ajouter dans l'API:
+Le mecanisme est maintenant disponible dans l'API et le repo fournit le recepteur n8n dedie.
 
-1. un `callback_url` passe par n8n au moment du `POST /api/proxy/convert`
-2. un appel HTTP sortant de l'application vers ce webhook lors d'un changement de statut
+Flux recommande:
 
-Ce mecanisme n'est pas encore present dans le code actuel.
+1. n8n envoie `callback_url` au moment du `POST /api/proxy/convert`;
+2. l'application appelle ce webhook lors de la creation de la conversion et des changements de statut;
+3. `n8n_vm_status_callback_receiver.json` expose le webhook `POST /webhook/f2edi-status` dans n8n;
+4. le workflow callback peut ensuite journaliser, notifier ou relancer une branche si besoin.
 
 ## Conclusion pratique
 

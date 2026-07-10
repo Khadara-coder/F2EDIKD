@@ -1,0 +1,54 @@
+{
+  "name": "F2EDI VM - Status callback receiver",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "f2edi-status",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "status-webhook-001",
+      "name": "Webhook: F2EDI status",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const payload = $input.first().json || {};\nconst eventType = String(payload.event_type || payload.status || '').trim();\nconst workflowStatus = String(payload.workflow_status || payload.status || '').trim();\nconst conversionId = String(payload.conversion_id || payload.pdf_hash || payload.cid || '').trim();\n\nreturn [\n  {\n    json: {\n      received: true,\n      event_type: eventType,\n      workflow_status: workflowStatus,\n      conversion_id: conversionId,\n      payload\n    }\n  }\n];"
+      },
+      "id": "normalize-status-001",
+      "name": "Normalize callback payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        300
+      ]
+    }
+  ],
+  "connections": {
+    "Webhook: F2EDI status": {
+      "main": [
+        [
+          {
+            "node": "Normalize callback payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {},
+  "versionId": "f2edi-vm-status-callback-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false
+  },
+  "pinData": {}
+}
