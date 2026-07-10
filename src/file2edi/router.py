@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
@@ -39,38 +40,22 @@ def create_router() -> APIRouter:
     # ── Dashboard ───────────────────────────────────────────────────────────
     @router.get("/dashboard/metrics")
     def dashboard_metrics():
-        store = get_store()
-        orders = store.list_orders_summary()
-        if not orders:
-            try:
-                import server as srv
-                convs = srv.list_conversions(limit=100)
-                orders = [
-                    {
-                        "status": _map_platform_status(c.get("status")),
-                        "created_at": c.get("created_at"),
-                    }
-                    for c in convs
-                ]
-            except Exception:
-                pass
+        orders = _list_combined_orders()
         return dashboard_metrics_from_db(orders)
 
     @router.get("/orders")
     def list_orders():
         """All converted orders for the Revue list page."""
-        store = get_store()
-        return [_order_list_item(o) for o in store.list_orders_summary()]
+        return [_order_list_item(o) for o in _list_combined_orders()]
 
     @router.get("/dashboard/review-queue")
     def review_queue():
         items: list[dict] = []
         try:
-            store = get_store()
             review_statuses = ("Revue requise", "À revoir", "À vérifier", "Bloqué")
             items = [
                 _order_list_item(o)
-                for o in store.list_orders_summary()
+                for o in _list_combined_orders()
                 if o.get("status") in review_statuses
             ]
         except Exception:
@@ -99,9 +84,8 @@ def create_router() -> APIRouter:
 
     @router.get("/dashboard/recent-conversions")
     def recent_conversions():
-        store = get_store()
         out = []
-        for o in store.list_orders_summary()[:10]:
+        for o in _list_combined_orders()[:10]:
             out.append({
                 "conversionId": f"conv-{o['order_id']}",
                 "orderId": o["order_id"],
@@ -325,8 +309,7 @@ def create_router() -> APIRouter:
         page: int = 1,
         pageSize: int = 10,
     ):
-        store = get_store()
-        rows_raw = store.list_orders_summary()
+        rows_raw = _list_combined_orders()
         rows = []
         for o in rows_raw:
             if search and search.lower() not in (o.get("file_name") or "").lower() and search.lower() not in (o.get("client_name") or "").lower():
@@ -491,9 +474,74 @@ def _map_platform_status(status: str | None) -> str:
         "REVIEW_REQUIRED": "Revue requise",
         "COMPLETED": "Généré",
         "FAILED": "Rejeté",
+        "REJECTED": "Rejeté",
+        "PROCESSING": "À revoir",
         "SFTP_FAILED": "SFTP échoué",
     }
     return m.get(status or "", "À revoir")
+
+
+def _list_combined_orders() -> list[dict]:
+    store = get_store()
+    rows = list(store.list_orders_summary())
+    rows_by_id = {
+        str(row.get("order_id") or ""): row
+        for row in rows
+        if str(row.get("order_id") or "")
+    }
+    try:
+        import server as srv
+        for conv in srv.list_conversions(limit=200):
+            conv_id = str(conv.get("id") or conv.get("pdf_hash") or "")
+            if not conv_id:
+                continue
+            conv_row = {
+                "order_id": conv_id,
+                "file_name": conv.get("source_filename") or conv.get("pdf_hash") or "Document sans nom",
+                "client_name": conv.get("customer_name"),
+                "global_confidence": conv.get("confidence") or 0,
+                "status": _map_platform_status(conv.get("status")),
+                "created_at": conv.get("created_at"),
+                "updated_at": conv.get("updated_at") or conv.get("created_at"),
+                "rejection_code": conv.get("rejection_code"),
+                "rejection_message": conv.get("rejection_message"),
+            }
+            existing = rows_by_id.get(conv_id)
+            if existing is None or _is_timestamp_newer(
+                conv_row.get("updated_at") or conv_row.get("created_at"),
+                existing.get("updated_at") or existing.get("created_at"),
+            ):
+                rows_by_id[conv_id] = conv_row
+    except Exception:
+        pass
+    rows = list(rows_by_id.values())
+    rows.sort(key=lambda row: row.get("updated_at") or row.get("created_at") or "", reverse=True)
+    return rows[:200]
+
+
+def _is_timestamp_newer(candidate: str | None, current: str | None) -> bool:
+    candidate_dt = _parse_timestamp(candidate)
+    current_dt = _parse_timestamp(current)
+    if candidate_dt and current_dt:
+        return candidate_dt > current_dt
+    if candidate_dt:
+        return True
+    return False
+
+
+def _parse_timestamp(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
 
 
 def _order_list_item(o: dict) -> dict:
@@ -509,6 +557,8 @@ def _order_list_item(o: dict) -> dict:
 
 
 def _issue_label(o: dict) -> str:
+    if o.get("rejection_message"):
+        return o["rejection_message"]
     status = o.get("status") or ""
     if status == "Rejeté":
         return "Commande rejetée par le moteur"

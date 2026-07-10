@@ -14,6 +14,7 @@ function startWorkspaceLogin() {
 export function LoginPage() {
   const [actor, setActor] = useState("dik1dy@bosch.com");
   const [role, setRole] = useState<"admin" | "adv">("adv");
+  const [password, setPassword] = useState("admin123");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [profileLoginEnabled, setProfileLoginEnabled] = useState(false);
@@ -36,9 +37,10 @@ export function LoginPage() {
   async function handleProfileLogin() {
     setError("");
     if (!actor.trim()) { setError("Identifiant requis"); return; }
+    if (!password.trim()) { setError("Mot de passe requis"); return; }
     try {
       setLoading(true);
-      await api.loginWithProfile({ actor: actor.trim(), role });
+      await api.loginWithProfile({ actor: actor.trim(), role, password });
       window.location.assign("/");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Échec de connexion");
@@ -80,6 +82,16 @@ export function LoginPage() {
                     <SelectItem value="admin">Admin</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Mot de passe</Label>
+                <Input
+                  type="password"
+                  value={password}
+                  placeholder="Mot de passe"
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleProfileLogin()}
+                />
               </div>
               {error && <p className="text-xs text-destructive">{error}</p>}
               <Button className="w-full" onClick={handleProfileLogin} disabled={loading}>

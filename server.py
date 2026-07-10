@@ -754,6 +754,11 @@ async def _require_authenticated_user(request: Request, call_next):
 class ProfileLoginPayload(BaseModel):
     actor: str
     role: str
+    password: str = ""
+
+
+def _profile_login_password() -> str:
+    return (os.environ.get("APP_PROFILE_LOGIN_PASSWORD") or "admin123").strip()
 
 
 @app.get("/api/auth/modes")
@@ -775,10 +780,16 @@ def api_auth_login(payload: ProfileLoginPayload):
 
     actor = _normalize_actor_identity(payload.actor)
     role = (payload.role or "").strip().lower()
+    provided_password = (payload.password or "").strip()
     if not actor:
         raise HTTPException(status_code=400, detail="Identifiant utilisateur requis")
     if role not in {"admin", "adv"}:
         raise HTTPException(status_code=400, detail="Rôle invalide (admin|adv)")
+    expected_password = _profile_login_password()
+    if not expected_password:
+        raise HTTPException(status_code=500, detail="Mot de passe de connexion non configuré")
+    if not provided_password or not hmac.compare_digest(provided_password, expected_password):
+        raise HTTPException(status_code=401, detail="Mot de passe invalide")
 
     token = uuid.uuid4().hex
     now_ts = int(datetime.now(timezone.utc).timestamp())
@@ -2426,7 +2437,7 @@ def list_conversions(
             )
         where = "WHERE " + " AND ".join(where_parts) if where_parts else ""
         return _delta_rows_to_dicts(
-            f"SELECT {', '.join(_CONV_COLS)} FROM {t} {where} ORDER BY created_at DESC LIMIT {limit}",
+            f"SELECT {', '.join(_CONV_COLS)} FROM {t} {where} ORDER BY COALESCE(updated_at, created_at) DESC LIMIT {limit}",
             _CONV_COLS
         )
 
@@ -2440,7 +2451,7 @@ def list_conversions(
                 ql in str(r.get(f, "")).lower()
                 for f in ("po_number", "source_filename", "customer_name", "soldto")
             )]
-        rows.sort(key=lambda r: r.get("created_at", ""), reverse=True)
+        rows.sort(key=lambda r: r.get("updated_at") or r.get("created_at", ""), reverse=True)
         return rows[:limit]
 
     # sqlite
@@ -2455,7 +2466,7 @@ def list_conversions(
             params.extend([like, like, like, like])
         where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
         rows = conn.execute(
-            f"SELECT * FROM conversions {where} ORDER BY created_at DESC LIMIT ?",
+            f"SELECT * FROM conversions {where} ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?",
             params + [limit]
         ).fetchall()
         conn.close()

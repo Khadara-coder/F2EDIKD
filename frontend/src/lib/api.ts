@@ -68,7 +68,7 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 export const api = {
   getAuthModes: () => request<{ profile_login_enabled: boolean; workspace_sso_available: boolean; allowed_roles: string[] }>("/auth/modes"),
 
-  loginWithProfile: (payload: { actor: string; role: "admin" | "adv" }) =>
+  loginWithProfile: (payload: { actor: string; role: "admin" | "adv"; password: string }) =>
     request<{ ok: boolean; actor: string; role: "admin" | "adv" }>("/auth/login", {
       method: "POST",
       body: JSON.stringify(payload),
