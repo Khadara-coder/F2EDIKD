@@ -1583,6 +1583,25 @@ def api_md_delta():
 @app.get("/api/settings")
 def api_settings():
     """Return complete settings shape (Issue 3 fix)."""
+    persisted = {
+        "defaultIncoterm": "DAP - Delivered At Place",
+        "currency": "EUR - Euro",
+        "documentLanguage": "Français (FR)",
+        "timezone": "(UTC+01:00) Europe/Paris",
+        "options": {
+            "autoValidateAbove90": True,
+            "detectDuplicates": True,
+            "autoSftp": False,
+            "manualReviewOnAnomaly": True,
+            "notifyOnDuplicate": False,
+        },
+    }
+    try:
+        from src.file2edi.store import get_store as _get_f2e_store
+        persisted = _get_f2e_store().load_app_settings()
+    except Exception:
+        pass
+
     sftp_host  = os.environ.get("SFTP_HOST", "")
     sftp_ok    = bool(sftp_host)
     email_ok   = bool(os.environ.get("SMTP_HOST", ""))
@@ -1617,6 +1636,7 @@ def api_settings():
             "rejection_mailbox": "botrejet.Commandes@fr.bosch.com",
         },
         "storage_mode": get_storage_mode(),
+        "app_settings": persisted,
         # ── Legacy flat fields (backward compat) ───────────────────────────
         "sftp_host":         os.environ.get("SFTP_HOST", "(non configuré)"),
         "sftp_username":     os.environ.get("SFTP_USERNAME", "(non configuré)"),

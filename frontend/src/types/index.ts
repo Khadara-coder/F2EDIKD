@@ -299,6 +299,42 @@ export interface AppSettings {
     csvExport: ConnectorStatus;
     sftp: ConnectorStatus;
   };
+  connectorConfig: {
+    apiBaseUrl: string;
+    dbSyncEnabled: boolean;
+    csvDelimiter: string;
+    sftpProfile: string;
+  };
+  validation: {
+    autoValidationThreshold: number;
+    requireCustomerReference: boolean;
+    requireDeliveryDate: boolean;
+    blockOnAmountMismatch: boolean;
+    duplicateWindowDays: number;
+  };
+  notifications: {
+    emailEnabled: boolean;
+    emailRecipients: string;
+    notifyOnSuccess: boolean;
+    notifyOnFailure: boolean;
+    webhookEnabled: boolean;
+    webhookUrl: string;
+  };
+  sftpConfig: {
+    enabled: boolean;
+    host: string;
+    port: number;
+    username: string;
+    remotePath: string;
+    fileNamePattern: string;
+  };
+  security: {
+    enforceAuth: boolean;
+    sessionTimeoutMinutes: number;
+    maxLoginAttempts: number;
+    auditLogEnabled: boolean;
+    ipAllowlist: string;
+  };
   options: {
     autoValidateAbove90: boolean;
     detectDuplicates: boolean;

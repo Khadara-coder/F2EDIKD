@@ -7,7 +7,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 
 from .mapper import (
@@ -396,36 +396,56 @@ def create_router() -> APIRouter:
         try:
             import server as srv
             s = srv.api_settings()
+            persisted = get_store().load_app_settings()
             return {
                 "ediProfile": s.get("profile", {}).get("name", "ELM_STANDARD"),
                 "standard": "UN/EDIFACT",
                 "version": "D.96A",
-                "defaultIncoterm": "DAP - Delivered At Place",
-                "currency": "EUR - Euro",
-                "documentLanguage": "Français (FR)",
-                "timezone": "(UTC+01:00) Europe/Paris",
+                "defaultIncoterm": persisted.get("defaultIncoterm", "DAP - Delivered At Place"),
+                "currency": persisted.get("currency", "EUR - Euro"),
+                "documentLanguage": persisted.get("documentLanguage", "Français (FR)"),
+                "timezone": persisted.get("timezone", "(UTC+01:00) Europe/Paris"),
                 "connectors": {
                     "apiExtraction": "connected" if s.get("api", {}).get("status") == "ok" else "disconnected",
                     "database": "connected" if s.get("storage_mode", {}).get("persistent") else "connected",
                     "csvExport": "connected" if s.get("masterdata", {}).get("customers", {}).get("rows", 0) > 0 else "disconnected",
                     "sftp": "connected" if s.get("sftp", {}).get("configured") else "disconnected",
                 },
-                "options": {
-                    "autoValidateAbove90": True,
-                    "detectDuplicates": True,
-                    "autoSftp": bool(s.get("sftp", {}).get("configured")),
-                    "manualReviewOnAnomaly": True,
-                    "notifyOnDuplicate": False,
-                },
+                "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
+                "validation": persisted.get("validation", _default_settings().get("validation", {})),
+                "notifications": persisted.get("notifications", _default_settings().get("notifications", {})),
+                "sftpConfig": persisted.get("sftpConfig", _default_settings().get("sftpConfig", {})),
+                "security": persisted.get("security", _default_settings().get("security", {})),
+                "options": persisted.get("options", _default_settings().get("options", {})),
             }
         except Exception:
             return _default_settings()
 
     @router.put("/settings")
-    def put_settings(payload: dict):
-        base = _default_settings()
-        opts = {**base["options"], **(payload.get("options") or {})}
-        return {**base, **payload, "options": opts, "connectors": base["connectors"]}
+    def put_settings(payload: dict, req: Request):
+        try:
+            import server as srv
+            srv._ensure_admin(req)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+        persisted = get_store().save_app_settings(payload or {})
+        settings = _default_settings()
+        settings.update({
+            "defaultIncoterm": persisted.get("defaultIncoterm", settings["defaultIncoterm"]),
+            "currency": persisted.get("currency", settings["currency"]),
+            "documentLanguage": persisted.get("documentLanguage", settings["documentLanguage"]),
+            "timezone": persisted.get("timezone", settings["timezone"]),
+        })
+        settings["connectorConfig"] = {**settings.get("connectorConfig", {}), **(persisted.get("connectorConfig") or {})}
+        settings["validation"] = {**settings.get("validation", {}), **(persisted.get("validation") or {})}
+        settings["notifications"] = {**settings.get("notifications", {}), **(persisted.get("notifications") or {})}
+        settings["sftpConfig"] = {**settings.get("sftpConfig", {}), **(persisted.get("sftpConfig") or {})}
+        settings["security"] = {**settings.get("security", {}), **(persisted.get("security") or {})}
+        settings["options"] = {**settings["options"], **(persisted.get("options") or {})}
+        return settings
 
     @router.post("/settings/test-connector/{connector}")
     def test_connector(connector: str):
@@ -458,6 +478,42 @@ def _default_settings() -> dict:
             "database": "connected",
             "csvExport": "connected",
             "sftp": "disconnected",
+        },
+        "connectorConfig": {
+            "apiBaseUrl": "",
+            "dbSyncEnabled": True,
+            "csvDelimiter": ";",
+            "sftpProfile": "default",
+        },
+        "validation": {
+            "autoValidationThreshold": 90,
+            "requireCustomerReference": True,
+            "requireDeliveryDate": False,
+            "blockOnAmountMismatch": True,
+            "duplicateWindowDays": 30,
+        },
+        "notifications": {
+            "emailEnabled": False,
+            "emailRecipients": "",
+            "notifyOnSuccess": False,
+            "notifyOnFailure": True,
+            "webhookEnabled": False,
+            "webhookUrl": "",
+        },
+        "sftpConfig": {
+            "enabled": False,
+            "host": "",
+            "port": 22,
+            "username": "",
+            "remotePath": "/inbox",
+            "fileNamePattern": "ORDERS_{orderId}.edi",
+        },
+        "security": {
+            "enforceAuth": True,
+            "sessionTimeoutMinutes": 480,
+            "maxLoginAttempts": 5,
+            "auditLogEnabled": True,
+            "ipAllowlist": "",
         },
         "options": {
             "autoValidateAbove90": True,

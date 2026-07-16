@@ -6,6 +6,42 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-Location -Path $PSScriptRoot
 
+function Stop-EdifactInstances {
+    $listen = Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue |
+        Where-Object { $_.LocalPort -ge 8000 -and $_.LocalPort -le 8100 } |
+        Select-Object -ExpandProperty OwningProcess -Unique
+
+    $uvicorn = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+        Where-Object {
+            $_.Name -in @('python.exe', 'py.exe') -and
+            $_.CommandLine -and
+            $_.CommandLine -match 'uvicorn.+server:app'
+        } |
+        Select-Object -ExpandProperty ProcessId -Unique
+
+    $candidatePids = @($listen + $uvicorn | Sort-Object -Unique)
+    $stopped = @()
+
+    foreach ($procId in $candidatePids) {
+        if (-not $procId) { continue }
+        try {
+            $proc = Get-CimInstance Win32_Process -Filter "ProcessId=$procId" -ErrorAction SilentlyContinue
+            if (-not $proc) { continue }
+            $cmd = [string]$proc.CommandLine
+            $isEdifact = $cmd -match 'server:app' -or $cmd -match 'EDIFACT'
+            if (-not $isEdifact) { continue }
+            Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
+            $stopped += $procId
+        } catch {
+            continue
+        }
+    }
+
+    if ($stopped.Count -gt 0) {
+        Write-Host ("[run_vm] Stopped existing EDIFACT instance(s): {0}" -f (($stopped | Sort-Object -Unique) -join ', ')) -ForegroundColor Yellow
+    }
+}
+
 $envFile = Join-Path $PSScriptRoot '.env.vm'
 if (-not (Test-Path $envFile)) {
     Write-Host '[run_vm] .env.vm missing - copying from .env.vm.example' -ForegroundColor Yellow
@@ -43,6 +79,8 @@ if ($RebuildFrontend -or -not (Test-Path $distIndex)) {
         Pop-Location
     }
 }
+
+Stop-EdifactInstances
 
 $hostValue = if ($env:APP_HOST) { $env:APP_HOST } else { '127.0.0.1' }
 $portValue = if ($env:APP_PORT) { [int]$env:APP_PORT } else { 8000 }

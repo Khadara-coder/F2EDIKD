@@ -20,6 +20,7 @@ import type {
   UpdateOrderHeaderPayload,
   UpdateOrderLinePayload,
 } from "@/types";
+import { mergeSettings } from "@/lib/defaultSettings";
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "/api";
 const MD_API_BASE = API_BASE.replace(/\/api\/?$/, "") + "/api/masterdata";
@@ -63,6 +64,63 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
   }
   if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+function normalizeSettingsPayload(raw: unknown): AppSettings {
+  const obj = (raw && typeof raw === "object") ? (raw as Record<string, unknown>) : {};
+  const persisted = (obj.app_settings && typeof obj.app_settings === "object")
+    ? (obj.app_settings as Record<string, unknown>)
+    : obj;
+
+  const profile = (obj.profile && typeof obj.profile === "object")
+    ? (obj.profile as Record<string, unknown>)
+    : {};
+  const api = (obj.api && typeof obj.api === "object")
+    ? (obj.api as Record<string, unknown>)
+    : {};
+  const sftp = (obj.sftp && typeof obj.sftp === "object")
+    ? (obj.sftp as Record<string, unknown>)
+    : {};
+  const storageMode = (obj.storage_mode && typeof obj.storage_mode === "object")
+    ? (obj.storage_mode as Record<string, unknown>)
+    : {};
+  const masterdata = (obj.masterdata && typeof obj.masterdata === "object")
+    ? (obj.masterdata as Record<string, unknown>)
+    : {};
+  const customers = (masterdata.customers && typeof masterdata.customers === "object")
+    ? (masterdata.customers as Record<string, unknown>)
+    : {};
+
+  const persistedWithDerived = {
+    ...persisted,
+    ediProfile:
+      typeof persisted.ediProfile === "string"
+        ? persisted.ediProfile
+        : (typeof profile.name === "string" ? profile.name : undefined),
+    connectors: {
+      apiExtraction:
+        (typeof api.status === "string" && api.status.toLowerCase() === "ok")
+          ? "connected"
+          : "disconnected",
+      database:
+        (typeof storageMode.persistent === "boolean" ? storageMode.persistent : true)
+          ? "connected"
+          : "disconnected",
+      csvExport:
+        (typeof customers.rows === "number" && customers.rows > 0)
+          ? "connected"
+          : "disconnected",
+      sftp:
+        (typeof sftp.configured === "boolean" && sftp.configured)
+          ? "connected"
+          : "disconnected",
+      ...(persisted.connectors && typeof persisted.connectors === "object"
+        ? (persisted.connectors as Record<string, unknown>)
+        : {}),
+    },
+  };
+
+  return mergeSettings(persistedWithDerived as Partial<AppSettings>);
 }
 
 export const api = {
@@ -191,13 +249,16 @@ export const api = {
     );
   },
 
-  getSettings: () => request<AppSettings>("/settings"),
+  getSettings: async () => {
+    const raw = await request<unknown>("/settings");
+    return normalizeSettingsPayload(raw);
+  },
 
   updateSettings: (payload: Partial<AppSettings>) =>
-    request<AppSettings>("/settings", {
+    request<unknown>("/settings", {
       method: "PUT",
       body: JSON.stringify(payload),
-    }),
+    }).then((raw) => normalizeSettingsPayload(raw)),
 
   testConnector: (connector: string) =>
     request<{ status: string }>(`/settings/test-connector/${connector}`, {

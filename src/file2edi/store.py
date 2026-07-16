@@ -10,10 +10,197 @@ from pathlib import Path
 from typing import Any
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[2] / "data" / "file2edi_schema.sql"
+_APP_SETTINGS_KEY = "app_settings_v1"
+
+_APP_SETTINGS_DEFAULT: dict[str, Any] = {
+    "defaultIncoterm": "DAP - Delivered At Place",
+    "currency": "EUR - Euro",
+    "documentLanguage": "Français (FR)",
+    "timezone": "(UTC+01:00) Europe/Paris",
+    "connectorConfig": {
+        "apiBaseUrl": "",
+        "dbSyncEnabled": True,
+        "csvDelimiter": ";",
+        "sftpProfile": "default",
+    },
+    "validation": {
+        "autoValidationThreshold": 90,
+        "requireCustomerReference": True,
+        "requireDeliveryDate": False,
+        "blockOnAmountMismatch": True,
+        "duplicateWindowDays": 30,
+    },
+    "notifications": {
+        "emailEnabled": False,
+        "emailRecipients": "",
+        "notifyOnSuccess": False,
+        "notifyOnFailure": True,
+        "webhookEnabled": False,
+        "webhookUrl": "",
+    },
+    "sftpConfig": {
+        "enabled": False,
+        "host": "",
+        "port": 22,
+        "username": "",
+        "remotePath": "/inbox",
+        "fileNamePattern": "ORDERS_{orderId}.edi",
+    },
+    "security": {
+        "enforceAuth": True,
+        "sessionTimeoutMinutes": 480,
+        "maxLoginAttempts": 5,
+        "auditLogEnabled": True,
+        "ipAllowlist": "",
+    },
+    "options": {
+        "autoValidateAbove90": True,
+        "detectDuplicates": True,
+        "autoSftp": False,
+        "manualReviewOnAnomaly": True,
+        "notifyOnDuplicate": False,
+    },
+}
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on", "y"}
+    return False
+
+
+def _merge_settings(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in (override or {}).items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = _merge_settings(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key in ("defaultIncoterm", "currency", "documentLanguage", "timezone"):
+        if key in payload and payload.get(key) is not None:
+            out[key] = str(payload.get(key)).strip()
+
+    raw_connector = payload.get("connectorConfig")
+    if isinstance(raw_connector, dict):
+        connector: dict[str, Any] = {}
+        if "apiBaseUrl" in raw_connector:
+            connector["apiBaseUrl"] = str(raw_connector.get("apiBaseUrl") or "").strip()
+        if "dbSyncEnabled" in raw_connector:
+            connector["dbSyncEnabled"] = _as_bool(raw_connector.get("dbSyncEnabled"))
+        if "csvDelimiter" in raw_connector:
+            val = str(raw_connector.get("csvDelimiter") or ";").strip()
+            connector["csvDelimiter"] = val[0] if val else ";"
+        if "sftpProfile" in raw_connector:
+            connector["sftpProfile"] = str(raw_connector.get("sftpProfile") or "default").strip() or "default"
+        if connector:
+            out["connectorConfig"] = connector
+
+    raw_validation = payload.get("validation")
+    if isinstance(raw_validation, dict):
+        validation: dict[str, Any] = {}
+        if "autoValidationThreshold" in raw_validation:
+            try:
+                val = int(raw_validation.get("autoValidationThreshold"))
+            except (TypeError, ValueError):
+                val = 90
+            validation["autoValidationThreshold"] = max(0, min(100, val))
+        if "requireCustomerReference" in raw_validation:
+            validation["requireCustomerReference"] = _as_bool(raw_validation.get("requireCustomerReference"))
+        if "requireDeliveryDate" in raw_validation:
+            validation["requireDeliveryDate"] = _as_bool(raw_validation.get("requireDeliveryDate"))
+        if "blockOnAmountMismatch" in raw_validation:
+            validation["blockOnAmountMismatch"] = _as_bool(raw_validation.get("blockOnAmountMismatch"))
+        if "duplicateWindowDays" in raw_validation:
+            try:
+                days = int(raw_validation.get("duplicateWindowDays"))
+            except (TypeError, ValueError):
+                days = 30
+            validation["duplicateWindowDays"] = max(1, min(365, days))
+        if validation:
+            out["validation"] = validation
+
+    raw_notifications = payload.get("notifications")
+    if isinstance(raw_notifications, dict):
+        notifications: dict[str, Any] = {}
+        for key in ("emailEnabled", "notifyOnSuccess", "notifyOnFailure", "webhookEnabled"):
+            if key in raw_notifications:
+                notifications[key] = _as_bool(raw_notifications.get(key))
+        if "emailRecipients" in raw_notifications:
+            notifications["emailRecipients"] = str(raw_notifications.get("emailRecipients") or "").strip()
+        if "webhookUrl" in raw_notifications:
+            notifications["webhookUrl"] = str(raw_notifications.get("webhookUrl") or "").strip()
+        if notifications:
+            out["notifications"] = notifications
+
+    raw_sftp = payload.get("sftpConfig")
+    if isinstance(raw_sftp, dict):
+        sftp: dict[str, Any] = {}
+        if "enabled" in raw_sftp:
+            sftp["enabled"] = _as_bool(raw_sftp.get("enabled"))
+        for key in ("host", "username", "remotePath", "fileNamePattern"):
+            if key in raw_sftp:
+                sftp[key] = str(raw_sftp.get(key) or "").strip()
+        if "port" in raw_sftp:
+            try:
+                port = int(raw_sftp.get("port"))
+            except (TypeError, ValueError):
+                port = 22
+            sftp["port"] = max(1, min(65535, port))
+        if sftp:
+            out["sftpConfig"] = sftp
+
+    raw_security = payload.get("security")
+    if isinstance(raw_security, dict):
+        security: dict[str, Any] = {}
+        if "enforceAuth" in raw_security:
+            security["enforceAuth"] = _as_bool(raw_security.get("enforceAuth"))
+        if "auditLogEnabled" in raw_security:
+            security["auditLogEnabled"] = _as_bool(raw_security.get("auditLogEnabled"))
+        if "sessionTimeoutMinutes" in raw_security:
+            try:
+                ttl = int(raw_security.get("sessionTimeoutMinutes"))
+            except (TypeError, ValueError):
+                ttl = 480
+            security["sessionTimeoutMinutes"] = max(15, min(1440, ttl))
+        if "maxLoginAttempts" in raw_security:
+            try:
+                attempts = int(raw_security.get("maxLoginAttempts"))
+            except (TypeError, ValueError):
+                attempts = 5
+            security["maxLoginAttempts"] = max(1, min(20, attempts))
+        if "ipAllowlist" in raw_security:
+            security["ipAllowlist"] = str(raw_security.get("ipAllowlist") or "").strip()
+        if security:
+            out["security"] = security
+
+    raw_options = payload.get("options")
+    if isinstance(raw_options, dict):
+        opts: dict[str, bool] = {}
+        for key in (
+            "autoValidateAbove90",
+            "detectDuplicates",
+            "autoSftp",
+            "manualReviewOnAnomaly",
+            "notifyOnDuplicate",
+        ):
+            if key in raw_options:
+                opts[key] = _as_bool(raw_options.get(key))
+        if opts:
+            out["options"] = opts
+    return out
 
 
 class File2EdiStore:
@@ -660,6 +847,47 @@ class File2EdiStore:
             "fileName": row["edifact_filename"] or f"ORDERS_{order_id}.tst",
             "content": row["edifact_content"],
         }
+
+    def load_app_settings(self) -> dict[str, Any]:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT setting_value FROM file2edi_settings WHERE setting_key=?",
+            [_APP_SETTINGS_KEY],
+        ).fetchone()
+        conn.close()
+        if not row:
+            return dict(_APP_SETTINGS_DEFAULT)
+        try:
+            parsed = json.loads(row["setting_value"] or "{}")
+            if not isinstance(parsed, dict):
+                return dict(_APP_SETTINGS_DEFAULT)
+            sanitized = _sanitize_settings_payload(parsed)
+            return _merge_settings(_APP_SETTINGS_DEFAULT, sanitized)
+        except Exception:
+            return dict(_APP_SETTINGS_DEFAULT)
+
+    def save_app_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        current = self.load_app_settings()
+        sanitized = _sanitize_settings_payload(payload)
+        merged = _merge_settings(current, sanitized)
+
+        def _write() -> dict[str, Any]:
+            conn = self._conn()
+            try:
+                conn.execute(
+                    """INSERT INTO file2edi_settings (setting_key, setting_value, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(setting_key) DO UPDATE SET
+                      setting_value=excluded.setting_value,
+                      updated_at=excluded.updated_at""",
+                    [_APP_SETTINGS_KEY, json.dumps(merged), _now()],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            return merged
+
+        return self._execute_write(_write)
 
 
 _store: File2EdiStore | None = None
