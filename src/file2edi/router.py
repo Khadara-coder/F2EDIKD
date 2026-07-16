@@ -23,6 +23,38 @@ DEMO_ORDER_ID = "ord-rexel-026545008"
 def create_router() -> APIRouter:
     router = APIRouter(tags=["file2edi"])
 
+    def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
+        if not isinstance(settings_payload, dict):
+            return
+        sftp = settings_payload.get("sftpConfig")
+        if not isinstance(sftp, dict):
+            return
+
+        host = str(sftp.get("host") or "").strip()
+        user = str(sftp.get("username") or "").strip()
+        remote = str(sftp.get("remotePath") or "").strip()
+
+        if host:
+            os.environ["SFTP_HOST"] = host
+        else:
+            os.environ.pop("SFTP_HOST", None)
+
+        if user:
+            os.environ["SFTP_USERNAME"] = user
+        else:
+            os.environ.pop("SFTP_USERNAME", None)
+
+        if remote:
+            os.environ["SFTP_REMOTE_DIR"] = remote
+        else:
+            os.environ.pop("SFTP_REMOTE_DIR", None)
+
+        try:
+            port = int(sftp.get("port") or 22)
+        except (TypeError, ValueError):
+            port = 22
+        os.environ["SFTP_PORT"] = str(max(1, min(65535, port)))
+
     # ── Health (React Header badges) ─────────────────────────────────────────
     @router.get("/health/system")
     def health_system():
@@ -266,6 +298,9 @@ def create_router() -> APIRouter:
         from starlette.datastructures import Headers
 
         class _FakeRequest:
+            headers: dict[str, str] = {}
+            cookies: dict[str, str] = {}
+
             async def json(self):
                 return {"corrections": _corrections_from_review(review)}
 
@@ -285,6 +320,58 @@ def create_router() -> APIRouter:
         if isinstance(result, dict):
             return {"success": False, "errors": _extract_generate_errors(result)}
         return {"success": False, "errors": ["Génération échouée"]}
+
+    @router.post("/orders/{order_id}/send-sap")
+    async def send_to_sap(order_id: str, payload: dict = Body(default_factory=dict)):
+        store = get_store()
+        export = store.get_edifact_export(order_id)
+        if not export:
+            raise HTTPException(400, "EDIFACT non généré pour cette commande")
+
+        # Align runtime SFTP env with persisted app settings before sending.
+        _apply_runtime_sftp_config(store.load_app_settings())
+
+        try:
+            import server as srv
+
+            force_resend = bool((payload or {}).get("force"))
+            conv = srv.load_conversion(order_id) or {}
+            already_sent = str(conv.get("sftp_status") or "").upper() == "SFTP_DELIVERED"
+            if already_sent and not force_resend:
+                return {
+                    "success": False,
+                    "alreadySent": True,
+                    "requiresConfirmation": True,
+                    "message": "Cette commande a déjà été envoyée vers SAP. Confirmez pour renvoyer.",
+                }
+
+            class _FakeRequest:
+                headers: dict[str, str] = {}
+                cookies: dict[str, str] = {}
+
+            res = srv.api_send_sftp(order_id, _FakeRequest())
+            if hasattr(res, "status_code"):
+                body = getattr(res, "body", b"") or b""
+                try:
+                    detail = json.loads(body).get("error", "Échec envoi SFTP")
+                except Exception:
+                    detail = "Échec envoi SFTP"
+                return {"success": False, "message": detail}
+
+            if isinstance(res, dict) and res.get("ok"):
+                remote = str(res.get("remote_path") or "")
+                return {
+                    "success": True,
+                    "alreadySent": already_sent,
+                    "message": f"Fichier envoyé vers SAP (SFTP) {remote}".strip(),
+                }
+
+            if isinstance(res, dict):
+                return {"success": False, "message": str(res.get("error") or "Échec envoi SFTP")}
+
+            return {"success": False, "message": "Échec envoi SFTP"}
+        except Exception as exc:
+            return {"success": False, "message": f"Échec envoi SFTP: {exc}"}
 
     @router.get("/orders/{order_id}/edifact")
     def download_edifact(order_id: str):
@@ -412,9 +499,14 @@ def create_router() -> APIRouter:
                     "sftp": "connected" if s.get("sftp", {}).get("configured") else "disconnected",
                 },
                 "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
+                "databricksConfig": persisted.get("databricksConfig", _default_settings().get("databricksConfig", {})),
                 "validation": persisted.get("validation", _default_settings().get("validation", {})),
                 "notifications": persisted.get("notifications", _default_settings().get("notifications", {})),
-                "sftpConfig": persisted.get("sftpConfig", _default_settings().get("sftpConfig", {})),
+                "sftpConfig": {
+                    **_default_settings().get("sftpConfig", {}),
+                    **(persisted.get("sftpConfig") or {}),
+                    "hasPassword": bool(os.environ.get("SFTP_PASSWORD", "")),
+                },
                 "security": persisted.get("security", _default_settings().get("security", {})),
                 "options": persisted.get("options", _default_settings().get("options", {})),
             }
@@ -432,6 +524,12 @@ def create_router() -> APIRouter:
             pass
 
         persisted = get_store().save_app_settings(payload or {})
+        try:
+            import server as srv
+            srv._apply_runtime_databricks_config(persisted)
+        except Exception:
+            pass
+        _apply_runtime_sftp_config(persisted)
         settings = _default_settings()
         settings.update({
             "defaultIncoterm": persisted.get("defaultIncoterm", settings["defaultIncoterm"]),
@@ -440,18 +538,26 @@ def create_router() -> APIRouter:
             "timezone": persisted.get("timezone", settings["timezone"]),
         })
         settings["connectorConfig"] = {**settings.get("connectorConfig", {}), **(persisted.get("connectorConfig") or {})}
+        settings["databricksConfig"] = {**settings.get("databricksConfig", {}), **(persisted.get("databricksConfig") or {})}
         settings["validation"] = {**settings.get("validation", {}), **(persisted.get("validation") or {})}
         settings["notifications"] = {**settings.get("notifications", {}), **(persisted.get("notifications") or {})}
         settings["sftpConfig"] = {**settings.get("sftpConfig", {}), **(persisted.get("sftpConfig") or {})}
+        settings["sftpConfig"]["hasPassword"] = bool(os.environ.get("SFTP_PASSWORD", ""))
         settings["security"] = {**settings.get("security", {}), **(persisted.get("security") or {})}
         settings["options"] = {**settings["options"], **(persisted.get("options") or {})}
         return settings
 
     @router.post("/settings/test-connector/{connector}")
-    def test_connector(connector: str):
+    def test_connector(connector: str, payload: dict = Body(default_factory=dict)):
         try:
             import server as srv
             if connector == "sftp":
+                persisted = get_store().load_app_settings()
+                merged_sftp = dict((persisted or {}).get("sftpConfig") or {})
+                incoming_sftp = (payload or {}).get("sftpConfig")
+                if isinstance(incoming_sftp, dict):
+                    merged_sftp.update(incoming_sftp)
+                _apply_runtime_sftp_config({"sftpConfig": merged_sftp})
                 ok, msg = srv._test_sftp()
                 return {"status": "connected" if ok else "disconnected", "message": msg}
             if connector == "apiExtraction":
@@ -460,6 +566,23 @@ def create_router() -> APIRouter:
             return {"status": "connected"}
         except Exception as exc:
             return {"status": "disconnected", "message": str(exc)}
+
+    @router.put("/settings/sftp-password")
+    def put_sftp_password(payload: dict, req: Request):
+        try:
+            import server as srv
+            srv._ensure_admin(req)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+        password = str((payload or {}).get("password") or "")
+        if not password.strip():
+            raise HTTPException(status_code=400, detail="Mot de passe SFTP requis")
+
+        os.environ["SFTP_PASSWORD"] = password
+        return {"ok": True, "message": "Mot de passe SFTP mis à jour"}
 
     return router
 
@@ -485,6 +608,15 @@ def _default_settings() -> dict:
             "csvDelimiter": ";",
             "sftpProfile": "default",
         },
+        "databricksConfig": {
+            "host": "https://adb-5555213114570927.7.azuredatabricks.net",
+            "apiBaseUrl": "https://file2edi-5555213114570927.7.azure.databricksapps.com",
+            "modelEndpoint": "databricks-gpt-oss-120b",
+            "warehouseId": "",
+            "catalog": "hive_metastore",
+            "schema": "edifact_generator",
+            "configProfile": "",
+        },
         "validation": {
             "autoValidationThreshold": 90,
             "requireCustomerReference": True,
@@ -507,6 +639,7 @@ def _default_settings() -> dict:
             "username": "",
             "remotePath": "/inbox",
             "fileNamePattern": "ORDERS_{orderId}.edi",
+            "hasPassword": False,
         },
         "security": {
             "enforceAuth": True,

@@ -34,13 +34,19 @@ IGNORED_ARTICLE_PATTERNS = (
 )
 
 # ── Model endpoint ─────────────────────────────────────────────────────────────
-_MODEL_ENDPOINT   = os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
 _FALLBACK_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
-_AI_ENDPOINT_URL  = (
-    os.environ.get("DATABRICKS_HOST",
-                   "https://adb-5555213114570927.7.azuredatabricks.net").rstrip("/")
-    + f"/serving-endpoints/{_MODEL_ENDPOINT}/invocations"
-)
+
+
+def _model_endpoint() -> str:
+    return os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
+
+
+def _ai_endpoint_url() -> str:
+    host = os.environ.get(
+        "DATABRICKS_HOST",
+        "https://adb-5555213114570927.7.azuredatabricks.net",
+    ).rstrip("/")
+    return host + f"/serving-endpoints/{_model_endpoint()}/invocations"
 
 # Minimum chars before calling the AI endpoint at all
 _MIN_TEXT_CHARS = 80
@@ -120,7 +126,7 @@ def _call_llm(prompt: str, max_tokens: int = 2000) -> Optional[str]:
         import mlflow.deployments
         client = mlflow.deployments.get_deploy_client("databricks")
         resp = client.predict(
-            endpoint=_MODEL_ENDPOINT,
+            endpoint=_model_endpoint(),
             inputs={
                 "messages": [{"role": "user", "content": prompt}],
                 "max_tokens": max_tokens,
@@ -145,7 +151,7 @@ def _call_llm(prompt: str, max_tokens: int = 2000) -> Optional[str]:
         else:
             headers = auth_fn()
         resp = _req.post(
-            _AI_ENDPOINT_URL,
+            _ai_endpoint_url(),
             headers=headers,
             json={
                 "messages": [{"role": "user", "content": prompt}],

@@ -42,6 +42,10 @@ export function ParametresPage() {
   const [newActor, setNewActor] = useState("");
   const [newRole, setNewRole] = useState<"admin" | "adv">("adv");
   const [roleError, setRoleError] = useState("");
+  const [sftpPassword, setSftpPassword] = useState("");
+  const [sftpPasswordMsg, setSftpPasswordMsg] = useState("");
+  const [testingConnector, setTestingConnector] = useState<string | null>(null);
+  const [connectorMessages, setConnectorMessages] = useState<Record<string, string>>({});
 
   const rolesQuery = useQuery({
     queryKey: ["admin", "roles"],
@@ -59,6 +63,7 @@ export function ParametresPage() {
       documentLanguage: DEFAULT_APP_SETTINGS.documentLanguage,
       timezone: DEFAULT_APP_SETTINGS.timezone,
       connectorConfig: DEFAULT_APP_SETTINGS.connectorConfig,
+      databricksConfig: DEFAULT_APP_SETTINGS.databricksConfig,
       validation: DEFAULT_APP_SETTINGS.validation,
       notifications: DEFAULT_APP_SETTINGS.notifications,
       sftpConfig: DEFAULT_APP_SETTINGS.sftpConfig,
@@ -79,6 +84,7 @@ export function ParametresPage() {
         documentLanguage: s.documentLanguage,
         timezone: s.timezone,
         connectorConfig: s.connectorConfig,
+        databricksConfig: s.databricksConfig,
         validation: s.validation,
         notifications: s.notifications,
         sftpConfig: s.sftpConfig,
@@ -115,6 +121,41 @@ export function ParametresPage() {
     },
     onError: (err) => {
       setRoleError(err instanceof Error ? err.message : "Échec de la révocation du rôle");
+    },
+  });
+
+  const sftpPasswordMutation = useMutation({
+    mutationFn: (password: string) => api.updateSftpPassword(password),
+    onSuccess: (res) => {
+      setSftpPassword("");
+      setSftpPasswordMsg(res.message || "Mot de passe SFTP enregistré");
+      form.setValue("sftpConfig.hasPassword", true);
+    },
+    onError: (err) => {
+      setSftpPasswordMsg(err instanceof Error ? err.message : "Échec mise à jour mot de passe SFTP");
+    },
+  });
+
+  const testConnectorMutation = useMutation({
+    mutationFn: ({ connector, payload }: { connector: string; payload?: unknown }) =>
+      api.testConnector(connector, payload),
+    onMutate: ({ connector }) => {
+      setTestingConnector(connector);
+      setConnectorMessages((prev) => ({ ...prev, [connector]: "" }));
+    },
+    onSuccess: (res, vars) => {
+      const connector = vars.connector;
+      const label = res.status === "connected" ? "Connecté" : "Déconnecté";
+      const msg = res.message ? `${label} — ${res.message}` : label;
+      setConnectorMessages((prev) => ({ ...prev, [connector]: msg }));
+    },
+    onError: (err, vars) => {
+      const connector = vars.connector;
+      const msg = err instanceof Error ? err.message : "Échec du test de connexion";
+      setConnectorMessages((prev) => ({ ...prev, [connector]: msg }));
+    },
+    onSettled: () => {
+      setTestingConnector(null);
     },
   });
 
@@ -213,24 +254,34 @@ export function ParametresPage() {
                 </CardHeader>
                 <CardContent className="space-y-4">
                   {connectors.map((c) => (
-                    <div key={c.key} className="flex items-center justify-between rounded-lg border p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                          <c.icon className="h-5 w-5 text-primary" />
+                    <div key={c.key}>
+                      <div className="flex items-center justify-between rounded-lg border p-4">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                            <c.icon className="h-5 w-5 text-primary" />
+                          </div>
+                          <div>
+                            <p className="font-medium">{c.label}</p>
+                            <Badge
+                              variant={c.status === "connected" ? "success" : "destructive"}
+                              className="mt-1"
+                            >
+                              {c.status === "connected" ? "Connecté" : "Déconnecté"}
+                            </Badge>
+                          </div>
                         </div>
-                        <div>
-                          <p className="font-medium">{c.label}</p>
-                          <Badge
-                            variant={c.status === "connected" ? "success" : "destructive"}
-                            className="mt-1"
-                          >
-                            {c.status === "connected" ? "Connecté" : "Déconnecté"}
-                          </Badge>
-                        </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => testConnectorMutation.mutate({ connector: c.key })}
+                          disabled={testConnectorMutation.isPending}
+                        >
+                          {testingConnector === c.key ? "Test..." : "Tester"}
+                        </Button>
                       </div>
-                      <Button variant="outline" size="sm" onClick={() => api.testConnector(c.key)}>
-                        Tester
-                      </Button>
+                      {connectorMessages[c.key] && (
+                        <p className="mt-2 text-xs text-muted-foreground">{connectorMessages[c.key]}</p>
+                      )}
                     </div>
                   ))}
                 </CardContent>
@@ -281,6 +332,50 @@ export function ParametresPage() {
                       value={form.watch("connectorConfig.sftpProfile")}
                       onChange={(e) => form.setValue("connectorConfig.sftpProfile", e.target.value)}
                     />
+                  </div>
+
+                  <div className="border-t pt-4">
+                    <p className="mb-3 text-sm font-medium">API Databricks</p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <EditableField
+                        label="Host Databricks"
+                        value={form.watch("databricksConfig.host")}
+                        onChange={(v) => form.setValue("databricksConfig.host", v)}
+                      />
+                      <EditableField
+                        label="Base URL File2EDI"
+                        value={form.watch("databricksConfig.apiBaseUrl")}
+                        onChange={(v) => form.setValue("databricksConfig.apiBaseUrl", v)}
+                      />
+                      <EditableField
+                        label="Serving endpoint modèle"
+                        value={form.watch("databricksConfig.modelEndpoint")}
+                        onChange={(v) => form.setValue("databricksConfig.modelEndpoint", v)}
+                      />
+                      <EditableField
+                        label="Warehouse ID"
+                        value={form.watch("databricksConfig.warehouseId")}
+                        onChange={(v) => form.setValue("databricksConfig.warehouseId", v)}
+                      />
+                      <EditableField
+                        label="Catalog"
+                        value={form.watch("databricksConfig.catalog")}
+                        onChange={(v) => form.setValue("databricksConfig.catalog", v)}
+                      />
+                      <EditableField
+                        label="Schema"
+                        value={form.watch("databricksConfig.schema")}
+                        onChange={(v) => form.setValue("databricksConfig.schema", v)}
+                      />
+                      <EditableField
+                        label="Profil Databricks local"
+                        value={form.watch("databricksConfig.configProfile")}
+                        onChange={(v) => form.setValue("databricksConfig.configProfile", v)}
+                      />
+                    </div>
+                    <p className="mt-3 text-xs text-muted-foreground">
+                      Le token Databricks reste géré hors application via variables d&apos;environnement ou profil CLI.
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -462,8 +557,74 @@ export function ParametresPage() {
                   onChange={(v) => form.setValue("sftpConfig.fileNamePattern", v)}
                 />
 
+                <div className="space-y-2 rounded-lg border p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Mot de passe SFTP</Label>
+                    <Badge variant={form.watch("sftpConfig.hasPassword") ? "default" : "secondary"}>
+                      {form.watch("sftpConfig.hasPassword") ? "Défini" : "Non défini"}
+                    </Badge>
+                  </div>
+                  <Input
+                    type="password"
+                    placeholder="Entrer le mot de passe SFTP"
+                    value={sftpPassword}
+                    onChange={(e) => {
+                      setSftpPassword(e.target.value);
+                      if (sftpPasswordMsg) setSftpPasswordMsg("");
+                    }}
+                  />
+                  <div className="flex items-center gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        if (!sftpPassword.trim()) {
+                          setSftpPasswordMsg("Mot de passe SFTP requis");
+                          return;
+                        }
+                        sftpPasswordMutation.mutate(sftpPassword);
+                      }}
+                      disabled={sftpPasswordMutation.isPending}
+                    >
+                      Enregistrer le mot de passe
+                    </Button>
+                    {sftpPasswordMsg && (
+                      <p className="text-xs text-muted-foreground">{sftpPasswordMsg}</p>
+                    )}
+                  </div>
+                </div>
+
+                <div className="space-y-2 rounded-lg border p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <Label>Test connexion SFTP</Label>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() =>
+                        testConnectorMutation.mutate({
+                          connector: "sftp",
+                          payload: {
+                            sftpConfig: {
+                              host: form.getValues("sftpConfig.host"),
+                              port: form.getValues("sftpConfig.port"),
+                              username: form.getValues("sftpConfig.username"),
+                              remotePath: form.getValues("sftpConfig.remotePath"),
+                            },
+                          },
+                        })
+                      }
+                      disabled={testConnectorMutation.isPending}
+                    >
+                      {testingConnector === "sftp" ? "Test..." : "Tester la connexion"}
+                    </Button>
+                  </div>
+                  {connectorMessages.sftp && (
+                    <p className="text-xs text-muted-foreground">{connectorMessages.sftp}</p>
+                  )}
+                </div>
+
                 <p className="text-xs text-muted-foreground">
-                  Le mot de passe SFTP reste géré côté variables d'environnement (non stocké dans l'app).
+                  Le mot de passe n&apos;est jamais renvoyé en clair. Il est appliqué au runtime pour les tests et exports SFTP.
                 </p>
               </CardContent>
             </Card>

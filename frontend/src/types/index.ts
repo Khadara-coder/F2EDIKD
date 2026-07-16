@@ -305,6 +305,15 @@ export interface AppSettings {
     csvDelimiter: string;
     sftpProfile: string;
   };
+  databricksConfig: {
+    host: string;
+    apiBaseUrl: string;
+    modelEndpoint: string;
+    warehouseId: string;
+    catalog: string;
+    schema: string;
+    configProfile: string;
+  };
   validation: {
     autoValidationThreshold: number;
     requireCustomerReference: boolean;
@@ -327,6 +336,7 @@ export interface AppSettings {
     username: string;
     remotePath: string;
     fileNamePattern: string;
+    hasPassword: boolean;
   };
   security: {
     enforceAuth: boolean;

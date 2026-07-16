@@ -118,6 +118,15 @@ function normalizeSettingsPayload(raw: unknown): AppSettings {
         ? (persisted.connectors as Record<string, unknown>)
         : {}),
     },
+    sftpConfig: {
+      ...(persisted.sftpConfig && typeof persisted.sftpConfig === "object"
+        ? (persisted.sftpConfig as Record<string, unknown>)
+        : {}),
+      hasPassword:
+        typeof (persisted.sftpConfig as Record<string, unknown> | undefined)?.hasPassword === "boolean"
+          ? (persisted.sftpConfig as Record<string, unknown>).hasPassword
+          : false,
+    },
   };
 
   return mergeSettings(persistedWithDerived as Partial<AppSettings>);
@@ -231,6 +240,12 @@ export const api = {
       method: "POST",
     }),
 
+  sendToSap: (orderId: string, payload?: { force?: boolean }) =>
+    request<{ success: boolean; message?: string; alreadySent?: boolean; requiresConfirmation?: boolean }>(`/orders/${orderId}/send-sap`, {
+      method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    }),
+
   getEdifactDownloadUrl: (orderId: string) => `${API_BASE}/orders/${orderId}/edifact`,
 
   getHistory: (filters: HistoryFilters) => {
@@ -260,9 +275,16 @@ export const api = {
       body: JSON.stringify(payload),
     }).then((raw) => normalizeSettingsPayload(raw)),
 
-  testConnector: (connector: string) =>
-    request<{ status: string }>(`/settings/test-connector/${connector}`, {
+  testConnector: (connector: string, payload?: unknown) =>
+    request<{ status: string; message?: string }>(`/settings/test-connector/${connector}`, {
       method: "POST",
+      body: payload ? JSON.stringify(payload) : undefined,
+    }),
+
+  updateSftpPassword: (password: string) =>
+    request<{ ok: boolean; message: string }>("/settings/sftp-password", {
+      method: "PUT",
+      body: JSON.stringify({ password }),
     }),
 
   getAccessRoles: () => request<AccessRolesResponse>("/admin/roles"),

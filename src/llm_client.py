@@ -24,8 +24,11 @@ from typing import Any, Optional
 log = logging.getLogger("edifact.llm_client")
 
 # ── Endpoint constants ────────────────────────────────────────────────────────
-PRIMARY_ENDPOINT  = os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
 FALLBACK_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
+
+
+def _primary_endpoint() -> str:
+    return os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
 
 # Lazy-init mlflow client (safe if not in Databricks context)
 _client: Any = None
@@ -101,10 +104,10 @@ def llm_call(
 ) -> Optional[str]:
     """Call the LLM endpoint and return raw text.
 
-    Tries ``endpoint`` (default PRIMARY_ENDPOINT) first, then FALLBACK_ENDPOINT.
+    Tries ``endpoint`` (default current DATABRICKS_MODEL_ENDPOINT) first, then FALLBACK_ENDPOINT.
     Returns None if both fail or client unavailable.
     """
-    primary = endpoint or PRIMARY_ENDPOINT
+    primary = endpoint or _primary_endpoint()
     messages: list[dict] = []
     if system:
         messages.append({"role": "system", "content": system})

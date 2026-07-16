@@ -19,16 +19,24 @@ from typing import Generator, Optional
 
 log = logging.getLogger("edifact.datatables")
 
-CATALOG   = os.environ.get("EDIFACT_CATALOG", "hive_metastore")
-SCHEMA    = os.environ.get("EDIFACT_SCHEMA",  "edifact_generator")
-WAREHOUSE = os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
+
+def _catalog() -> str:
+    return os.environ.get("EDIFACT_CATALOG", "hive_metastore")
+
+
+def _schema() -> str:
+    return os.environ.get("EDIFACT_SCHEMA", "edifact_generator")
+
+
+def _warehouse() -> str:
+    return os.environ.get("DATABRICKS_WAREHOUSE_ID", "")
 
 
 # ── DDL definitions ────────────────────────────────────────────────────────────
 
 _TABLES: dict[str, str] = {
     "customers": f"""
-        CREATE TABLE IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.customers (
+        CREATE TABLE IF NOT EXISTS `{_catalog()}`.`{_schema()}`.customers (
           sap_code       STRING,
           customer_vat   STRING,
           name           STRING,
@@ -43,7 +51,7 @@ _TABLES: dict[str, str] = {
         ) USING DELTA
     """,
     "partners": f"""
-        CREATE TABLE IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.partners (
+        CREATE TABLE IF NOT EXISTS `{_catalog()}`.`{_schema()}`.partners (
           partner_code       STRING,
           customer_sap_code  STRING,
           customer_vat       STRING,
@@ -63,7 +71,7 @@ _TABLES: dict[str, str] = {
         ) USING DELTA
     """,
     "materials": f"""
-        CREATE TABLE IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.materials (
+        CREATE TABLE IF NOT EXISTS `{_catalog()}`.`{_schema()}`.materials (
           article_code          STRING,
           description           STRING,
           customer_article_code STRING,
@@ -76,7 +84,7 @@ _TABLES: dict[str, str] = {
         ) USING DELTA
     """,
     "article_aliases": f"""
-        CREATE TABLE IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.article_aliases (
+        CREATE TABLE IF NOT EXISTS `{_catalog()}`.`{_schema()}`.article_aliases (
           customer_vat          STRING,
           customer_article_code STRING,
           bosch_article_code    STRING,
@@ -87,7 +95,7 @@ _TABLES: dict[str, str] = {
         ) USING DELTA
     """,
     "order_ledger": f"""
-        CREATE TABLE IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.order_ledger (
+        CREATE TABLE IF NOT EXISTS `{_catalog()}`.`{_schema()}`.order_ledger (
           order_key           STRING,
           source_filename     STRING,
           tst_filename        STRING,
@@ -115,7 +123,7 @@ _TABLES: dict[str, str] = {
         ) USING DELTA
     """,
     "job_history": f"""
-        CREATE TABLE IF NOT EXISTS `{CATALOG}`.`{SCHEMA}`.job_history (
+        CREATE TABLE IF NOT EXISTS `{_catalog()}`.`{_schema()}`.job_history (
           job_id           STRING,
           correlation_id   STRING,
           filename         STRING,

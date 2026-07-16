@@ -23,6 +23,15 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "csvDelimiter": ";",
         "sftpProfile": "default",
     },
+    "databricksConfig": {
+        "host": "https://adb-5555213114570927.7.azuredatabricks.net",
+        "apiBaseUrl": "https://file2edi-5555213114570927.7.azure.databricksapps.com",
+        "modelEndpoint": "databricks-gpt-oss-120b",
+        "warehouseId": "",
+        "catalog": "hive_metastore",
+        "schema": "edifact_generator",
+        "configProfile": "",
+    },
     "validation": {
         "autoValidationThreshold": 90,
         "requireCustomerReference": True,
@@ -45,6 +54,7 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "username": "",
         "remotePath": "/inbox",
         "fileNamePattern": "ORDERS_{orderId}.edi",
+        "hasPassword": False,
     },
     "security": {
         "enforceAuth": True,
@@ -107,6 +117,23 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
             connector["sftpProfile"] = str(raw_connector.get("sftpProfile") or "default").strip() or "default"
         if connector:
             out["connectorConfig"] = connector
+
+    raw_databricks = payload.get("databricksConfig")
+    if isinstance(raw_databricks, dict):
+        databricks: dict[str, Any] = {}
+        for key in (
+            "host",
+            "apiBaseUrl",
+            "modelEndpoint",
+            "warehouseId",
+            "catalog",
+            "schema",
+            "configProfile",
+        ):
+            if key in raw_databricks:
+                databricks[key] = str(raw_databricks.get(key) or "").strip()
+        if databricks:
+            out["databricksConfig"] = databricks
 
     raw_validation = payload.get("validation")
     if isinstance(raw_validation, dict):

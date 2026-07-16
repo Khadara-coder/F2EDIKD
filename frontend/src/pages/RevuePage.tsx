@@ -1,8 +1,10 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { Download, CheckCircle } from "lucide-react";
+import { Download, CheckCircle, Send } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOrderReview } from "@/hooks/useFile2Edi";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/file2edi/StatCard";
 import { StatusBadge } from "@/components/file2edi/StatusBadge";
@@ -23,7 +25,11 @@ export function RevuePage() {
     return <Navigate to="/revue" replace />;
   }
   const queryClient = useQueryClient();
+  const meQuery = useCurrentUser();
   const { data, isLoading, isError, error, refetch } = useOrderReview(orderId);
+  const [infoDialog, setInfoDialog] = useState<{ title: string; message: string } | null>(null);
+  const [confirmSendOpen, setConfirmSendOpen] = useState(false);
+  const [confirmResendOpen, setConfirmResendOpen] = useState(false);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
@@ -49,13 +55,19 @@ export function RevuePage() {
     mutationFn: () => api.generateEdifact(orderId),
     onSuccess: (result) => {
       if (result.success) {
-        alert(`EDIFACT généré : ${result.fileName}`);
+        setInfoDialog({
+          title: "Succès",
+          message: `EDIFACT généré : ${result.fileName}`,
+        });
         invalidate();
       } else {
         const detail = result.errors?.length
           ? result.errors.join("\n")
           : result.message ?? "Génération échouée";
-        alert(`Impossible de générer l'EDIFACT :\n\n${detail}`);
+        setInfoDialog({
+          title: "Erreur",
+          message: `Impossible de générer l'EDIFACT :\n\n${detail}`,
+        });
       }
     },
   });
@@ -79,8 +91,15 @@ export function RevuePage() {
       invalidate();
     },
     onError: (err) => {
-      alert(`Impossible de télécharger l'EDIFACT :\n\n${err instanceof Error ? err.message : "Erreur inconnue"}`);
+      setInfoDialog({
+        title: "Erreur",
+        message: `Impossible de télécharger l'EDIFACT :\n\n${err instanceof Error ? err.message : "Erreur inconnue"}`,
+      });
     },
+  });
+
+  const sendToSap = useMutation({
+    mutationFn: (payload?: { force?: boolean }) => api.sendToSap(orderId, payload),
   });
 
   if (isLoading) {
@@ -108,7 +127,10 @@ export function RevuePage() {
   const handleValidate = () => {
     const errors = collectReviewBlockers(order, partners, lines, anomalies);
     if (errors.length) {
-      alert("Impossible de générer l'EDIFACT :\n\n" + errors.join("\n"));
+      setInfoDialog({
+        title: "Erreur",
+        message: "Impossible de générer l'EDIFACT :\n\n" + errors.join("\n"),
+      });
       return;
     }
     generateEdifact.mutate();
@@ -117,14 +139,69 @@ export function RevuePage() {
   const handleDownloadEdifact = () => {
     const errors = collectReviewBlockers(order, partners, lines, anomalies);
     if (errors.length) {
-      alert("Impossible de télécharger l'EDIFACT :\n\n" + errors.join("\n"));
+      setInfoDialog({
+        title: "Erreur",
+        message: "Impossible de télécharger l'EDIFACT :\n\n" + errors.join("\n"),
+      });
       return;
     }
     downloadEdifact.mutate();
   };
 
-  const edifactBusy = generateEdifact.isPending || downloadEdifact.isPending;
+  const handleSendToSap = async () => {
+    try {
+      const first = await sendToSap.mutateAsync({});
+      if (first.success) {
+        setInfoDialog({
+          title: "Succès",
+          message: first.message || "Commande envoyée vers SAP",
+        });
+        return;
+      }
+
+      if (first.requiresConfirmation || first.alreadySent) {
+        setConfirmResendOpen(true);
+        return;
+      }
+
+      setInfoDialog({
+        title: "Erreur",
+        message: `Impossible d'envoyer vers SAP :\n\n${first.message || "Erreur inconnue"}`,
+      });
+    } catch (err) {
+      setInfoDialog({
+        title: "Erreur",
+        message: `Impossible d'envoyer vers SAP :\n\n${err instanceof Error ? err.message : "Erreur inconnue"}`,
+      });
+    }
+  };
+
+  const handleForceResendToSap = async () => {
+    try {
+      const forced = await sendToSap.mutateAsync({ force: true });
+      if (forced.success) {
+        setInfoDialog({
+          title: "Succès",
+          message: forced.message || "Commande renvoyée vers SAP",
+        });
+        return;
+      }
+      setInfoDialog({
+        title: "Erreur",
+        message: `Impossible d'envoyer vers SAP :\n\n${forced.message || "Erreur inconnue"}`,
+      });
+    } catch (err) {
+      setInfoDialog({
+        title: "Erreur",
+        message: `Impossible d'envoyer vers SAP :\n\n${err instanceof Error ? err.message : "Erreur inconnue"}`,
+      });
+    }
+  };
+
+  const edifactBusy = generateEdifact.isPending || downloadEdifact.isPending || sendToSap.isPending;
   const canValidate = pendingAnomalyCount === 0;
+  const isValidated = data.edifactReady || order.status === "Généré";
+  const isAdv = meQuery.data?.role === "adv";
 
   return (
     <>
@@ -145,15 +222,17 @@ export function RevuePage() {
             >
               <Download className="h-4 w-4" /> PDF
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-2"
-              onClick={handleDownloadEdifact}
-              disabled={edifactBusy}
-            >
-              <Download className="h-4 w-4" /> EDIFACT
-            </Button>
+            {!isAdv && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2"
+                onClick={handleDownloadEdifact}
+                disabled={edifactBusy}
+              >
+                <Download className="h-4 w-4" /> EDIFACT
+              </Button>
+            )}
             <Button size="sm" className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate}>
               <CheckCircle className="h-4 w-4" /> Valider
             </Button>
@@ -302,18 +381,98 @@ export function RevuePage() {
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t pt-6">
-        <Button
-          variant="outline"
-          className="gap-2"
-          onClick={handleDownloadEdifact}
-          disabled={edifactBusy}
-        >
-          <Download className="h-4 w-4" /> Télécharger EDIFACT
-        </Button>
+        {!isAdv && (
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={handleDownloadEdifact}
+            disabled={edifactBusy}
+          >
+            <Download className="h-4 w-4" /> Télécharger EDIFACT
+          </Button>
+        )}
         <Button className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate}>
           <CheckCircle className="h-4 w-4" /> Valider
         </Button>
+        <Button
+          variant="outline"
+          className="gap-2"
+          onClick={() => setConfirmSendOpen(true)}
+          disabled={edifactBusy || !isValidated}
+        >
+          <Send className="h-4 w-4" /> Envoyer vers SAP
+        </Button>
       </div>
+
+      {confirmSendOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="text-base">Confirmation</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm">Confirmer l&apos;envoi de ce fichier vers SAP ?</p>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setConfirmSendOpen(false)}>
+                  Annuler
+                </Button>
+                <Button
+                  onClick={async () => {
+                    setConfirmSendOpen(false);
+                    await handleSendToSap();
+                  }}
+                >
+                  Confirmer
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {confirmResendOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="text-base">Commande déjà envoyée</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="text-sm">
+                Cette commande avait déjà été envoyée vers SAP. Voulez-vous vraiment la renvoyer ?
+              </p>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setConfirmResendOpen(false)}>
+                  Annuler
+                </Button>
+                <Button
+                  onClick={async () => {
+                    setConfirmResendOpen(false);
+                    await handleForceResendToSap();
+                  }}
+                >
+                  Renvoyer
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {infoDialog && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <Card className="w-full max-w-md">
+            <CardHeader>
+              <CardTitle className="text-base">{infoDialog.title}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <p className="whitespace-pre-line text-sm">{infoDialog.message}</p>
+              <div className="flex justify-end">
+                <Button onClick={() => setInfoDialog(null)}>Fermer</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
     </>
   );
 }

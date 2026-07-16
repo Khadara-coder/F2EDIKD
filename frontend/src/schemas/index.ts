@@ -70,6 +70,15 @@ export const appSettingsSchema = z.object({
     csvDelimiter: z.string().min(1).max(1),
     sftpProfile: z.string(),
   }),
+  databricksConfig: z.object({
+    host: z.string(),
+    apiBaseUrl: z.string(),
+    modelEndpoint: z.string(),
+    warehouseId: z.string(),
+    catalog: z.string(),
+    schema: z.string(),
+    configProfile: z.string(),
+  }),
   validation: z.object({
     autoValidationThreshold: z.number().int().min(0).max(100),
     requireCustomerReference: z.boolean(),
@@ -92,6 +101,7 @@ export const appSettingsSchema = z.object({
     username: z.string(),
     remotePath: z.string(),
     fileNamePattern: z.string(),
+    hasPassword: z.boolean(),
   }),
   security: z.object({
     enforceAuth: z.boolean(),

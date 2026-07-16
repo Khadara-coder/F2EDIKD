@@ -92,6 +92,51 @@ F2EDI_API_BASE   = os.environ.get("F2EDI_API_BASE",
                        "https://file2edi-5555213114570927.7.azure.databricksapps.com")
 AI_ENDPOINT_URL  = f"{DATABRICKS_HOST.rstrip('/')}/serving-endpoints/{MODEL_ENDPOINT}/invocations"
 
+
+def _load_persisted_app_settings() -> dict:
+    try:
+        from src.file2edi.store import get_store as _get_f2e_store
+        return _get_f2e_store().load_app_settings()
+    except Exception:
+        return {}
+
+
+def _runtime_databricks_config() -> dict[str, str]:
+    persisted = _load_persisted_app_settings().get("databricksConfig") or {}
+    return {
+        "host": str(persisted.get("host") or os.environ.get("DATABRICKS_HOST") or DATABRICKS_HOST).strip(),
+        "api_base_url": str(persisted.get("apiBaseUrl") or os.environ.get("F2EDI_API_BASE") or F2EDI_API_BASE).strip(),
+        "model_endpoint": str(persisted.get("modelEndpoint") or os.environ.get("DATABRICKS_MODEL_ENDPOINT") or MODEL_ENDPOINT).strip(),
+        "warehouse_id": str(persisted.get("warehouseId") or os.environ.get("DATABRICKS_WAREHOUSE_ID") or "").strip(),
+        "catalog": str(persisted.get("catalog") or os.environ.get("EDIFACT_CATALOG") or "hive_metastore").strip(),
+        "schema": str(persisted.get("schema") or os.environ.get("EDIFACT_SCHEMA") or "edifact_generator").strip(),
+        "config_profile": str(persisted.get("configProfile") or os.environ.get("DATABRICKS_CONFIG_PROFILE") or "").strip(),
+    }
+
+
+def _apply_runtime_databricks_config(settings_payload: dict | None = None) -> None:
+    payload = settings_payload or _load_persisted_app_settings()
+    databricks = payload.get("databricksConfig") if isinstance(payload, dict) else None
+    if not isinstance(databricks, dict):
+        return
+
+    mapping = {
+        "host": "DATABRICKS_HOST",
+        "apiBaseUrl": "F2EDI_API_BASE",
+        "modelEndpoint": "DATABRICKS_MODEL_ENDPOINT",
+        "warehouseId": "DATABRICKS_WAREHOUSE_ID",
+        "catalog": "EDIFACT_CATALOG",
+        "schema": "EDIFACT_SCHEMA",
+        "configProfile": "DATABRICKS_CONFIG_PROFILE",
+    }
+    for key, env_name in mapping.items():
+        value = str(databricks.get(key) or "").strip()
+        if value:
+            os.environ[env_name] = value
+
+
+_apply_runtime_databricks_config()
+
 # Set MASTER_DATA_DIR for app/masterdata.py (read at import time)
 os.environ.setdefault("MASTER_DATA_DIR", MASTER_DATA_RUNTIME)
 
@@ -552,7 +597,7 @@ def _download_workspace_file(ws_path: str, dst_path: Path) -> None:
     """
     import requests as _req
 
-    host = DATABRICKS_HOST.rstrip("/")
+    host = _runtime_databricks_config()["host"].rstrip("/")
     if not host.startswith("http"):
         host = f"https://{host}"
     encoded = urllib.parse.quote(ws_path, safe="")
@@ -1601,6 +1646,21 @@ def api_settings():
         persisted = _get_f2e_store().load_app_settings()
     except Exception:
         pass
+    dbx = _runtime_databricks_config()
+
+    sftp_password_set = bool(os.environ.get("SFTP_PASSWORD", ""))
+    if isinstance(persisted, dict):
+        persisted_sftp = persisted.get("sftpConfig") if isinstance(persisted.get("sftpConfig"), dict) else {}
+        persisted["sftpConfig"] = {
+            "enabled": False,
+            "host": "",
+            "port": 22,
+            "username": "",
+            "remotePath": "/inbox",
+            "fileNamePattern": "ORDERS_{orderId}.edi",
+            **persisted_sftp,
+            "hasPassword": sftp_password_set,
+        }
 
     sftp_host  = os.environ.get("SFTP_HOST", "")
     sftp_ok    = bool(sftp_host)
@@ -1616,11 +1676,11 @@ def api_settings():
             "locked": True,
         },
         "api": {
-            "status": "ok", "base_url": "(local)", "version": "2.1.0",
+            "status": "ok", "base_url": dbx["api_base_url"] or "(local)", "version": "2.1.0",
             "health_endpoint":        "/api/proxy/health",
             "convert_endpoint":       "/api/proxy/convert",
             "convert_batch_endpoint": "/api/proxy/convert-batch",
-            "model_endpoint":         MODEL_ENDPOINT,
+            "model_endpoint":         dbx["model_endpoint"],
         },
         "masterdata": _masterdata_stats(),
         "sftp": {
@@ -1643,10 +1703,10 @@ def api_settings():
         "sftp_remote_dir":   os.environ.get("SFTP_REMOTE_DIR", "(non configuré)"),
         "sender_gln":        UNB_SENDER_GLN,
         "receiver_gln":      UNB_RECEIVER_GLN,
-        "model_endpoint":    MODEL_ENDPOINT,
+        "model_endpoint":    dbx["model_endpoint"],
         "token_status":      "SET" if os.environ.get("DATABRICKS_TOKEN") else "NOT SET (OAuth)",
-        "catalog":           os.environ.get("EDIFACT_CATALOG", "hive_metastore"),
-        "schema":            os.environ.get("EDIFACT_SCHEMA", "edifact_generator"),
+        "catalog":           dbx["catalog"],
+        "schema":            dbx["schema"],
         "masterdata_source": MASTER_DATA_SRC,
         "masterdata_runtime":MASTER_DATA_RUNTIME,
         "outbox":            OUTBOX_DIR,
@@ -2173,7 +2233,10 @@ def _ws_headers() -> dict:
 
 def _ws_api(method: str, endpoint: str, **kwargs) -> "requests.Response":
     import requests as _req
-    url = f"https://{DATABRICKS_HOST}{endpoint}"
+    host = _runtime_databricks_config()["host"].rstrip("/")
+    if not host.startswith("http"):
+        host = f"https://{host}"
+    url = f"{host}{endpoint}"
     resp = _req.request(method, url, headers=_ws_headers(), timeout=30, **kwargs)
     return resp
 

@@ -20,6 +20,15 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     csvDelimiter: ";",
     sftpProfile: "default",
   },
+  databricksConfig: {
+    host: "https://adb-5555213114570927.7.azuredatabricks.net",
+    apiBaseUrl: "https://file2edi-5555213114570927.7.azure.databricksapps.com",
+    modelEndpoint: "databricks-gpt-oss-120b",
+    warehouseId: "",
+    catalog: "hive_metastore",
+    schema: "edifact_generator",
+    configProfile: "",
+  },
   validation: {
     autoValidationThreshold: 90,
     requireCustomerReference: true,
@@ -42,6 +51,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     username: "",
     remotePath: "/inbox",
     fileNamePattern: "ORDERS_{orderId}.edi",
+    hasPassword: false,
   },
   security: {
     enforceAuth: true,
@@ -66,6 +76,7 @@ export function mergeSettings(partial?: Partial<AppSettings> | null): AppSetting
     ...partial,
     connectors: { ...DEFAULT_APP_SETTINGS.connectors, ...partial.connectors },
     connectorConfig: { ...DEFAULT_APP_SETTINGS.connectorConfig, ...partial.connectorConfig },
+    databricksConfig: { ...DEFAULT_APP_SETTINGS.databricksConfig, ...partial.databricksConfig },
     validation: { ...DEFAULT_APP_SETTINGS.validation, ...partial.validation },
     notifications: { ...DEFAULT_APP_SETTINGS.notifications, ...partial.notifications },
     sftpConfig: { ...DEFAULT_APP_SETTINGS.sftpConfig, ...partial.sftpConfig },

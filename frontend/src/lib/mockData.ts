@@ -470,6 +470,15 @@ export const mockSettings: AppSettings = {
     csvDelimiter: ";",
     sftpProfile: "default",
   },
+  databricksConfig: {
+    host: "https://adb-5555213114570927.7.azuredatabricks.net",
+    apiBaseUrl: "https://file2edi-5555213114570927.7.azure.databricksapps.com",
+    modelEndpoint: "databricks-gpt-oss-120b",
+    warehouseId: "",
+    catalog: "hive_metastore",
+    schema: "edifact_generator",
+    configProfile: "",
+  },
   validation: {
     autoValidationThreshold: 90,
     requireCustomerReference: true,
@@ -492,6 +501,7 @@ export const mockSettings: AppSettings = {
     username: "",
     remotePath: "/inbox",
     fileNamePattern: "ORDERS_{orderId}.edi",
+    hasPassword: false,
   },
   security: {
     enforceAuth: true,
