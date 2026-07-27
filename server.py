@@ -1916,6 +1916,7 @@ CREATE TABLE IF NOT EXISTS conversions (
     callback_url           TEXT,
   source_filename        TEXT NOT NULL,
   pdf_hash               TEXT,
+  order_key              TEXT,
   status                 TEXT NOT NULL DEFAULT 'PROCESSING',
   business_status        TEXT,
   delivery_status        TEXT DEFAULT 'NOT_APPLICABLE',
@@ -1978,6 +1979,8 @@ def _init_db() -> None:
         cols = {row[1] for row in conn.execute("PRAGMA table_info(conversions)").fetchall()}
         if "callback_url" not in cols:
             conn.execute("ALTER TABLE conversions ADD COLUMN callback_url TEXT")
+        if "order_key" not in cols:
+            conn.execute("ALTER TABLE conversions ADD COLUMN order_key TEXT")
         conn.commit()
         conn.close()
     except Exception as e:
@@ -2165,15 +2168,33 @@ def _detect_and_init_backend() -> None:
             ok1, _ = _delta_exec(conv_ddl)
             ok2, _ = _delta_exec(audit_ddl)
             if ok1 and ok2:
+                # Order-graph Delta tables (orders + partners + lines + anomalies).
+                # Idempotent DDL so the app is self-contained; if creation fails
+                # (e.g. missing grants) the order graph simply stays SQLite-only.
+                _p = f"`{cat}`.`{schema}`"
+                order_tables = {
+                    "orders":    f"{_p}.file2edi_orders",
+                    "partners":  f"{_p}.file2edi_order_partners",
+                    "lines":     f"{_p}.file2edi_order_lines",
+                    "anomalies": f"{_p}.file2edi_order_anomalies",
+                }
+                order_ok = all(_delta_exec(ddl)[0] for ddl in _order_graph_ddls(cat, schema).values())
+                if not order_ok:
+                    log.warning("persistence: order-graph delta tables unavailable "
+                                "(orders stay SQLite-only)")
+                    order_tables = {}
                 _PERSIST_BACKEND = {
                     "backend": "delta", "persistent": True,
                     "location": f"{cat}.{schema}", "warehouse_id": warehouse_id,
                     "t_conv": t_conv, "t_audit": t_audit,
+                    "order_tables": order_tables,
                     "_delta_exec": _delta_exec,
                     "conversions_available": True, "audit_events_available": True,
+                    "order_graph_available": bool(order_tables),
                     "note": f"Delta tables at {cat}.{schema} via warehouse {warehouse_id}",
                 }
-                log.info("persistence: delta backend active at %s.%s", cat, schema)
+                log.info("persistence: delta backend active at %s.%s (order_graph=%s)",
+                         cat, schema, bool(order_tables))
                 return
             else:
                 log.warning("persistence: delta DDL failed; trying next tier")
@@ -2343,6 +2364,137 @@ def _q(v) -> str:
     """Escape a value for inline SQL (Delta MERGE). Never used for user input."""
     if v is None: return "NULL"
     return "'" + str(v).replace("'", "''") + "'"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Order-graph Delta persistence (full order model → Delta tables)
+# Column spec tuple: (delta_col, review_key, type)  type ∈ str|num|int|bool
+# ─────────────────────────────────────────────────────────────────────────────
+_ORDER_SPEC = [
+    ("order_id", "orderId", "str"), ("upload_id", "uploadId", "str"),
+    ("file_name", "fileName", "str"), ("client_name", "clientName", "str"),
+    ("customer_order_number", "customerOrderNumber", "str"),
+    ("document_reference", "documentReference", "str"),
+    ("order_date", "orderDate", "str"), ("requested_delivery_date", "requestedDeliveryDate", "str"),
+    ("currency", "currency", "str"), ("incoterm", "incoterm", "str"),
+    ("delivery_mode", "deliveryMode", "str"), ("message_type", "messageType", "str"),
+    ("vendor", "vendor", "str"), ("total_amount", "totalAmount", "num"),
+    ("global_confidence", "globalConfidence", "num"), ("status", "status", "str"),
+    ("review_required", "reviewRequired", "bool"), ("line_count", "lineCount", "int"),
+    ("created_at", "createdAt", "str"), ("updated_at", "updatedAt", "str"),
+]
+_PARTNER_SPEC = [
+    ("partner_id", "partnerId", "str"), ("order_id", "orderId", "str"),
+    ("partner_function", "partnerFunction", "str"), ("partner_code", "partnerCode", "str"),
+    ("partner_name", "partnerName", "str"), ("address_line_1", "addressLine1", "str"),
+    ("postal_code", "postalCode", "str"), ("city", "city", "str"),
+    ("country", "country", "str"), ("confidence", "confidence", "num"),
+    ("manually_edited", "manuallyEdited", "bool"),
+]
+_LINE_SPEC = [
+    ("line_id", "lineId", "str"), ("order_id", "orderId", "str"),
+    ("line_number", "lineNumber", "int"), ("customer_reference", "customerReference", "str"),
+    ("bosch_article", "boschArticle", "str"), ("designation", "designation", "str"),
+    ("quantity", "quantity", "num"), ("unit", "unit", "str"),
+    ("unit_price", "unitPrice", "num"), ("amount", "amount", "num"),
+    ("confidence", "confidence", "num"), ("status", "status", "str"),
+    ("comment", "comment", "str"), ("manually_edited", "manuallyEdited", "bool"),
+]
+_ANOMALY_SPEC = [
+    ("anomaly_id", "anomalyId", "str"), ("order_id", "orderId", "str"),
+    ("line_id", "lineId", "str"), ("severity", "severity", "str"),
+    ("field_name", "fieldName", "str"), ("message", "message", "str"),
+    ("status", "status", "str"), ("created_at", "createdAt", "str"),
+]
+_DELTA_TYPE = {"str": "STRING", "num": "DOUBLE", "int": "BIGINT", "bool": "BOOLEAN"}
+
+
+def _order_graph_ddls(cat: str, schema: str) -> dict[str, str]:
+    """Return idempotent CREATE TABLE DDL for the order-graph Delta tables."""
+    def _cols(spec: list) -> str:
+        return ",\n  ".join(f"{c} {_DELTA_TYPE[t]}" for c, _, t in spec)
+    p = f"`{cat}`.`{schema}`"
+    return {
+        "orders":    f"CREATE TABLE IF NOT EXISTS {p}.file2edi_orders (\n  {_cols(_ORDER_SPEC)}\n) USING DELTA",
+        "partners":  f"CREATE TABLE IF NOT EXISTS {p}.file2edi_order_partners (\n  {_cols(_PARTNER_SPEC)}\n) USING DELTA",
+        "lines":     f"CREATE TABLE IF NOT EXISTS {p}.file2edi_order_lines (\n  {_cols(_LINE_SPEC)}\n) USING DELTA",
+        "anomalies": f"CREATE TABLE IF NOT EXISTS {p}.file2edi_order_anomalies (\n  {_cols(_ANOMALY_SPEC)}\n) USING DELTA",
+    }
+
+
+def _qtyped(v, typ: str) -> str:
+    """Format a value as a typed inline SQL literal for Delta."""
+    if typ == "num":
+        try:
+            return str(float(v)) if v not in (None, "") else "NULL"
+        except (TypeError, ValueError):
+            return "NULL"
+    if typ == "int":
+        try:
+            return str(int(v)) if v not in (None, "") else "NULL"
+        except (TypeError, ValueError):
+            return "NULL"
+    if typ == "bool":
+        return "true" if v else "false"
+    return _q(v) if v is not None else "NULL"
+
+
+def _delta_merge_order(table: str, spec: list, order: dict) -> bool:
+    key = spec[0][0]  # order_id
+    src  = ", ".join(f"{_qtyped(order.get(rk), t)} AS {c}" for c, rk, t in spec)
+    sets = ", ".join(f"tgt.{c}=src.{c}" for c, _, _ in spec if c != key)
+    cols = ", ".join(c for c, _, _ in spec)
+    vals = ", ".join(f"src.{c}" for c, _, _ in spec)
+    ok, _ = _delta_exec(
+        f"MERGE INTO {table} AS tgt USING (SELECT {src}) AS src "
+        f"ON tgt.{key}=src.{key} "
+        f"WHEN MATCHED THEN UPDATE SET {sets} "
+        f"WHEN NOT MATCHED THEN INSERT ({cols}) VALUES ({vals})"
+    )
+    return ok
+
+
+def _delta_replace_children(table: str, spec: list, order_id: str, rows: list) -> bool:
+    """Full-replace children of an order (DELETE by order_id, then bulk INSERT)."""
+    ok_del, _ = _delta_exec(f"DELETE FROM {table} WHERE order_id={_q(order_id)}")
+    if not rows:
+        return ok_del
+    cols   = ", ".join(c for c, _, _ in spec)
+    tuples = [
+        "(" + ", ".join(_qtyped(r.get(rk), t) for _, rk, t in spec) + ")"
+        for r in rows
+    ]
+    ok_ins, _ = _delta_exec(f"INSERT INTO {table} ({cols}) VALUES {', '.join(tuples)}")
+    return ok_del and ok_ins
+
+
+def save_order_graph(review: dict) -> bool:
+    """Mirror a full order graph (order + partners + lines + anomalies) into Delta.
+
+    Best-effort: active only when the Delta backend and order-graph tables are
+    available. Returns True on success, False when skipped or on failure
+    (failures are logged, never raised — this must not break the SQLite path).
+    """
+    if _PERSIST_BACKEND.get("backend") != "delta":
+        return False
+    tables = _PERSIST_BACKEND.get("order_tables")
+    if not tables:
+        return False
+    order = review.get("order") or {}
+    oid   = order.get("orderId")
+    if not oid:
+        return False
+    try:
+        ok  = _delta_merge_order(tables["orders"], _ORDER_SPEC, order)
+        ok &= _delta_replace_children(tables["partners"], _PARTNER_SPEC, oid, review.get("partners", []))
+        ok &= _delta_replace_children(tables["lines"], _LINE_SPEC, oid, review.get("lines", []))
+        ok &= _delta_replace_children(tables["anomalies"], _ANOMALY_SPEC, oid, review.get("anomalies", []))
+        if not ok:
+            log.warning("save_order_graph(%s): one or more delta writes failed", oid)
+        return ok
+    except Exception as exc:
+        log.warning("save_order_graph(%s): %s", oid, exc)
+        return False
 
 
 # ─────────────────────────────────────────────────────────────────────────────

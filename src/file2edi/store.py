@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import time
 import uuid
@@ -11,6 +12,7 @@ from typing import Any
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[2] / "data" / "file2edi_schema.sql"
 _APP_SETTINGS_KEY = "app_settings_v1"
+_log = logging.getLogger("edifact.file2edi.store")
 
 _APP_SETTINGS_DEFAULT: dict[str, Any] = {
     "defaultIncoterm": "DAP - Delivered At Place",
@@ -498,6 +500,7 @@ class File2EdiStore:
             finally:
                 conn.close()
             self._sync_conversion_row(review, engine)
+            self._sync_order_graph(review)
 
         self._execute_write(_write)
 
@@ -528,8 +531,22 @@ class File2EdiStore:
             }
             if hasattr(srv, "save_conversion"):
                 srv.save_conversion(row)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log.warning("conversion mirror failed for order %s: %s",
+                         review.get("order", {}).get("orderId"), exc)
+
+    def _sync_order_graph(self, review: dict | None) -> None:
+        """Mirror the full order graph into Delta (best-effort, via server adapter)."""
+        if not review:
+            return
+        try:
+            import server as srv  # lazy: Delta adapter lives in server
+            if hasattr(srv, "save_order_graph"):
+                srv.save_order_graph(review)
+        except Exception as exc:
+            _log.warning("delta order-graph sync failed for order %s: %s",
+                         review.get("order", {}).get("orderId"), exc)
+
 
     def load_order_review(self, order_id: str) -> dict | None:
         conn = self._conn()
@@ -681,7 +698,9 @@ class File2EdiStore:
             )
             conn.commit()
         conn.close()
-        return self.load_order_review(order_id)
+        review = self.load_order_review(order_id)
+        self._sync_order_graph(review)
+        return review
 
     def update_partner(self, partner_id: str, payload: dict) -> dict | None:
         payload = dict(payload)
@@ -744,7 +763,9 @@ class File2EdiStore:
                 )
             conn.commit()
         conn.close()
-        return self.load_order_review(order_id)
+        review = self.load_order_review(order_id)
+        self._sync_order_graph(review)
+        return review
 
     def update_line(self, line_id: str, payload: dict) -> dict | None:
         conn = self._conn()
@@ -777,7 +798,9 @@ class File2EdiStore:
         conn.commit()
         self._recalc_order_total(conn, order_id)
         conn.close()
-        return self.load_order_review(order_id)
+        review = self.load_order_review(order_id)
+        self._sync_order_graph(review)
+        return review
 
     def _recalc_order_total(self, conn: sqlite3.Connection, order_id: str) -> None:
         total = conn.execute(
@@ -813,7 +836,9 @@ class File2EdiStore:
         conn.commit()
         self._recalc_order_total(conn, order_id)
         conn.close()
-        return self.load_order_review(order_id)
+        review = self.load_order_review(order_id)
+        self._sync_order_graph(review)
+        return review
 
     def delete_line(self, line_id: str) -> dict | None:
         conn = self._conn()
@@ -826,7 +851,9 @@ class File2EdiStore:
         conn.commit()
         self._recalc_order_total(conn, order_id)
         conn.close()
-        return self.load_order_review(order_id)
+        review = self.load_order_review(order_id)
+        self._sync_order_graph(review)
+        return review
 
     def resolve_anomaly(self, anomaly_id: str, action: str) -> dict | None:
         status_map = {"corrected": "Corrigée", "ignored": "Ignorée", "blocking": "Bloquante"}
@@ -843,7 +870,9 @@ class File2EdiStore:
         )
         conn.commit()
         conn.close()
-        return self.load_order_review(row["order_id"])
+        review = self.load_order_review(row["order_id"])
+        self._sync_order_graph(review)
+        return review
 
     def mark_edifact_generated(self, order_id: str, filename: str, content: str) -> None:
         conn = self._conn()
@@ -860,6 +889,7 @@ class File2EdiStore:
         )
         conn.commit()
         conn.close()
+        self._sync_order_graph(self.load_order_review(order_id))
 
     def get_edifact_export(self, order_id: str) -> dict | None:
         conn = self._conn()
