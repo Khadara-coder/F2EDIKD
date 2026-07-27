@@ -1308,6 +1308,13 @@ async def _startup_sync_masterdata() -> None:
         log.info("persistence: backend=%s persistent=%s location=%s",
                  _PERSIST_BACKEND.get("backend"), _PERSIST_BACKEND.get("persistent"),
                  _PERSIST_BACKEND.get("location"))
+        # Rebuild the local SQLite order cache from Delta when the container is
+        # fresh/ephemeral (no data loss across redeploys).
+        try:
+            from src.file2edi.store import get_store as _gs
+            _gs().hydrate_from_delta()
+        except Exception as _he:
+            log.warning("order-cache hydration from Delta failed (non-fatal): %s", _he)
     except Exception as _pe:
         log.warning("persistence backend init failed (SQLite fallback active): %s", _pe)
 
@@ -2495,6 +2502,77 @@ def save_order_graph(review: dict) -> bool:
     except Exception as exc:
         log.warning("save_order_graph(%s): %s", oid, exc)
         return False
+
+
+def _cast_delta_value(v, typ: str):
+    """Cast a Delta scalar (usually returned as string) back to a Python value."""
+    if v is None or v == "":
+        return None
+    if typ == "num":
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+    if typ == "int":
+        try:
+            return int(float(v))
+        except (TypeError, ValueError):
+            return None
+    if typ == "bool":
+        return str(v).strip().lower() in ("true", "1", "yes")
+    return v
+
+
+def _delta_obj(row: dict, spec: list) -> dict:
+    """Map a Delta row (snake_case cols) to a review object (camelCase keys)."""
+    return {rk: _cast_delta_value(row.get(c), t) for c, rk, t in spec}
+
+
+def load_order_graphs_from_delta() -> list[dict]:
+    """Read every order graph from Delta and rebuild review dicts (for hydration).
+
+    Returns [] when the Delta backend / order tables are unavailable. Children
+    are fetched in bulk and grouped in memory to avoid N+1 warehouse queries.
+    """
+    if _PERSIST_BACKEND.get("backend") != "delta":
+        return []
+    tables = _PERSIST_BACKEND.get("order_tables")
+    if not tables:
+        return []
+    try:
+        order_cols   = [c for c, _, _ in _ORDER_SPEC]
+        partner_cols = [c for c, _, _ in _PARTNER_SPEC]
+        line_cols    = [c for c, _, _ in _LINE_SPEC]
+        anomaly_cols = [c for c, _, _ in _ANOMALY_SPEC]
+
+        orders   = _delta_rows_to_dicts(f"SELECT {', '.join(order_cols)} FROM {tables['orders']}", order_cols)
+        partners = _delta_rows_to_dicts(f"SELECT {', '.join(partner_cols)} FROM {tables['partners']}", partner_cols)
+        lines    = _delta_rows_to_dicts(f"SELECT {', '.join(line_cols)} FROM {tables['lines']}", line_cols)
+        anomalies = _delta_rows_to_dicts(f"SELECT {', '.join(anomaly_cols)} FROM {tables['anomalies']}", anomaly_cols)
+
+        by_order_p: dict[str, list] = {}
+        by_order_l: dict[str, list] = {}
+        by_order_a: dict[str, list] = {}
+        for p in partners:
+            by_order_p.setdefault(p.get("order_id"), []).append(_delta_obj(p, _PARTNER_SPEC))
+        for ln in lines:
+            by_order_l.setdefault(ln.get("order_id"), []).append(_delta_obj(ln, _LINE_SPEC))
+        for a in anomalies:
+            by_order_a.setdefault(a.get("order_id"), []).append(_delta_obj(a, _ANOMALY_SPEC))
+
+        reviews = []
+        for o in orders:
+            oid = o.get("order_id")
+            reviews.append({
+                "order": _delta_obj(o, _ORDER_SPEC),
+                "partners": by_order_p.get(oid, []),
+                "lines": sorted(by_order_l.get(oid, []), key=lambda r: r.get("lineNumber") or 0),
+                "anomalies": by_order_a.get(oid, []),
+            })
+        return reviews
+    except Exception as exc:
+        log.warning("load_order_graphs_from_delta: %s", exc)
+        return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────

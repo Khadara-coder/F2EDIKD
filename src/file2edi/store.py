@@ -391,7 +391,7 @@ class File2EdiStore:
         p = Path(row["file_path"])
         return p if p.exists() else None
 
-    def save_order_review(self, review: dict) -> None:
+    def save_order_review(self, review: dict, sync_delta: bool = True) -> None:
         review = dict(review)
 
         def _write() -> None:
@@ -500,7 +500,8 @@ class File2EdiStore:
             finally:
                 conn.close()
             self._sync_conversion_row(review, engine)
-            self._sync_order_graph(review)
+            if sync_delta:
+                self._sync_order_graph(review)
 
         self._execute_write(_write)
 
@@ -546,6 +547,38 @@ class File2EdiStore:
         except Exception as exc:
             _log.warning("delta order-graph sync failed for order %s: %s",
                          review.get("order", {}).get("orderId"), exc)
+
+    def hydrate_from_delta(self) -> int:
+        """Rebuild the local SQLite order cache from Delta on startup.
+
+        Only runs when the Delta backend is active AND the local order table is
+        empty (i.e. a fresh/ephemeral container). Writes are sync-free to avoid
+        mirroring straight back to Delta. Returns the number of orders loaded.
+        """
+        try:
+            import server as srv  # lazy
+            if not hasattr(srv, "load_order_graphs_from_delta"):
+                return 0
+            conn = self._conn()
+            existing = conn.execute("SELECT COUNT(*) FROM file2edi_orders").fetchone()[0]
+            conn.close()
+            if existing > 0:
+                return 0
+            reviews = srv.load_order_graphs_from_delta()
+            count = 0
+            for rev in reviews:
+                try:
+                    self.save_order_review(rev, sync_delta=False)
+                    count += 1
+                except Exception as exc:
+                    _log.warning("hydrate: skip order %s: %s",
+                                 rev.get("order", {}).get("orderId"), exc)
+            if count:
+                _log.info("hydrate: loaded %d orders from Delta into local SQLite", count)
+            return count
+        except Exception as exc:
+            _log.warning("hydrate_from_delta failed: %s", exc)
+            return 0
 
 
     def load_order_review(self, order_id: str) -> dict | None:
