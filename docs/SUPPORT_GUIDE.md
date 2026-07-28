@@ -3,10 +3,11 @@
 ## Daily Operational Checks
 
 1. New files processed today (check `logs/edifact.log`)
-2. Any files in `PDF_ERROR` that need review
-3. SFTP delivery confirmations in `data/sftp_delivery_ledger.csv`
-4. Duplicate detection count
-5. `logs/edifact.log` does not show CRITICAL entries
+2. Masterdata sync freshness on `/api/health/system` (`masterdata_sync.status` should be `fresh`)
+3. Any files in `PDF_ERROR` that need review
+4. SFTP delivery confirmations in `data/sftp_delivery_ledger.csv`
+5. Duplicate detection count in `data/duplicate_ledger.csv`
+6. `logs/edifact.log` does not show CRITICAL entries
 
 ## Common Error Codes and Resolution
 
@@ -24,10 +25,24 @@
 
 ## Master Data Refresh
 
-When master data is updated in the `RSR1DY/masterdata` repository:
-1. Sync files to `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
-2. The engine picks them up on next run automatically
-3. No restart required
+Production must sync from `https://github.boschdevcloud.com/RSR1DY/masterdata.git` daily.
+
+Use the daily Databricks job command:
+
+```
+python scripts/sync_masterdata_repo.py \
+	--repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
+	--branch main \
+	--target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
+	--notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync \
+	--notify-api-key "$APP_API_KEY"
+```
+
+After sync, verify:
+
+1. `/api/masterdata/stats` shows updated `sync_commit` and recent `sync_age_hours`
+2. `/api/health/system` reports `masterdata_sync.status = fresh`
+3. `.masterdata_sync_metadata.json` exists in runtime masterdata path
 
 ## SFTP Credential Rotation
 

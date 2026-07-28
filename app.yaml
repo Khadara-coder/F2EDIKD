@@ -19,6 +19,10 @@ env:
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/"
   - name: MASTERDATA_RUNTIME_DIR
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata_runtime"
+  - name: MASTERDATA_SYNC_METADATA_PATH
+    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata_runtime/.masterdata_sync_metadata.json"
+  - name: MASTERDATA_STALE_HOURS
+    value: "25"
   - name: OUTBOX_DIR
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox"
   - name: LOG_DIR

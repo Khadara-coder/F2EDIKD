@@ -74,6 +74,35 @@ git pull origin main
     - Outbox: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox/`
     - Logs: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs/`
 
+### Daily masterdata sync job (production)
+
+Production masterdata must come from:
+
+- `https://github.boschdevcloud.com/RSR1DY/masterdata.git`
+
+Schedule a daily Databricks job that runs:
+
+```bash
+python scripts/sync_masterdata_repo.py \
+    --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
+    --branch main \
+    --target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
+    --notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync \
+    --notify-api-key "$APP_API_KEY"
+```
+
+What the job does:
+
+1. Pulls latest repo content into a local cache.
+2. Validates required files: `10564_Customers.csv`, `10564_Partners.csv`, `10564_Materials.csv`, `DB_Salesorder.csv`.
+3. Publishes files atomically to the production Volume.
+4. Writes sync metadata file `.masterdata_sync_metadata.json` (commit hash, timestamp, checksums, row counts).
+5. Optionally calls `/api/masterdata/sync` to refresh runtime cache without app restart.
+
+Health visibility:
+
+- `/api/health/system` and `/api/masterdata/stats` now expose masterdata sync freshness (`fresh|stale|unknown`), age in hours, and git commit hash.
+
 ### Persistence tiers
 
 | Tier | Config | Durability |

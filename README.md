@@ -100,12 +100,24 @@ python src/edifact_orders_engine.py --analyse-n8n-only
 
 Authoritative source (Databricks prod): `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
 
+Daily source repository (production sync job): `https://github.boschdevcloud.com/RSR1DY/masterdata.git`
+
 | File | Role |
 |---|---|
 | `10564_Customers.csv` | Sold-to lookup (SOLDTO;NAME;ORT01;PSTLZ;STRAS;LAND1;VAT_NR) |
 | `10564_Partners.csv` | Ship-to lookup (SOLDTO;SHIPTO;LAND1;NAME;ORT01;PSTLZ;STRAS) |
 | `10564_Materials.csv` | Material index (MATNR;MAKTX) |
 | `DB_Salesorder.csv` | Historical reference (comparison only) |
+
+Daily sync into production Volume:
+
+```bash
+python scripts/sync_masterdata_repo.py \
+  --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
+  --branch main \
+  --target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
+  --notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync
+```
 
 ---
 

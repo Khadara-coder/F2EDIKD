@@ -61,6 +61,23 @@ MASTER_DATA_RUNTIME = _ensure_dir(
     os.environ.get("MASTERDATA_RUNTIME_DIR", str(APP_ROOT / "data" / "masterdata")),
     "masterdata",
 )
+MASTERDATA_SYNC_METADATA_FILENAME = (
+    os.environ.get("MASTERDATA_SYNC_METADATA_FILENAME", ".masterdata_sync_metadata.json")
+    or ".masterdata_sync_metadata.json"
+).strip()
+MASTERDATA_SYNC_METADATA_PATH = (
+    os.environ.get(
+        "MASTERDATA_SYNC_METADATA_PATH",
+        str(Path(MASTER_DATA_RUNTIME) / MASTERDATA_SYNC_METADATA_FILENAME),
+    )
+    or str(Path(MASTER_DATA_RUNTIME) / MASTERDATA_SYNC_METADATA_FILENAME)
+).strip()
+try:
+    MASTERDATA_STALE_HOURS = int(
+        (os.environ.get("MASTERDATA_STALE_HOURS", "25") or "25").strip()
+    )
+except Exception:
+    MASTERDATA_STALE_HOURS = 25
 OUTBOX_DIR = _ensure_dir(
     os.environ.get("OUTBOX_DIR", str(APP_ROOT / "data" / "outbox")),
     "outbox",
@@ -604,6 +621,79 @@ _MASTER_FILES = [
 ]
 
 
+def _read_masterdata_sync_metadata() -> dict:
+    """Read sync metadata from runtime/source locations if available."""
+    candidates = [
+        Path(MASTERDATA_SYNC_METADATA_PATH),
+        Path(MASTER_DATA_RUNTIME) / MASTERDATA_SYNC_METADATA_FILENAME,
+        Path(MASTER_DATA_SRC) / MASTERDATA_SYNC_METADATA_FILENAME,
+    ]
+    seen: set[str] = set()
+    for p in candidates:
+        k = str(p)
+        if k in seen:
+            continue
+        seen.add(k)
+        if not p.exists() or not p.is_file():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict):
+                data["_metadata_path"] = str(p)
+                return data
+        except Exception as exc:
+            log.warning("masterdata sync metadata parse failed (%s): %s", p, exc)
+    return {}
+
+
+def _masterdata_sync_freshness() -> dict:
+    """Return metadata + freshness state for production daily sync visibility."""
+    meta = _read_masterdata_sync_metadata()
+    sync_at = str(meta.get("synced_at_utc") or meta.get("synced_at") or "").strip()
+    age_hours: float | None = None
+    stale = None
+    if sync_at:
+        try:
+            sync_dt = datetime.fromisoformat(sync_at.replace("Z", "+00:00"))
+            age_hours = round(
+                (datetime.now(timezone.utc) - sync_dt.astimezone(timezone.utc)).total_seconds() / 3600,
+                2,
+            )
+            stale = age_hours > float(MASTERDATA_STALE_HOURS)
+        except Exception:
+            stale = None
+    if not sync_at:
+        status = "unknown"
+    elif stale is True:
+        status = "stale"
+    elif stale is False:
+        status = "fresh"
+    else:
+        status = "unknown"
+    return {
+        "status": status,
+        "stale": stale,
+        "stale_after_hours": MASTERDATA_STALE_HOURS,
+        "synced_at_utc": sync_at or None,
+        "age_hours": age_hours,
+        "repo_url": meta.get("repo_url"),
+        "branch": meta.get("branch"),
+        "commit": meta.get("commit"),
+        "files": meta.get("files") if isinstance(meta.get("files"), dict) else {},
+        "metadata_path": meta.get("_metadata_path"),
+    }
+
+
+def _apply_masterdata_sync_metadata_to_cache_state() -> None:
+    """Mark cache source as workspace-synced when metadata exists."""
+    meta = _read_masterdata_sync_metadata()
+    sync_at = str(meta.get("synced_at_utc") or meta.get("synced_at") or "").strip()
+    if not sync_at:
+        return
+    for key in _MD_FILES:
+        _MD_LAST_SYNC.setdefault(key, sync_at)
+
+
 def _download_workspace_file(ws_path: str, dst_path: Path) -> None:
     """Download a single workspace file via the Databricks REST API.
 
@@ -746,6 +836,15 @@ def _sync_masterdata() -> list[list]:
                 err_cat = str(exc)[:150]
             log.warning("masterdata sync failed for %s: %s", fname, exc)
             rows.append([fname, "—", "—", f"ERROR: {err_cat}"])
+
+    metadata_src = Path(MASTER_DATA_SRC) / MASTERDATA_SYNC_METADATA_FILENAME
+    metadata_dst = Path(MASTERDATA_SYNC_METADATA_PATH)
+    try:
+        if metadata_src.exists():
+            metadata_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(str(metadata_src), str(metadata_dst))
+    except Exception as exc:
+        log.warning("masterdata metadata copy failed (%s -> %s): %s", metadata_src, metadata_dst, exc)
 
     # Invalidate in-memory masterdata cache so next PDF uses fresh data
     try:
@@ -1124,6 +1223,7 @@ def _store_conversion_history(result: dict) -> None:
 def api_proxy_health():
     """Health check — fully local.  Always returns top-level ok/status (Issue 1 fix)."""
     local_md  = _masterdata_stats()   # dict after masterdata refactoring
+    md_sync   = _masterdata_sync_freshness()
     mc_status = {k: {"rows": v.get("rows",0), "loaded_at": v.get("loaded_at")}
                  for k, v in MASTERDATA_CACHE.items()}
     # Fix: iterate dict values, not dict keys (md_ok bug)
@@ -1147,7 +1247,11 @@ def api_proxy_health():
         "api":      {"ok": True, "status": "ok", "version": "2.1.0"},
         "database": {"ok": db_ok, "status": "ok" if db_ok else "ERROR",
                      "backend": storage.get("backend", "sqlite")},
-        "masterdata": {"ok": md_rows_ok, "schema_ok": md_schema_ok},
+        "masterdata": {
+            "ok": md_rows_ok,
+            "schema_ok": md_schema_ok,
+            "sync": md_sync,
+        },
         "profile": {
             "name": "ELM_STANDARD", "syntax": "UNOC:3", "message": "ORDERS D.96A",
             "sender_gln": UNB_SENDER_GLN, "receiver_gln": UNB_RECEIVER_GLN,
@@ -1161,6 +1265,7 @@ def api_proxy_health():
         "sftp_configured": bool(os.environ.get("SFTP_HOST", "")),
         "f2edi_base":      "local",
         "mc_status":       mc_status,
+        "masterdata_sync": md_sync,
     }
 
 
@@ -1317,12 +1422,14 @@ async def _startup_sync_masterdata() -> None:
         all_present = all((dst / f).exists() for f in _MASTER_FILES)
         if all_present:
             total = sum((dst / f).stat().st_size for f in _MASTER_FILES)
+            _apply_masterdata_sync_metadata_to_cache_state()
             _load_masterdata_cache()
             log.info("startup masterdata: all %d files already present (%.1f MB bundled) — skipping API sync",
                      len(_MASTER_FILES), total / 1_048_576)
         else:
             # Files missing — try API download
             rows = _sync_masterdata()
+            _apply_masterdata_sync_metadata_to_cache_state()
             _load_masterdata_cache()   # warm up cache after download
             ok  = sum(1 for r in rows if r[-1] == "OK")
             log.info("startup masterdata sync: %d/%d files OK", ok, len(rows))
@@ -1597,13 +1704,18 @@ def api_md_stats():
     all_valid  = all(v.get("schema_valid", True) is not False for v in stats.values())
     total_rows = sum(v.get("rows", 0) for v in stats.values())
     last_sync  = max(_MD_LAST_SYNC.values(), default=None) if _MD_LAST_SYNC else None
+    md_sync    = _masterdata_sync_freshness()
     return {
         "files": stats,
         "summary": {
             "all_valid":  all_valid,
             "total_rows": total_rows,
             "last_sync":  last_sync,
+            "sync_status": md_sync.get("status"),
+            "sync_age_hours": md_sync.get("age_hours"),
+            "sync_commit": md_sync.get("commit"),
         },
+        "sync": md_sync,
         "full_load_warning": (
             "Les fichiers masterdata sont traités comme full-load. "
             "Aucune suppression automatique n'est exécutée par File2EDI."
@@ -1628,6 +1740,7 @@ def api_md_sync():
         for key, fname in _MD_FILES.items():
             if fname in ok_files:
                 _MD_LAST_SYNC[key] = now_iso
+        _apply_masterdata_sync_metadata_to_cache_state()
         _load_masterdata_cache()
         save_audit_event("__masterdata__", "masterdata_sync_succeeded", "system",
                          {"ok": ok_files, "errors": err_files})
@@ -4159,9 +4272,11 @@ def api_md_reload_cache():
 def api_md_diagnostics():
     """Comprehensive masterdata diagnostics for Paramètres > Diagnostics (Req 6+13)."""
     stats = _masterdata_stats()
+    md_sync = _masterdata_sync_freshness()
     return {
         "active_source":     {k: _MD_SOURCE.get(k, "unknown") for k in _MD_FILES},
         "last_sync":         dict(_MD_LAST_SYNC),
+        "sync":              md_sync,
         "files":             stats,
         "full_load_warning": (
             "Les fichiers masterdata sont traités comme full-load. "
