@@ -1,0 +1,16 @@
+{
+  "source": "pdf_text",
+  "width": 600,
+  "height": 800,
+  "lines": [
+    {"text": "Facture a", "bbox": {"x0": 30, "y0": 80, "x1": 120, "y1": 95}},
+    {"text": "Adresse de livraison", "bbox": {"x0": 330, "y0": 80, "x1": 500, "y1": 95}},
+    {"text": "AUTRE CLIENT SA", "bbox": {"x0": 30, "y0": 120, "x1": 180, "y1": 135}},
+    {"text": "SOCIETE TEST LIVRAISON", "bbox": {"x0": 330, "y0": 120, "x1": 540, "y1": 135}},
+    {"text": "10 RUE PARIS", "bbox": {"x0": 30, "y0": 140, "x1": 170, "y1": 155}},
+    {"text": "18 AVENUE DU PONT DE TASSET", "bbox": {"x0": 330, "y0": 140, "x1": 560, "y1": 155}},
+    {"text": "75001 PARIS", "bbox": {"x0": 30, "y0": 160, "x1": 150, "y1": 175}},
+    {"text": "74960 MEYTHET", "bbox": {"x0": 330, "y0": 160, "x1": 460, "y1": 175}},
+    {"text": "FRANCE", "bbox": {"x0": 330, "y0": 180, "x1": 390, "y1": 195}}
+  ]
+}

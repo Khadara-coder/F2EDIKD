@@ -403,9 +403,9 @@ def postal_city_from_text(line: str) -> tuple[str, str] | None:
     if pair:
         return pair["postal"], pair["city"]
 
-    reference = load_postal_reference()
-    if reference["loaded"]:
-        return None
+    # Even with a loaded postal reference, keep a textual fallback because some
+    # real delivery cities/postals can be absent or OCR-noisy in the reference.
+    _reference = load_postal_reference()
 
     match = re.search(r"\b(\d{5})\b\s*([A-ZÀ-ÖØ-Þ][A-ZÀ-ÖØ-Þ' -]{2,})?", line, flags=re.IGNORECASE)
     if not match:

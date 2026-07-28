@@ -1,0 +1,6 @@
+BON DE COMMANDE
+Facture a                    Adresse de livraison
+AUTRE CLIENT SA              SOCIETE TEST LIVRAISON
+10 RUE PARIS                 18 AVENUE DU PONT DE TASSET
+75001 PARIS                  74960 MEYTHET
+FRANCE                       FRANCE

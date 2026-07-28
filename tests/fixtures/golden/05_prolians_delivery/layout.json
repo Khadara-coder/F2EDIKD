@@ -1,0 +1,18 @@
+{
+  "source": "pdf_text",
+  "width": 600,
+  "height": 900,
+  "lines": [
+    {"text": "Reference client ST 0 CSP 70478", "bbox": {"x0": 35, "y0": 70, "x1": 320, "y1": 84}},
+    {"text": "Facture a", "bbox": {"x0": 360, "y0": 70, "x1": 440, "y1": 84}},
+    {"text": "Adresse de livraison", "bbox": {"x0": 35, "y0": 210, "x1": 210, "y1": 224}},
+    {"text": "LECOUFLE AGNEAUX", "bbox": {"x0": 35, "y0": 230, "x1": 210, "y1": 244}},
+    {"text": "1522 ROUTE DE PERIERS", "bbox": {"x0": 35, "y0": 250, "x1": 250, "y1": 264}},
+    {"text": "50180 AGNEAUX", "bbox": {"x0": 35, "y0": 270, "x1": 170, "y1": 284}},
+    {"text": "FRANCE", "bbox": {"x0": 35, "y0": 290, "x1": 95, "y1": 304}},
+    {"text": "FACTURE A", "bbox": {"x0": 360, "y0": 220, "x1": 450, "y1": 234}},
+    {"text": "ELM LEBLANC", "bbox": {"x0": 360, "y0": 240, "x1": 470, "y1": 254}},
+    {"text": "126 RUE DE STALINGRAD", "bbox": {"x0": 360, "y0": 260, "x1": 560, "y1": 274}},
+    {"text": "93700 DRANCY", "bbox": {"x0": 360, "y0": 280, "x1": 470, "y1": 294}}
+  ]
+}

@@ -164,7 +164,15 @@ def is_acceptable_postal_city_validation(validation: dict[str, Any] | None) -> b
         return False
     if validation.get("match") is True:
         return True
-    return validation.get("status") in {"ville_incompatible", "cedex_ok"}
+    # Keep delivery extraction resilient when the city reference is incomplete:
+    # unknown postal/city pairs are still usable as candidates and can be
+    # validated later against master data.
+    return validation.get("status") in {
+        "ville_incompatible",
+        "cedex_ok",
+        "code_postal_inconnu",
+        "reference_absente",
+    }
 
 
 def is_rejectable_postal_city_pair(
