@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from app.engines.delivery_address import DeliveryAddressEngine
 from app.engines.order_lines import OrderLinesEngine
 from app.engines.purchase_order import PurchaseOrderEngine
@@ -11,6 +13,7 @@ from app.engines.tax_identification import TaxIdentificationEngine
 
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures" / "golden"
+_MASTERDATA_AVAILABLE = (Path(__file__).resolve().parents[1] / "data" / "masterdata" / "10564_Customers.csv").exists()
 
 
 def test_delivery_address_engine_detects_layout_address():
@@ -26,6 +29,7 @@ def test_delivery_address_engine_detects_layout_address():
     assert result["layout_analysis"]["address_candidates"]
 
 
+@pytest.mark.skipif(not _MASTERDATA_AVAILABLE, reason="Master data CSV absent")
 def test_shipto_matching_engine_matches_from_detected_address(monkeypatch):
     monkeypatch.setenv("ENABLE_ADDRESS_EMBEDDINGS", "false")
     fixture_dir = FIXTURES / "01_izi_confort_order"
@@ -67,6 +71,7 @@ def test_tax_identification_engine_filters_invalid_vat():
     assert result["expected_vat_from_siren"] == ["FR65200410101"]
 
 
+@pytest.mark.skipif(not _MASTERDATA_AVAILABLE, reason="Master data CSV absent")
 def test_purchase_order_engine_orchestrates_specialized_engines(monkeypatch):
     monkeypatch.setenv("ENABLE_ADDRESS_EMBEDDINGS", "false")
     fixture_dir = FIXTURES / "01_izi_confort_order"

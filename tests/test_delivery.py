@@ -452,6 +452,10 @@ def test_prolians_real_pdf_delivery():
     assert resolved.get("Ville") == "AGNEAUX"
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "data" / "masterdata" / "10564_Customers.csv").exists(),
+    reason="Master data CSV absent",
+)
 def test_izi_confort_order_validates_shipto():
     import os
 
@@ -477,6 +481,10 @@ def test_izi_confort_order_validates_shipto():
     assert result["SOLDTO"] == "15020720"
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "data" / "masterdata" / "10564_Customers.csv").exists(),
+    reason="Master data CSV absent",
+)
 def test_izi_confort_guided_pipeline_validates_shipto():
     import os
 
@@ -508,6 +516,10 @@ def test_izi_confort_guided_pipeline_validates_shipto():
     assert validated["Guidage masterdata"] == "oui"
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "data" / "masterdata" / "10564_Customers.csv").exists(),
+    reason="Master data CSV absent",
+)
 def test_prolians_guided_pipeline_detects_50180_without_shipto_match():
     import os
 

@@ -19,7 +19,10 @@ def master_data():
 
     md.master_data_cache = None
     md.master_data_cache_fingerprint = None
-    return get_master_data()
+    data = get_master_data()
+    if not data.get("loaded"):
+        pytest.skip(f"Master data unavailable: {data.get('error', 'unknown')}")
+    return data
 
 
 def test_master_data_indexes_loaded(master_data):
@@ -431,6 +434,10 @@ def test_garanka_pdf_matches_soldto_billing_address():
     assert "JEAN PERRIN" not in (validated.get("Rue") or "")
 
 
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "data" / "masterdata" / "10564_Customers.csv").exists(),
+    reason="Master data CSV absent",
+)
 def test_validate_delivery_with_master_does_not_return_zero_score_shipto():
     delivery = {
         "Rue": "999 AVENUE INCONNUE",
