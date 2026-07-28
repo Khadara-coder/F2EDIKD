@@ -73,6 +73,8 @@ export interface ReviewQueueItem {
   confidence: number;
   issue: string;
   date: string;
+  createdAt?: string;
+  updatedAt?: string;
   status: OrderStatus;
   processedAt?: string;
   processedBy?: string;

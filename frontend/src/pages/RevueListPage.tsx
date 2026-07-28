@@ -25,6 +25,15 @@ export function RevueListPage() {
   const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
 
+  const managerLabel = (raw: string | undefined) => {
+    const value = (raw || "").trim();
+    if (!value) return null;
+    if (value.toLowerCase() === "operator" || value.toLowerCase() === "system") {
+      return "Système (historique)";
+    }
+    return value;
+  };
+
   return (
     <>
       <Header
@@ -91,13 +100,13 @@ export function RevueListPage() {
                       </TableCell>
                     )}
                     {isAdmin && <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>}
-                    <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
+                    <TableCell className="text-sm">{formatDateTime(row.createdAt || row.date)}</TableCell>
                     <TableCell className="text-sm">
                       {row.processedAt ? formatDateTime(row.processedAt) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     {isAdmin && (
                       <TableCell className="text-sm">
-                        {row.processedBy ? row.processedBy : <span className="text-muted-foreground">—</span>}
+                        {managerLabel(row.processedBy) || <span className="text-muted-foreground">—</span>}
                       </TableCell>
                     )}
                     <TableCell>

@@ -738,16 +738,27 @@ def _parse_timestamp(value: str | None) -> datetime | None:
         return None
 
 
+def _to_iso_utc(value: str | None) -> str | None:
+    """Normalize mixed timestamp inputs to ISO-8601 UTC for frontend consistency."""
+    parsed = _parse_timestamp(value)
+    return parsed.isoformat() if parsed else None
+
+
 def _order_list_item(o: dict) -> dict:
+    created_at = _to_iso_utc(o.get("created_at"))
+    updated_at = _to_iso_utc(o.get("updated_at"))
+    processed_at = _to_iso_utc(o.get("processed_at"))
     return {
         "orderId": o["order_id"],
         "fileName": o["file_name"],
         "clientName": o["client_name"] or "—",
         "confidence": int(o.get("global_confidence") or 0),
         "issue": _issue_label(o),
-        "date": o.get("updated_at") or o.get("created_at"),
+        "date": updated_at or created_at,
+        "createdAt": created_at,
+        "updatedAt": updated_at,
         "status": o.get("status", "À revoir"),
-        "processedAt": o.get("processed_at"),
+        "processedAt": processed_at,
         "processedBy": o.get("processed_by"),
     }
 
