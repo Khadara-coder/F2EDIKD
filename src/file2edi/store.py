@@ -698,9 +698,11 @@ class File2EdiStore:
             """SELECT o.order_id,
                       COALESCE(u.file_name, o.file_name) AS file_name,
                       o.client_name, o.global_confidence, o.status,
-                      o.created_at, o.updated_at
+                      o.created_at, o.updated_at,
+                      h.processed_at, h.processed_by
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
+               LEFT JOIN file2edi_conversion_history h ON h.order_id = o.order_id
                ORDER BY o.created_at DESC
                LIMIT 200"""
         ).fetchall()
@@ -907,7 +909,7 @@ class File2EdiStore:
         self._sync_order_graph(review)
         return review
 
-    def mark_edifact_generated(self, order_id: str, filename: str, content: str) -> None:
+    def mark_edifact_generated(self, order_id: str, filename: str, content: str, actor: str = "operator") -> None:
         conn = self._conn()
         conn.execute(
             "UPDATE file2edi_orders SET status='Généré', edifact_filename=?, edifact_content=?, review_required=0, updated_at=? WHERE order_id=?",
@@ -916,9 +918,9 @@ class File2EdiStore:
         conn.execute(
             """INSERT OR REPLACE INTO file2edi_conversion_history
             (conversion_id,order_id,file_name,status,confidence,edifact_path,processed_at,processed_by)
-            SELECT order_id, order_id, file_name, 'Généré', global_confidence, ?, ?, 'operator'
+            SELECT order_id, order_id, file_name, 'Généré', global_confidence, ?, ?, ?
             FROM file2edi_orders WHERE order_id=?""",
-            [filename, _now(), order_id],
+            [filename, _now(), actor or "operator", order_id],
         )
         conn.commit()
         conn.close()

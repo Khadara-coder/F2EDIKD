@@ -62,9 +62,10 @@ export function RevueListPage() {
                   <TableHead>Client</TableHead>
                   <TableHead>Confiance</TableHead>
                   <TableHead>Problématique</TableHead>
-                  <TableHead>Date</TableHead>
+                  <TableHead>Date import</TableHead>
+                  <TableHead>Traité le</TableHead>
+                  <TableHead>Gestionnaire</TableHead>
                   <TableHead>Statut</TableHead>
-                  <TableHead />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -86,20 +87,14 @@ export function RevueListPage() {
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>
                     <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
-                    <TableCell>
-                      <StatusBadge status={row.status} />
+                    <TableCell className="text-sm">
+                      {row.processedAt ? formatDateTime(row.processedAt) : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="text-sm">
+                      {row.processedBy ? row.processedBy : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(`/revue/${row.orderId}`);
-                        }}
-                      >
-                        Ouvrir
-                      </Button>
+                      <StatusBadge status={row.status} />
                     </TableCell>
                   </TableRow>
                 ))}

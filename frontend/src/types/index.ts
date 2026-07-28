@@ -76,6 +76,8 @@ export interface ReviewQueueItem {
   issue: string;
   date: string;
   status: OrderStatus;
+  processedAt?: string;
+  processedBy?: string;
 }
 
 export interface ConversionHistoryItem {

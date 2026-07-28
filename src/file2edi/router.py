@@ -281,7 +281,7 @@ def create_router() -> APIRouter:
         return review
 
     @router.post("/orders/{order_id}/generate-edifact")
-    async def generate_edifact(order_id: str):
+    async def generate_edifact(order_id: str, req: Request):
         store = get_store()
         review = store.load_order_review(order_id)
         if not review:
@@ -315,7 +315,12 @@ def create_router() -> APIRouter:
         if isinstance(result, dict) and result.get("generated"):
             fname = result.get("tst_filename") or f"ORDERS_{order_id}.tst"
             content = result.get("edifact_content") or ""
-            store.mark_edifact_generated(order_id, fname, content)
+            try:
+                import server as _srv
+                _actor = _srv._resolve_actor(req)
+            except Exception:
+                _actor = "operator"
+            store.mark_edifact_generated(order_id, fname, content, actor=_actor)
             return {"success": True, "fileName": fname, "content": content}
         if isinstance(result, dict):
             return {"success": False, "errors": _extract_generate_errors(result)}
@@ -742,6 +747,8 @@ def _order_list_item(o: dict) -> dict:
         "issue": _issue_label(o),
         "date": o.get("updated_at") or o.get("created_at"),
         "status": o.get("status", "À revoir"),
+        "processedAt": o.get("processed_at"),
+        "processedBy": o.get("processed_by"),
     }
 
 
