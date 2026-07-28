@@ -26,6 +26,9 @@ const navItems = [
 
 export function Sidebar() {
   const { data: me } = useCurrentUser();
+  if (me?.authenticated === false) {
+    return null;
+  }
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { data: queue } = useQuery({

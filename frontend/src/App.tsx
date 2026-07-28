@@ -46,6 +46,14 @@ function isUnauthorized(error: unknown): boolean {
   return false;
 }
 
+function AppShell() {
+  return (
+    <PageContainer>
+      <Outlet />
+    </PageContainer>
+  );
+}
+
 function AppContent() {
   const meQuery = useCurrentUser();
 
@@ -82,9 +90,9 @@ function AppContent() {
 
   return (
     <BrowserRouter>
-      <PageContainer>
-        <Routes>
-          <Route path="/login" element={<LoginPage />} />
+      <Routes>
+        <Route path="/login" element={<Navigate to="/" replace />} />
+        <Route element={<AppShell />}>
           <Route
             path="/"
             element={meQuery.data?.role === "admin" ? <CockpitPage /> : <Navigate to="/convertir" replace />}
@@ -132,9 +140,9 @@ function AppContent() {
               </GuardedRoute>
             }
           />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </PageContainer>
+        </Route>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </BrowserRouter>
   );
 }
