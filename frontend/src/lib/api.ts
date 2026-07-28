@@ -98,6 +98,9 @@ function normalizeSettingsPayload(raw: unknown): AppSettings {
         ? persisted.ediProfile
         : (typeof profile.name === "string" ? profile.name : undefined),
     connectors: {
+      ...(persisted.connectors && typeof persisted.connectors === "object"
+        ? (persisted.connectors as Record<string, unknown>)
+        : {}),
       apiExtraction:
         (typeof api.status === "string" && api.status.toLowerCase() === "ok")
           ? "connected"
@@ -114,9 +117,6 @@ function normalizeSettingsPayload(raw: unknown): AppSettings {
         (typeof sftp.configured === "boolean" && sftp.configured)
           ? "connected"
           : "disconnected",
-      ...(persisted.connectors && typeof persisted.connectors === "object"
-        ? (persisted.connectors as Record<string, unknown>)
-        : {}),
     },
     sftpConfig: {
       ...(persisted.sftpConfig && typeof persisted.sftpConfig === "object"

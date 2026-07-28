@@ -132,7 +132,7 @@ def create_router() -> APIRouter:
 
     # ── Upload & extraction ─────────────────────────────────────────────────
     @router.post("/upload")
-    async def upload_pdf(pdf: UploadFile = File(...)):
+    async def upload_pdf(req: Request, pdf: UploadFile = File(...)):
         if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
             raise HTTPException(400, "PDF requis")
         payload = await pdf.read()
@@ -142,7 +142,9 @@ def create_router() -> APIRouter:
         upload_id = f"upl-{uuid.uuid4().hex[:12]}"
         dest = store.intake_dir / f"{upload_id}.pdf"
         dest.write_bytes(payload)
-        meta = store.save_upload_with_id(upload_id, pdf.filename, len(payload), str(dest))
+        import server as srv
+        uploaded_by = srv._resolve_actor(req)
+        meta = store.save_upload_with_id(upload_id, pdf.filename, len(payload), str(dest), uploaded_by=uploaded_by)
         return {"uploadId": meta["uploadId"]}
 
     @router.post("/upload/{upload_id}/extract")
@@ -151,9 +153,12 @@ def create_router() -> APIRouter:
         pdf_path = store.get_upload_path(upload_id)
         if not pdf_path:
             raise HTTPException(404, "Upload introuvable")
+        upload_meta = store.get_upload_meta(upload_id) or {}
+        uploaded_by = str(upload_meta.get("uploaded_by") or "operator")
         payload = pdf_path.read_bytes()
         import server as srv
-        result = srv._local_process_and_respond(payload, pdf_path.name)
+        result = srv._local_process_and_respond(payload, pdf_path.name, actor=uploaded_by)
+        assigned_actor = srv._resolve_processing_actor(uploaded_by, result)
         order_id = result.get("pdf_hash") or f"ord-{uuid.uuid4().hex[:12]}"
         page_count = 3
         try:
@@ -163,14 +168,14 @@ def create_router() -> APIRouter:
         except Exception:
             pass
         review = engine_to_order_review(order_id, upload_id, result)
-        upload_meta = store.get_upload_meta(upload_id)
-        if upload_meta and upload_meta.get("file_name"):
+        if upload_meta.get("file_name"):
             review["order"]["fileName"] = upload_meta["file_name"]
         review["order"]["pdfPath"] = str(pdf_path)
+        review["order"]["processedBy"] = assigned_actor
         store.save_order_review(review)
         try:
             srv._init_db()
-            srv._upsert_conversion(_conversion_from_engine(order_id, upload_id, result))
+            srv._upsert_conversion(_conversion_from_engine(order_id, upload_id, result, operator=assigned_actor))
         except Exception:
             pass
         return engine_to_extraction_preview(
@@ -441,42 +446,12 @@ def create_router() -> APIRouter:
 
     # ── Master data ─────────────────────────────────────────────────────────
     @router.get("/master-data")
-    def master_data(type: str = "clients", search: str = ""):
+    def master_data(req: Request, type: str = "clients", search: str = ""):
         try:
             import server as srv
-            stats = srv._masterdata_stats()
-            customers = []
-            cache = srv.MASTERDATA_CACHE.get("customers", {})
-            if cache.get("rows", 0) > 0:
-                import csv
-                md_path = Path(srv.MASTER_DATA_RUNTIME) / "10564_Customers.csv"
-                if md_path.exists():
-                    with md_path.open(encoding="utf-8-sig", newline="") as f:
-                        for i, row in enumerate(csv.DictReader(f, delimiter=";")):
-                            if i >= 50:
-                                break
-                            name = row.get("NAME") or row.get("name") or ""
-                            if search and search.lower() not in name.lower():
-                                continue
-                            customers.append({
-                                "clientId": f"cli-{i}",
-                                "name": name,
-                                "soldto": row.get("SOLDTO") or row.get("soldto") or "",
-                                "vat": row.get("VAT_NR") or "",
-                                "channel": "Distribution",
-                                "division": "Thermique",
-                                "status": "Actif",
-                                "updatedAt": "",
-                            })
+            customers = srv._masterdata_clients_for_request(req, search, limit=50)
             return {
-                "summary": {
-                    "activeClients": stats.get("customers", {}).get("rows", 0),
-                    "shiptoCount": stats.get("partners", {}).get("rows", 0),
-                    "articlesCount": stats.get("materials", {}).get("rows", 0),
-                    "rulesCount": 18,
-                    "lastSync": "",
-                    "monthlyGrowth": {"clients": 8, "shipto": 37, "articles": 215, "rules": 1},
-                },
+                "summary": srv._masterdata_summary_for_request(req),
                 "clients": customers,
             }
         except Exception as exc:
@@ -778,7 +753,7 @@ def _issue_label(o: dict) -> str:
     return "Revue requise"
 
 
-def _conversion_from_engine(order_id: str, upload_id: str, result: dict) -> dict:
+def _conversion_from_engine(order_id: str, upload_id: str, result: dict, operator: str = "operator") -> dict:
     order = result.get("order") or {}
     cust = result.get("customer") or {}
     rej = result.get("rejection") or {}
@@ -798,6 +773,7 @@ def _conversion_from_engine(order_id: str, upload_id: str, result: dict) -> dict
         "line_count": (result.get("lines") or {}).get("count", 0),
         "rejection_code": rej.get("reason"),
         "rejection_message": (rej.get("details") or [{}])[0].get("message") if rej.get("details") else None,
+        "operator": operator,
         "extraction_json": json.dumps(result),
     }
 

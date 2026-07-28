@@ -1,4 +1,5 @@
 import type { AppSettings } from "@/types";
+import { resolveDisplayTimeZone } from "@/lib/utils";
 
 export const DEFAULT_APP_SETTINGS: AppSettings = {
   ediProfile: "ELM_STANDARD",
@@ -7,7 +8,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
   defaultIncoterm: "DAP - Delivered At Place",
   currency: "EUR - Euro",
   documentLanguage: "Français (FR)",
-  timezone: "(UTC+01:00) Europe/Paris",
+  timezone: "Europe/Paris",
   connectors: {
     apiExtraction: "connected",
     database: "connected",
@@ -71,6 +72,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
 
 export function mergeSettings(partial?: Partial<AppSettings> | null): AppSettings {
   if (!partial) return DEFAULT_APP_SETTINGS;
+  const timezone = resolveDisplayTimeZone(partial.timezone) ?? partial.timezone ?? DEFAULT_APP_SETTINGS.timezone;
   return {
     ...DEFAULT_APP_SETTINGS,
     ...partial,
@@ -82,5 +84,6 @@ export function mergeSettings(partial?: Partial<AppSettings> | null): AppSetting
     sftpConfig: { ...DEFAULT_APP_SETTINGS.sftpConfig, ...partial.sftpConfig },
     security: { ...DEFAULT_APP_SETTINGS.security, ...partial.security },
     options: { ...DEFAULT_APP_SETTINGS.options, ...partial.options },
+    timezone,
   };
 }

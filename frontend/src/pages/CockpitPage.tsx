@@ -7,7 +7,7 @@ import {
   Upload,
   XCircle,
 } from "lucide-react";
-import { useDashboard } from "@/hooks/useFile2Edi";
+import { useDashboard, useDisplayTimeZone } from "@/hooks/useFile2Edi";
 import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/file2edi/StatCard";
 import { StatusBadge } from "@/components/file2edi/StatusBadge";
@@ -27,6 +27,7 @@ import { Eye, Download, FileIcon } from "lucide-react";
 export function CockpitPage() {
   const navigate = useNavigate();
   const { metrics, reviewQueue, recentConversions } = useDashboard();
+  const displayTimeZone = useDisplayTimeZone();
   const m = metrics.data;
 
   const kpis = [
@@ -97,7 +98,7 @@ export function CockpitPage() {
                     {row.confidence}%
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>
-                  <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
+                  <TableCell className="text-sm">{formatDateTime(row.date, displayTimeZone)}</TableCell>
                   <TableCell>
                     <StatusBadge status={row.status} />
                   </TableCell>
@@ -139,7 +140,7 @@ export function CockpitPage() {
                   <TableCell>
                     <StatusBadge status={row.status} />
                   </TableCell>
-                  <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
+                  <TableCell className="text-sm">{formatDateTime(row.date, displayTimeZone)}</TableCell>
                   <TableCell>
                     <div className="flex gap-1">
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => navigate(`/revue/${row.orderId}`)}>

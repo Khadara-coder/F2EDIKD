@@ -13,6 +13,7 @@ from collections import OrderedDict
 import json
 import logging
 import os
+import re
 import shutil
 import sqlite3
 from datetime import datetime as _datetime
@@ -244,6 +245,23 @@ def _normalize_actor_identity(value: str | None) -> str:
     if lower.startswith("user:"):
         return lower.split(":", 1)[1].strip()
     return lower
+
+
+def _display_name_from_actor(actor: str) -> str:
+    """Derive a readable first/last name from an email-like actor identifier."""
+    normalized = _normalize_actor_identity(actor)
+    if not normalized:
+        return ""
+    local = normalized.split("@", 1)[0]
+    local = local.replace("users:", "").replace("user:", "")
+    parts = [part for part in re.split(r"[._\-]+", local) if part]
+    if not parts:
+        return normalized
+
+    def _titleize(part: str) -> str:
+        return part[:1].upper() + part[1:].lower() if part else ""
+
+    return " ".join(_titleize(part) for part in parts)
 
 
 def _db_role_override(actor: str) -> str | None:
@@ -1925,6 +1943,7 @@ def api_admin_roles(req: Request):
         items.append(
             {
                 **row,
+                "display_name": _display_name_from_actor(actor_key),
                 "effective_role": _resolve_role(actor_key),
             }
         )
@@ -3470,6 +3489,254 @@ def _csv_search_cached(key: str, q: str, limit: int = 50) -> list[dict]:
     return df[mask].head(limit).to_dict("records")
 
 
+def _masterdata_table_records(key: str) -> list[dict]:
+    """Return master data rows as plain dicts, regardless of cache backend."""
+    entry = MASTERDATA_CACHE.get(key, {})
+    df = entry.get("df")
+    if df is not None:
+        try:
+            return [dict(row) for row in df.to_dict("records")]
+        except Exception:
+            pass
+
+    fname = _MD_FILES.get(key, "")
+    if not fname:
+        return []
+    path = Path(MASTER_DATA_RUNTIME) / fname
+    if not path.exists():
+        return []
+
+    try:
+        import csv
+
+        with path.open(encoding="utf-8-sig", newline="") as fh:
+            return [dict(row) for row in csv.DictReader(fh, delimiter=";")]
+    except Exception:
+        return []
+
+
+def _masterdata_row_value(row: dict, *names: str) -> str:
+    """Read a value from a row using case-insensitive column lookup."""
+    lowered = {str(k).strip().lower(): v for k, v in row.items()}
+    for name in names:
+        value = lowered.get(str(name).strip().lower())
+        if value is not None:
+            return str(value).strip()
+    return ""
+
+
+def _masterdata_match_keys(value: str) -> set[str]:
+    """Build comparison keys for actor and partner identity matching."""
+    raw = (value or "").strip()
+    if not raw:
+        return set()
+
+    variants = {raw}
+    local = raw.split("@", 1)[0]
+    variants.add(local)
+    variants.add(re.sub(r"[._-]+", " ", local))
+    variants.add(_display_name_from_actor(raw))
+
+    keys: set[str] = set()
+    for variant in variants:
+        cleaned = (variant or "").strip()
+        if not cleaned:
+            continue
+        norm = _normalize_masterdata_value(cleaned)
+        keys.add(norm)
+        keys.add(norm.replace(" ", ""))
+        parts = [part for part in re.split(r"[^A-Z0-9]+", norm) if part]
+        if parts:
+            keys.add(" ".join(sorted(parts)))
+    return {key for key in keys if key}
+
+
+def _masterdata_row_matches_actor(row: dict, actor_keys: set[str]) -> bool:
+    """True when a partner row is linked to the current actor identity."""
+    if not actor_keys:
+        return False
+
+    for field in (
+        "adv_team1_email",
+        "adv_team2_email",
+        "email",
+        "gestionaire_adv",
+        "Gestionaire ADV",
+    ):
+        raw = _masterdata_row_value(row, field)
+        if not raw:
+            continue
+        for chunk in re.split(r"[;,|/]+", raw):
+            if _masterdata_match_keys(chunk) & actor_keys:
+                return True
+    return False
+
+
+def _masterdata_allowed_soldtos(req: Request | None) -> set[str] | None:
+    """Return the sold-to scope for the current user.
+
+    None means unrestricted access. An empty set means ADV access with no
+    linked sold-to found.
+    """
+    actor = _resolve_actor(req)
+    role = _resolve_role_for_request(actor, req)
+    if role != "adv":
+        return None
+    if not actor:
+        return set()
+
+    actor_keys = _masterdata_match_keys(actor)
+    allowed: set[str] = set()
+    for row in _masterdata_table_records("partners"):
+        if not _masterdata_row_matches_actor(row, actor_keys):
+            continue
+        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
+        if soldto:
+            allowed.add(soldto)
+    return allowed
+
+
+def _masterdata_visible_records(key: str, req: Request | None) -> list[dict]:
+    """Return all visible rows for a master data table under the current scope."""
+    rows = _masterdata_table_records(key)
+    allowed_soldtos = _masterdata_allowed_soldtos(req)
+    if allowed_soldtos is None or key not in {"customers", "partners"}:
+        return rows
+    if not allowed_soldtos:
+        return []
+
+    visible: list[dict] = []
+    for row in rows:
+        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
+        if soldto in allowed_soldtos:
+            visible.append(row)
+    return visible
+
+
+def _csv_search_cached(key: str, q: str, limit: int = 50, req: Request | None = None) -> list[dict]:
+    """Search in-memory cache for a masterdata table.  Falls back to file scan.
+
+    Limit is clamped to 200 (Req 7).  Columns not present in the DataFrame are
+    skipped so searches never raise KeyError on schema-mismatched files (Req 3).
+    """
+    limit = min(int(limit or 50), 200)
+    entry = MASTERDATA_CACHE.get(key, {})
+    df = entry.get("df")
+    cols = _MD_SEARCH_COLS.get(key, [])
+    allowed_soldtos = _masterdata_allowed_soldtos(req)
+    q_lo = q.strip().lower()
+
+    if df is None:
+        rows = _csv_search(_MD_FILES.get(key, ""), q, cols, limit)
+        if allowed_soldtos is None or key not in {"customers", "partners"}:
+            return rows
+        if not allowed_soldtos:
+            return []
+        filtered_rows = []
+        for row in rows:
+            soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
+            if soldto in allowed_soldtos:
+                filtered_rows.append(row)
+        return filtered_rows[:limit]
+
+    if allowed_soldtos is not None and key in {"customers", "partners"}:
+        if not allowed_soldtos:
+            return []
+        soldto_col = next((c for c in df.columns if str(c).strip().lower() == "soldto"), None)
+        if soldto_col is not None:
+            df = df[df[soldto_col].astype(str).str.strip().isin(allowed_soldtos)]
+
+    if not q_lo:
+        return df.head(limit).to_dict("records")
+
+    safe_cols = [c for c in cols if c in df.columns]
+    if not safe_cols:
+        return df.head(limit).to_dict("records")
+
+    mask = df[safe_cols].apply(
+        lambda c: c.str.lower().str.contains(q_lo, na=False)
+    ).any(axis=1)
+    return df[mask].head(limit).to_dict("records")
+
+
+def _masterdata_clients_for_request(req: Request | None, search: str = "", limit: int = 50) -> list[dict]:
+    """Return master-data client rows, filtered by the active user's scope."""
+    rows = _csv_search_cached("customers", search, limit, req=req)
+    clients: list[dict] = []
+    for i, row in enumerate(rows):
+        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
+        name = _masterdata_row_value(row, "NAME", "name")
+        clients.append({
+            "clientId": soldto or f"cli-{i}",
+            "name": name,
+            "soldto": soldto,
+            "vat": _masterdata_row_value(row, "VAT_NR", "vat"),
+            "channel": "Distribution",
+            "division": "Thermique",
+            "status": "Actif",
+            "updatedAt": "",
+        })
+    return clients
+
+
+def _masterdata_summary_for_request(req: Request | None) -> dict:
+    """Return summary counts scoped to the active user when applicable."""
+    stats = _masterdata_stats()
+    allowed_soldtos = _masterdata_allowed_soldtos(req)
+    if allowed_soldtos is None:
+        return {
+            "activeClients": stats.get("customers", {}).get("rows", 0),
+            "shiptoCount": stats.get("partners", {}).get("rows", 0),
+            "articlesCount": stats.get("materials", {}).get("rows", 0),
+            "rulesCount": 18,
+            "lastSync": "",
+            "monthlyGrowth": {"clients": 8, "shipto": 37, "articles": 215, "rules": 1},
+        }
+
+    clients = _masterdata_visible_records("customers", req)
+    partner_rows = _masterdata_visible_records("partners", req)
+    return {
+        "activeClients": len(clients),
+        "shiptoCount": len(partner_rows),
+        "articlesCount": stats.get("materials", {}).get("rows", 0),
+        "rulesCount": 18,
+        "lastSync": "",
+        "monthlyGrowth": {"clients": 8, "shipto": 37, "articles": 215, "rules": 1},
+    }
+
+
+def _resolve_processing_actor(uploaded_by: str, result: dict | None = None) -> str:
+    """Resolve who should handle a deposited PDF.
+
+    Admin uploads are routed to the linked ADV when master data exposes a
+    responsible manager; ADV uploads remain self-owned.
+    """
+    uploader = _normalize_actor_identity(uploaded_by)
+    if not uploader:
+        return ""
+
+    if _resolve_role(uploader) != "admin":
+        return uploader
+
+    soldto = _masterdata_row_value((result or {}).get("customer") or {}, "soldto")
+    shipto = _masterdata_row_value((result or {}).get("customer") or {}, "shipto")
+    candidates = [value for value in (soldto, shipto) if value]
+    if not candidates:
+        return uploader
+
+    for row in _masterdata_table_records("partners"):
+        row_soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
+        row_shipto = _masterdata_row_value(row, "SHIPTO", "shipto")
+        if row_soldto not in candidates and row_shipto not in candidates:
+            continue
+        for field in ("gestionaire_adv", "adv_team1_email", "adv_team2_email", "email"):
+            target = _masterdata_row_value(row, field)
+            if target:
+                return _normalize_actor_identity(target) or target.strip().lower()
+
+    return uploader
+
+
 def _get_soldto_row(soldto_code: str) -> dict:
     """Look up a SOLDTO code in the customers cache. Returns builder-compatible dict."""
     entry = MASTERDATA_CACHE.get("customers", {})
@@ -4233,12 +4500,12 @@ async def api_send_rejection_email(cid: str, req: Request):
 
 # ── Masterdata search ─────────────────────────────────────────────────────────
 @app.get("/api/masterdata/customers/search")
-def api_md_customers(q: str = "", limit: int = 50):
-    return {"results": _csv_search_cached("customers", q, min(limit, 200))}
+def api_md_customers(req: Request, q: str = "", limit: int = 50):
+    return {"results": _csv_search_cached("customers", q, min(limit, 200), req=req)}
 
 @app.get("/api/masterdata/partners/search")
-def api_md_partners(q: str = "", limit: int = 50):
-    return {"results": _csv_search_cached("partners", q, min(limit, 200))}
+def api_md_partners(req: Request, q: str = "", limit: int = 50):
+    return {"results": _csv_search_cached("partners", q, min(limit, 200), req=req)}
 
 @app.get("/api/masterdata/materials/search")
 def api_md_materials(q: str = "", limit: int = 50):

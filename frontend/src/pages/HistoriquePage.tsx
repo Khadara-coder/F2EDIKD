@@ -9,7 +9,7 @@ import {
   FileText,
   Search,
 } from "lucide-react";
-import { useHistory } from "@/hooks/useFile2Edi";
+import { useDisplayTimeZone, useHistory } from "@/hooks/useFile2Edi";
 import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/file2edi/StatCard";
 import { StatusBadge } from "@/components/file2edi/StatusBadge";
@@ -44,6 +44,7 @@ const STATUS_OPTIONS: (OrderStatus | "all")[] = [
 
 export function HistoriquePage() {
   const navigate = useNavigate();
+  const displayTimeZone = useDisplayTimeZone();
   const [filters, setFilters] = useState<HistoryFilters>({
     page: 1,
     pageSize: 10,
@@ -160,7 +161,7 @@ export function HistoriquePage() {
                     <TableCell>{row.clientName}</TableCell>
                     <TableCell>{row.customerOrderNumber}</TableCell>
                     <TableCell>{row.documentReference}</TableCell>
-                    <TableCell className="text-sm">{formatDateTime(row.processedAt)}</TableCell>
+                    <TableCell className="text-sm">{formatDateTime(row.processedAt, displayTimeZone)}</TableCell>
                     <TableCell>
                       <StatusBadge status={row.status} />
                     </TableCell>

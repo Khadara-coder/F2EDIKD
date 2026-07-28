@@ -14,21 +14,49 @@ export function formatCurrency(amount: number, currency = "EUR"): string {
 
 export function formatDate(date: string | Date | null | undefined): string {
   if (!date) return "—";
+  if (typeof date === "string") {
+    const match = date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (match) {
+      const [, year, month, day] = match;
+      return new Intl.DateTimeFormat("fr-FR", {
+        day: "2-digit",
+        month: "2-digit",
+        year: "numeric",
+      }).format(new Date(Number(year), Number(month) - 1, Number(day)));
+    }
+  }
   const d = typeof date === "string" ? new Date(date) : date;
   if (isNaN(d.getTime())) return "Invalid Date";
   return new Intl.DateTimeFormat("fr-FR").format(d);
 }
 
-export function formatDateTime(date: string | Date | null | undefined): string {
+export function resolveDisplayTimeZone(timeZone?: string | null): string | undefined {
+  const value = (timeZone || "").trim();
+  if (!value) return undefined;
+  if (value.includes("/")) {
+    const direct = value.match(/[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/);
+    if (direct) return direct[0];
+  }
+  const afterParen = value.replace(/^.*\)\s*/, "").trim();
+  if (afterParen.includes("/")) {
+    const direct = afterParen.match(/[A-Za-z_]+\/[A-Za-z_]+(?:\/[A-Za-z_]+)?$/);
+    if (direct) return direct[0];
+  }
+  return undefined;
+}
+
+export function formatDateTime(date: string | Date | null | undefined, timeZone?: string | null): string {
   if (!date) return "—";
   const d = typeof date === "string" ? new Date(date) : date;
   if (isNaN(d.getTime())) return "—";
+  const resolvedTimeZone = resolveDisplayTimeZone(timeZone);
   return new Intl.DateTimeFormat("fr-FR", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric",
     hour: "2-digit",
     minute: "2-digit",
+    ...(resolvedTimeZone ? { timeZone: resolvedTimeZone } : {}),
   }).format(d);
 }
 

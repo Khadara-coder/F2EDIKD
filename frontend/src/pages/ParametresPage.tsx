@@ -23,6 +23,26 @@ import { cn } from "@/lib/utils";
 import { mergeSettings, DEFAULT_APP_SETTINGS } from "@/lib/defaultSettings";
 import { Input } from "@/components/ui/input";
 
+const TIMEZONE_OPTIONS = (() => {
+  const supported = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
+  const fallback = [
+    "UTC",
+    "Europe/Paris",
+    "Europe/London",
+    "Europe/Berlin",
+    "America/New_York",
+    "America/Chicago",
+    "America/Denver",
+    "America/Los_Angeles",
+    "Asia/Dubai",
+    "Asia/Kolkata",
+    "Asia/Singapore",
+    "Asia/Tokyo",
+    "Australia/Sydney",
+  ];
+  return Array.from(new Set([...supported, ...fallback])).sort((a, b) => a.localeCompare(b));
+})();
+
 const SECTIONS = [
   { id: "profil", label: "Profil EDI" },
   { id: "connecteurs", label: "Connecteurs" },
@@ -148,6 +168,20 @@ export function ParametresPage() {
       const label = res.status === "connected" ? "Connecté" : "Déconnecté";
       const msg = res.message ? `${label} — ${res.message}` : label;
       setConnectorMessages((prev) => ({ ...prev, [connector]: msg }));
+      queryClient.setQueryData(["settings"], (current: unknown) => {
+        const settings = current && typeof current === "object" ? (current as Record<string, unknown>) : {};
+        const connectors =
+          settings.connectors && typeof settings.connectors === "object"
+            ? (settings.connectors as Record<string, unknown>)
+            : {};
+        return {
+          ...settings,
+          connectors: {
+            ...connectors,
+            [connector]: res.status,
+          },
+        };
+      });
     },
     onError: (err, vars) => {
       const connector = vars.connector;
@@ -237,7 +271,7 @@ export function ParametresPage() {
                   value={form.watch("documentLanguage")}
                   onChange={(v) => form.setValue("documentLanguage", v)}
                 />
-                <EditableField
+                <TimezoneField
                   label="Fuseau horaire"
                   value={form.watch("timezone")}
                   onChange={(v) => form.setValue("timezone", v)}
@@ -735,7 +769,8 @@ export function ParametresPage() {
                 <table className="w-full text-sm">
                   <thead className="bg-muted/50">
                     <tr>
-                      <th className="px-3 py-2 text-left font-medium">Utilisateur</th>
+                      <th className="px-3 py-2 text-left font-medium">Nom / prénom</th>
+                      <th className="px-3 py-2 text-left font-medium">Email</th>
                       <th className="px-3 py-2 text-left font-medium">Rôle</th>
                       <th className="px-3 py-2 text-left font-medium">Source</th>
                       <th className="px-3 py-2 text-left font-medium">Maj par</th>
@@ -750,12 +785,13 @@ export function ParametresPage() {
                     )}
                     {!rolesQuery.isLoading && roleItems.length === 0 && (
                       <tr>
-                        <td className="px-3 py-4 text-muted-foreground" colSpan={5}>Aucun profil configuré.</td>
+                        <td className="px-3 py-4 text-muted-foreground" colSpan={6}>Aucun profil configuré.</td>
                       </tr>
                     )}
                     {!rolesQuery.isLoading && roleItems.map((item) => (
                       <tr key={`${item.actor}-${item.source}`} className="border-t">
-                        <td className="px-3 py-2">{item.actor}</td>
+                        <td className="px-3 py-2 font-medium">{item.display_name || item.actor}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{item.actor}</td>
                         <td className="px-3 py-2">
                           <Badge variant={item.effective_role === "admin" ? "default" : "secondary"} className="gap-1">
                             <Shield className="h-3 w-3" />
@@ -855,6 +891,36 @@ function NumberField({
           onChange(Math.min(max, Math.max(min, raw)));
         }}
       />
+    </div>
+  );
+}
+
+function TimezoneField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <Label className="text-muted-foreground">{label}</Label>
+      <Input
+        list="timezone-options"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="Europe/Paris"
+      />
+      <datalist id="timezone-options">
+        {TIMEZONE_OPTIONS.map((timezone) => (
+          <option key={timezone} value={timezone} />
+        ))}
+      </datalist>
+      <p className="text-xs text-muted-foreground">
+        Tapez une partie du fuseau pour filtrer, puis sélectionnez dans la liste.
+      </p>
     </div>
   );
 }

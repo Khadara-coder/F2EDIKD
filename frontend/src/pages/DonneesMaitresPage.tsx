@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Building2, Database, Package, RefreshCw, Shield, Plus, Upload } from "lucide-react";
-import { useMasterData } from "@/hooks/useFile2Edi";
+import { useDisplayTimeZone, useMasterData } from "@/hooks/useFile2Edi";
 import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/file2edi/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,6 +25,7 @@ export function DonneesMaitresPage() {
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<MasterDataClient | null>(null);
   const [page, setPage] = useState(1);
+  const displayTimeZone = useDisplayTimeZone();
   const pageSize = 8;
   const { data } = useMasterData(tab, search);
 
@@ -83,7 +84,7 @@ export function DonneesMaitresPage() {
             <p className="text-xs text-muted-foreground px-1">
               Dernière synchronisation
               <br />
-              {formatDateTime(summary?.lastSync)}
+              {formatDateTime(summary?.lastSync, displayTimeZone)}
             </p>
           </div>
 
@@ -136,7 +137,7 @@ export function DonneesMaitresPage() {
                               {c.status}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-sm">{formatDateTime(c.updatedAt)}</TableCell>
+                          <TableCell className="text-sm">{formatDateTime(c.updatedAt, displayTimeZone)}</TableCell>
                         </TableRow>
                       ))}
                     </TableBody>

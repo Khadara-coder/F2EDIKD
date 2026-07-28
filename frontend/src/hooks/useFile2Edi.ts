@@ -1,5 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { resolveDisplayTimeZone } from "@/lib/utils";
 
 export function useDashboard() {
   const metrics = useQuery({
@@ -52,4 +53,9 @@ export function useSettings() {
     queryKey: ["settings"],
     queryFn: api.getSettings,
   });
+}
+
+export function useDisplayTimeZone() {
+  const settings = useSettings();
+  return resolveDisplayTimeZone(settings.data?.timezone);
 }

@@ -455,7 +455,7 @@ export const mockSettings: AppSettings = {
   defaultIncoterm: "DAP - Delivered At Place",
   currency: "EUR - Euro",
   documentLanguage: "Français (FR)",
-  timezone: "(UTC+01:00) Europe/Paris",
+  timezone: "Europe/Paris",
   connectors: {
     apiExtraction: "disconnected",
     database: "connected",

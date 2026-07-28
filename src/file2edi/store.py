@@ -360,7 +360,8 @@ class File2EdiStore:
                       file_name=excluded.file_name,
                       file_size=excluded.file_size,
                       file_path=excluded.file_path,
-                      uploaded_at=excluded.uploaded_at""",
+                      uploaded_at=excluded.uploaded_at,
+                      uploaded_by=excluded.uploaded_by""",
                     [upload_id, file_name, file_size, file_path, _now(), uploaded_by, "RECEIVED"],
                 )
                 conn.commit()
@@ -373,7 +374,7 @@ class File2EdiStore:
     def get_upload_meta(self, upload_id: str) -> dict | None:
         conn = self._conn()
         row = conn.execute(
-            "SELECT upload_id, file_name, file_size, file_path, uploaded_at, status"
+            "SELECT upload_id, file_name, file_size, file_path, uploaded_at, uploaded_by, status"
             " FROM file2edi_pdf_uploads WHERE upload_id=?",
             [upload_id],
         ).fetchone()

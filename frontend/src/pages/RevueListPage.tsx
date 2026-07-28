@@ -1,11 +1,14 @@
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { FileIcon, Upload } from "lucide-react";
-import { useDashboard, useOrdersList } from "@/hooks/useFile2Edi";
+import { ArrowUpDown, FileIcon, Search, SlidersHorizontal, Upload, X } from "lucide-react";
+import { useDashboard, useDisplayTimeZone, useOrdersList } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Header } from "@/components/layout/Header";
-import { StatusBadge } from "@/components/file2edi/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -14,14 +17,73 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { confidenceColor, formatDateTime } from "@/lib/utils";
+import { confidenceColor, formatDateTime, cn } from "@/lib/utils";
+import type { OrderStatus } from "@/types";
+
+type ReviewManagerFilter = "all" | "human" | "system";
+type ReviewStatusFilter = "all" | "toProcess" | "processed" | "partial" | "rejected" | "deliveryFailed";
+type BusinessStatusGroup = Exclude<ReviewStatusFilter, "all">;
+type ReviewSortKey =
+  | "fileName"
+  | "clientName"
+  | "confidence"
+  | "issue"
+  | "createdAt"
+  | "processedAt"
+  | "processedBy"
+  | "status";
+type SortDirection = "asc" | "desc";
+
+const STATUS_FILTERS: Array<{ value: ReviewStatusFilter; label: string; className: string }> = [
+  { value: "all", label: "Tous", className: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100" },
+  { value: "toProcess", label: "À traiter", className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
+  { value: "processed", label: "Traité", className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
+  { value: "partial", label: "Partiel", className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
+  { value: "rejected", label: "Rejeté", className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
+  { value: "deliveryFailed", label: "Échec d'envoi", className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
+];
+
+const GROUP_STATUS_BADGE: Record<BusinessStatusGroup, { label: string; variant: "warning" | "success" | "info" | "destructive" }> = {
+  toProcess: { label: "À traiter", variant: "warning" },
+  processed: { label: "Traité", variant: "success" },
+  partial: { label: "Partiel", variant: "info" },
+  rejected: { label: "Rejeté", variant: "destructive" },
+  deliveryFailed: { label: "Échec d'envoi", variant: "destructive" },
+};
+
+function statusToFilterGroup(status: OrderStatus): BusinessStatusGroup {
+  if (status === "Revue requise" || status === "À revoir" || status === "À vérifier" || status === "Bloqué") {
+    return "toProcess";
+  }
+  if (status === "Généré" || status === "Validé") {
+    return "processed";
+  }
+  if (status === "Partiel") {
+    return "partial";
+  }
+  if (status === "Rejeté" || status === "Doublon") {
+    return "rejected";
+  }
+  if (status === "SFTP échoué") {
+    return "deliveryFailed";
+  }
+  return "toProcess";
+}
 
 export function RevueListPage() {
   const navigate = useNavigate();
   const { reviewQueue } = useDashboard();
   const ordersList = useOrdersList();
+  const displayTimeZone = useDisplayTimeZone();
   const { data: me } = useCurrentUser();
   const isAdmin = me?.role === "admin";
+
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>("all");
+  const [managerFilter, setManagerFilter] = useState<ReviewManagerFilter>("all");
+  const [sortKey, setSortKey] = useState<ReviewSortKey>("createdAt");
+  const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+
   const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
 
@@ -34,6 +96,72 @@ export function RevueListPage() {
     return value;
   };
 
+  const handleSort = (key: ReviewSortKey) => {
+    if (sortKey === key) {
+      setSortDirection((current) => (current === "asc" ? "desc" : "asc"));
+      return;
+    }
+    setSortKey(key);
+    setSortDirection("asc");
+  };
+
+  const getSortValue = (row: (typeof items)[number], key: ReviewSortKey) => {
+    switch (key) {
+      case "confidence":
+        return row.confidence ?? 0;
+      case "createdAt":
+        return row.createdAt || row.date || "";
+      case "processedAt":
+        return row.processedAt || "";
+      case "processedBy":
+        return (row.processedBy || "").toLowerCase();
+      case "status":
+        return statusToFilterGroup(row.status);
+      case "issue":
+        return row.issue || "";
+      case "clientName":
+        return row.clientName || "";
+      case "fileName":
+      default:
+        return row.fileName || "";
+    }
+  };
+
+  const filteredItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    const filtered = items.filter((row) => {
+      const matchesSearch =
+        !query ||
+        [row.fileName, row.clientName, row.issue, row.status, row.processedBy, row.date, row.createdAt, row.processedAt]
+          .filter(Boolean)
+          .some((value) => String(value).toLowerCase().includes(query));
+      const matchesStatus = statusFilter === "all" || statusToFilterGroup(row.status) === statusFilter;
+      const processedBy = (row.processedBy || "").trim().toLowerCase();
+      const normalizedManager = processedBy === "operator" || processedBy === "system" ? "system" : "human";
+      const matchesManager = managerFilter === "all" || normalizedManager === managerFilter;
+      return matchesSearch && matchesStatus && matchesManager;
+    });
+
+    return filtered.sort((left, right) => {
+      const leftValue = getSortValue(left, sortKey);
+      const rightValue = getSortValue(right, sortKey);
+
+      let comparison = 0;
+      if (sortKey === "confidence") {
+        comparison = Number(leftValue) - Number(rightValue);
+      } else if (sortKey === "createdAt" || sortKey === "processedAt") {
+        comparison = Date.parse(String(leftValue)) - Date.parse(String(rightValue));
+        if (Number.isNaN(comparison)) {
+          comparison = String(leftValue).localeCompare(String(rightValue), "fr", { sensitivity: "base" });
+        }
+      } else {
+        comparison = String(leftValue).localeCompare(String(rightValue), "fr", { sensitivity: "base" });
+      }
+
+      return sortDirection === "asc" ? comparison : -comparison;
+    });
+  }, [items, managerFilter, search, sortDirection, sortKey, statusFilter]);
+
   return (
     <>
       <Header
@@ -42,26 +170,115 @@ export function RevueListPage() {
       />
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="text-base">
-            Commandes converties
-            {pendingCount > 0 && (
-              <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
-                {pendingCount} à revoir
-              </span>
-            )}
-          </CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-4 border-b bg-muted/20">
+          <div>
+            <CardTitle className="text-base">
+              Commandes converties
+              {pendingCount > 0 && (
+                <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
+                  {pendingCount} à revoir
+                </span>
+              )}
+            </CardTitle>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Filtrez la liste par statut, gestionnaire ou mot-clé.
+            </p>
+          </div>
           <Button variant="outline" className="gap-2" onClick={() => navigate("/convertir")}>
             <Upload className="h-4 w-4" />
             Convertir un PDF
           </Button>
         </CardHeader>
+
+        <CardContent className="border-b bg-muted/30 p-4">
+          <div className="mb-4 flex items-center gap-2 text-sm font-medium text-foreground">
+            <SlidersHorizontal className="h-4 w-4 text-primary" />
+            Filtres
+          </div>
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto] lg:items-center">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Rechercher un fichier, client, commande ou statut…"
+                className="pl-9"
+              />
+            </div>
+
+            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Statut" />
+              </SelectTrigger>
+              <SelectContent>
+                {STATUS_FILTERS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {isAdmin ? (
+              <Select value={managerFilter} onValueChange={(v) => setManagerFilter(v as ReviewManagerFilter)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Gestionnaire" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Tous les gestionnaires</SelectItem>
+                  <SelectItem value="human">Gestionnaire humain</SelectItem>
+                  <SelectItem value="system">Système / historique</SelectItem>
+                </SelectContent>
+              </Select>
+            ) : (
+              <div />
+            )}
+
+            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+              <Button
+                variant="ghost"
+                className="gap-2 text-muted-foreground"
+                onClick={() => {
+                  setSearch("");
+                  setStatusFilter("all");
+                  setManagerFilter("all");
+                  setSortKey("createdAt");
+                  setSortDirection("desc");
+                }}
+              >
+                <X className="h-4 w-4" />
+                Réinitialiser
+              </Button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border bg-background/80 p-3">
+            <span className="text-sm font-medium text-foreground">Palette de statuts</span>
+            {STATUS_FILTERS.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setStatusFilter(option.value)}
+                className={cn(
+                  "rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors",
+                  option.className,
+                  statusFilter === option.value && "ring-2 ring-primary ring-offset-2",
+                )}
+              >
+                {option.label}
+              </Button>
+            ))}
+          </div>
+        </CardContent>
+
         <CardContent className="p-0">
           {ordersList.isLoading ? (
             <p className="p-6 text-sm text-muted-foreground">Chargement…</p>
-          ) : items.length === 0 ? (
+          ) : filteredItems.length === 0 ? (
             <div className="flex flex-col items-center gap-4 p-12 text-center">
-              <p className="text-muted-foreground">Aucune commande en attente de revue.</p>
+              <p className="text-muted-foreground">Aucune commande ne correspond à ces filtres.</p>
               <Button onClick={() => navigate("/convertir")}>
                 Importer un bon de commande PDF
               </Button>
@@ -70,18 +287,64 @@ export function RevueListPage() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Fichier</TableHead>
-                  <TableHead>Client</TableHead>
-                  {isAdmin && <TableHead>Confiance</TableHead>}
-                  {isAdmin && <TableHead>Problématique</TableHead>}
-                  <TableHead>Date import</TableHead>
-                  <TableHead>Traité le</TableHead>
-                  {isAdmin && <TableHead>Gestionnaire</TableHead>}
-                  <TableHead>Statut</TableHead>
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("fileName")}>
+                      Fichier
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("clientName")}>
+                      Client
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  {isAdmin && (
+                    <TableHead>
+                      <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("confidence")}>
+                        Confiance
+                        <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                    </TableHead>
+                  )}
+                  {isAdmin && (
+                    <TableHead>
+                      <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("issue")}>
+                        Problématique
+                        <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                    </TableHead>
+                  )}
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("createdAt")}>
+                      Date import
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedAt")}>
+                      Traité le
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  {isAdmin && (
+                    <TableHead>
+                      <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
+                        Gestionnaire
+                        <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                      </button>
+                    </TableHead>
+                  )}
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("status")}>
+                      Statut
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {items.map((row) => (
+                {filteredItems.map((row) => (
                   <TableRow
                     key={row.orderId}
                     className="cursor-pointer"
@@ -100,9 +363,9 @@ export function RevueListPage() {
                       </TableCell>
                     )}
                     {isAdmin && <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>}
-                    <TableCell className="text-sm">{formatDateTime(row.createdAt || row.date)}</TableCell>
+                    <TableCell className="text-sm">{formatDateTime(row.createdAt || row.date, displayTimeZone)}</TableCell>
                     <TableCell className="text-sm">
-                      {row.processedAt ? formatDateTime(row.processedAt) : <span className="text-muted-foreground">—</span>}
+                      {row.processedAt ? formatDateTime(row.processedAt, displayTimeZone) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     {isAdmin && (
                       <TableCell className="text-sm">
@@ -110,7 +373,9 @@ export function RevueListPage() {
                       </TableCell>
                     )}
                     <TableCell>
-                      <StatusBadge status={row.status} />
+                      <Badge variant={GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].variant}>
+                        {GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].label}
+                      </Badge>
                     </TableCell>
                   </TableRow>
                 ))}

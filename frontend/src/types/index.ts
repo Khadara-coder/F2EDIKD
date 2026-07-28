@@ -30,6 +30,7 @@ export interface CurrentUser {
 
 export interface AccessRoleItem {
   actor: string;
+  display_name?: string;
   role: AppRole;
   source: "env" | "db";
   is_active: boolean;
