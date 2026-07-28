@@ -162,6 +162,7 @@ ENABLE_PROFILE_LOGIN = os.environ.get("ENABLE_PROFILE_LOGIN", _profile_login_def
     "1", "true", "yes", "on"
 }
 SESSION_COOKIE_NAME = "f2edi_profile_session"
+LOCAL_LOGOUT_COOKIE_NAME = "f2edi_force_login"
 SESSION_TTL_SECONDS = int(os.environ.get("PROFILE_SESSION_TTL_SECONDS", "28800") or "28800")
 _PROFILE_SESSIONS: dict[str, dict] = {}
 log.info("environment: %s (databricks=%s dev_actor=%s)",
@@ -283,6 +284,20 @@ def _profile_session_role(req: Request | None) -> str:
     return role if role in {"admin", "adv"} else ""
 
 
+def _local_logout_forced(req: Request | None) -> bool:
+    """True when user explicitly logged out from local profile UI.
+
+    This marker disables DEV_ACTOR fallback so /api/me can become unauthenticated
+    after logout in local mode.
+    """
+    if req is None or not IS_LOCAL:
+        return False
+    try:
+        return (req.cookies.get(LOCAL_LOGOUT_COOKIE_NAME) or "").strip() == "1"
+    except Exception:
+        return False
+
+
 def _api_key_values() -> list[str]:
     """Return configured machine-to-machine API keys."""
     values = _parse_secret_env("APP_API_KEYS")
@@ -391,6 +406,10 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
 
     if _api_key_authenticated(req):
         return _api_key_actor()
+
+    # Local explicit logout: do not silently re-authenticate via DEV_ACTOR.
+    if _local_logout_forced(req):
+        return ""
 
     # Local dev: no SSO proxy injects headers, so fall back to DEV_ACTOR to
     # mirror the authenticated identity/role you would have on Databricks.
@@ -854,6 +873,7 @@ def api_auth_login(payload: ProfileLoginPayload):
         secure=False,
         path="/",
     )
+    resp.delete_cookie(LOCAL_LOGOUT_COOKIE_NAME, path="/")
     return resp
 
 
@@ -864,6 +884,16 @@ def api_auth_logout(req: Request):
         _PROFILE_SESSIONS.pop(token, None)
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    # Local explicit logout marker to block DEV_ACTOR fallback until next login.
+    resp.set_cookie(
+        key=LOCAL_LOGOUT_COOKIE_NAME,
+        value="1",
+        max_age=SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        secure=False,
+        path="/",
+    )
     return resp
 
 
