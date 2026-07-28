@@ -30,15 +30,13 @@ export const mockDashboardMetrics: DashboardMetrics = {
   generated: 9,
   reviewRequired: 3,
   rejected: 1,
-  partial: 1,
-  duplicates: 0,
   sftpFailed: 0,
   total: 14,
   statusDistribution: [
     { label: "Générés", count: 9, percent: 64, color: "bg-emerald-500" },
     { label: "Revue requise", count: 3, percent: 21, color: "bg-amber-500" },
-    { label: "Partiels", count: 1, percent: 7, color: "bg-violet-500" },
     { label: "Rejetés", count: 1, percent: 7, color: "bg-red-500" },
+    { label: "SFTP échoué", count: 0, percent: 0, color: "bg-rose-500" },
   ],
   processingFlow: {
     pdfReceived: 14,
