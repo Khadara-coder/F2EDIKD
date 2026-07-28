@@ -322,51 +322,49 @@ class PostgresDB:
             log.info("Skipping DB init (SQLite mode)")
             return
 
+        # Step 1: create tables (own transaction)
         async with self.engine.begin() as conn:
-            # Create tables
             await conn.run_sync(Base.metadata.create_all)
-            
-            # Enable RLS on order tables
-            await conn.execute(
-                text("ALTER TABLE file2edi_orders ENABLE ROW LEVEL SECURITY;")
-            )
-            
-            # Create RLS policies for ADV users
-            # Policy 1: ADV sees only orders they process OR within their master-data scope
-            policy_adv_select = """
-            CREATE POLICY IF NOT EXISTS adv_orders_select ON file2edi_orders
-            FOR SELECT USING (
-              current_setting('app.current_role')::TEXT = 'admin'
-              OR processed_by = current_setting('app.current_user')::TEXT
-              OR soldto IN (
-                SELECT soldto FROM auth_user_adv_scope
-                WHERE user_id = (SELECT id FROM auth_users WHERE email = current_setting('app.current_user')::TEXT)
-              )
-            );
+
+        # Step 2: RLS setup (idempotent, separate transaction per statement)
+        rls_statements = [
+            "ALTER TABLE file2edi_orders ENABLE ROW LEVEL SECURITY;",
             """
-            
-            # Policy 2: ADV can update only if they have access (same as select)
-            policy_adv_update = """
-            CREATE POLICY IF NOT EXISTS adv_orders_update ON file2edi_orders
-            FOR UPDATE USING (
-              current_setting('app.current_role')::TEXT = 'admin'
-              OR processed_by = current_setting('app.current_user')::TEXT
-              OR soldto IN (
-                SELECT soldto FROM auth_user_adv_scope
-                WHERE user_id = (SELECT id FROM auth_users WHERE email = current_setting('app.current_user')::TEXT)
-              )
-            );
+            DO $$ BEGIN
+              CREATE POLICY adv_orders_select ON file2edi_orders
+              FOR SELECT USING (
+                current_setting('app.current_role', true)::TEXT = 'admin'
+                OR processed_by = current_setting('app.current_user', true)::TEXT
+                OR soldto IN (
+                  SELECT soldto FROM auth_user_adv_scope
+                  WHERE user_id = (SELECT id FROM auth_users
+                                   WHERE email = current_setting('app.current_user', true)::TEXT)
+                )
+              );
+            EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+            """,
             """
-            
+            DO $$ BEGIN
+              CREATE POLICY adv_orders_update ON file2edi_orders
+              FOR UPDATE USING (
+                current_setting('app.current_role', true)::TEXT = 'admin'
+                OR processed_by = current_setting('app.current_user', true)::TEXT
+                OR soldto IN (
+                  SELECT soldto FROM auth_user_adv_scope
+                  WHERE user_id = (SELECT id FROM auth_users
+                                   WHERE email = current_setting('app.current_user', true)::TEXT)
+                )
+              );
+            EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+            """,
+        ]
+        for stmt in rls_statements:
             try:
-                await conn.execute(text("ALTER TABLE file2edi_orders ENABLE ROW LEVEL SECURITY;"))
-                await conn.execute(text(policy_adv_select))
-                await conn.execute(text(policy_adv_update))
-                log.info("RLS policies initialized")
+                async with self.engine.begin() as conn:
+                    await conn.execute(text(stmt))
             except Exception as e:
                 log.warning(f"RLS policy init (may already exist): {e}")
-
-            await conn.commit()
+        log.info("RLS policies initialized")
 
     @asynccontextmanager
     async def get_session(self, actor: str | None = None, role: str = "adv") -> AsyncGenerator[AsyncSession, None]:
