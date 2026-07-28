@@ -962,6 +962,7 @@ _PUBLIC_API_PATHS = {
     "/api/health",
     "/api/health/system",
     "/api/proxy/health",
+    "/api/me",
     "/api/auth/modes",
     "/api/auth/login",
     "/api/auth/logout",
