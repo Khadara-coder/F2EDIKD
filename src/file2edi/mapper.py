@@ -269,35 +269,34 @@ def engine_to_extraction_preview(upload_id: str, order_id: str, result: dict, fi
 
 def dashboard_metrics_from_db(orders: list[dict]) -> dict:
     today = datetime.now(timezone.utc).date().isoformat()
-    today_orders = [o for o in orders if (o.get("created_at") or "")[:10] == today]
+    today_count = sum(1 for o in orders if (o.get("created_at") or "")[:10] == today)
+
     def cnt(status: str) -> int:
-        return sum(1 for o in today_orders if o.get("status") == status)
-    generated = cnt("Généré")
-    review = cnt("Revue requise") + cnt("À revoir") + cnt("À vérifier")
-    rejected = cnt("Rejeté")
-    partial = cnt("Partiel")
-    duplicates = cnt("Doublon")
+        return sum(1 for o in orders if o.get("status") == status)
+
+    generated   = cnt("Généré")
+    review      = cnt("Revue requise") + cnt("À revoir") + cnt("À vérifier")
+    rejected    = cnt("Rejeté")
     sftp_failed = cnt("SFTP échoué")
-    total = len(today_orders) or 1
+    total_all   = len(orders) or 1
+
     return {
-        "today": len(today_orders),
+        "today": today_count,
         "generated": generated,
         "reviewRequired": review,
         "rejected": rejected,
-        "partial": partial,
-        "duplicates": duplicates,
         "sftpFailed": sftp_failed,
-        "total": len(today_orders),
+        "total": len(orders),
         "statusDistribution": [
-            {"label": "Générés", "count": generated, "percent": round(100 * generated / total), "color": "bg-emerald-500"},
-            {"label": "Revue requise", "count": review, "percent": round(100 * review / total), "color": "bg-amber-500"},
-            {"label": "Partiels", "count": partial, "percent": round(100 * partial / total), "color": "bg-violet-500"},
-            {"label": "Rejetés", "count": rejected, "percent": round(100 * rejected / total), "color": "bg-red-500"},
+            {"label": "Générés",       "count": generated,   "percent": round(100 * generated   / total_all), "color": "bg-emerald-500"},
+            {"label": "Revue requise", "count": review,      "percent": round(100 * review      / total_all), "color": "bg-amber-500"},
+            {"label": "Rejetés",       "count": rejected,    "percent": round(100 * rejected    / total_all), "color": "bg-red-500"},
+            {"label": "SFTP échoué",   "count": sftp_failed, "percent": round(100 * sftp_failed / total_all), "color": "bg-rose-500"},
         ],
         "processingFlow": {
-            "pdfReceived": len(today_orders),
+            "pdfReceived":      len(orders),
             "edifactGenerated": generated,
             "manualValidations": review,
-            "sftpExports": generated,
+            "sftpExports":      generated,
         },
     }

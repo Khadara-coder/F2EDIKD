@@ -55,8 +55,6 @@ export interface DashboardMetrics {
   generated: number;
   reviewRequired: number;
   rejected: number;
-  partial: number;
-  duplicates: number;
   sftpFailed: number;
   total: number;
   statusDistribution: { label: string; count: number; percent: number; color: string }[];

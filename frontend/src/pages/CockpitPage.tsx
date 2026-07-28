@@ -2,11 +2,9 @@ import { useNavigate } from "react-router-dom";
 import {
   Calendar,
   CheckCircle,
-  Copy,
   FileText,
   Sigma,
   Upload,
-  UserCheck,
   XCircle,
 } from "lucide-react";
 import { useDashboard } from "@/hooks/useFile2Edi";
@@ -32,24 +30,22 @@ export function CockpitPage() {
   const m = metrics.data;
 
   const kpis = [
-    { label: "Aujourd'hui", value: m?.today ?? "—", sub: "Commandes reçues", icon: Calendar },
-    { label: "Générés", value: m?.generated ?? "—", sub: "EDIFACT générés", icon: FileText, iconCls: "bg-blue-500/10 [&_svg]:text-blue-600" },
-    { label: "Revue requise", value: m?.reviewRequired ?? "—", sub: "En attente de validation", icon: UserCheck, iconCls: "bg-amber-500/10 [&_svg]:text-amber-600" },
-    { label: "Rejetés", value: m?.rejected ?? "—", sub: "Échec de traitement", icon: XCircle, iconCls: "bg-red-500/10 [&_svg]:text-red-600" },
-    { label: "Partiels", value: m?.partial ?? "—", sub: "Conversion partielle", icon: CheckCircle, iconCls: "bg-violet-500/10 [&_svg]:text-violet-600" },
-    { label: "Doublons", value: m?.duplicates ?? "—", sub: "Fichiers dupliqués", icon: Copy },
-    { label: "SFTP échoué", value: m?.sftpFailed ?? "—", sub: "Export en échec", icon: Upload },
-    { label: "Total", value: m?.total ?? "—", sub: "Tous statuts confondus", icon: Sigma, iconCls: "bg-blue-500/10 [&_svg]:text-blue-600" },
+    { label: "Aujourd'hui", value: m?.today ?? "—", sub: "Importés ce jour", icon: Calendar },
+    { label: "Total", value: m?.total ?? "—", sub: "Tous statuts, toutes dates", icon: Sigma, iconCls: "bg-slate-500/10 [&_svg]:text-slate-600" },
+    { label: "Générés", value: m?.generated ?? "—", sub: "EDIFACT produits", icon: FileText, iconCls: "bg-blue-500/10 [&_svg]:text-blue-600" },
+    { label: "Revue requise", value: m?.reviewRequired ?? "—", sub: "En attente de validation", icon: CheckCircle, iconCls: "bg-amber-500/10 [&_svg]:text-amber-600" },
+    { label: "Rejetés", value: m?.rejected ?? "—", sub: "Commandes échouées", icon: XCircle, iconCls: "bg-red-500/10 [&_svg]:text-red-600" },
+    { label: "SFTP échoué", value: m?.sftpFailed ?? "—", sub: "Exports en échec", icon: Upload, iconCls: "bg-rose-500/10 [&_svg]:text-rose-600" },
   ];
 
   return (
     <>
       <Header
         title="Cockpit"
-        subtitle="Vue d'ensemble des conversions du jour"
+        subtitle="Vue d'ensemble des conversions"
       />
 
-      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-8">
+      <div className="mb-6 grid grid-cols-2 gap-4 md:grid-cols-3 lg:grid-cols-6">
         {kpis.map((k) => (
           <StatCard
             key={k.label}
@@ -81,7 +77,6 @@ export function CockpitPage() {
                 <TableHead>Problématique</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead>Statut</TableHead>
-                <TableHead />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -105,18 +100,6 @@ export function CockpitPage() {
                   <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
                   <TableCell>
                     <StatusBadge status={row.status} />
-                  </TableCell>
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        navigate(`/revue/${row.orderId}`);
-                      }}
-                    >
-                      Ouvrir
-                    </Button>
                   </TableCell>
                 </TableRow>
               ))}
