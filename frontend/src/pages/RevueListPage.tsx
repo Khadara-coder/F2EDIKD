@@ -1,6 +1,7 @@
 import { useNavigate } from "react-router-dom";
 import { FileIcon, Upload } from "lucide-react";
 import { useDashboard, useOrdersList } from "@/hooks/useFile2Edi";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Header } from "@/components/layout/Header";
 import { StatusBadge } from "@/components/file2edi/StatusBadge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +20,8 @@ export function RevueListPage() {
   const navigate = useNavigate();
   const { reviewQueue } = useDashboard();
   const ordersList = useOrdersList();
+  const { data: me } = useCurrentUser();
+  const isAdmin = me?.role === "admin";
   const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
 
@@ -60,11 +63,11 @@ export function RevueListPage() {
                 <TableRow>
                   <TableHead>Fichier</TableHead>
                   <TableHead>Client</TableHead>
-                  <TableHead>Confiance</TableHead>
-                  <TableHead>Problématique</TableHead>
+                  {isAdmin && <TableHead>Confiance</TableHead>}
+                  {isAdmin && <TableHead>Problématique</TableHead>}
                   <TableHead>Date import</TableHead>
                   <TableHead>Traité le</TableHead>
-                  <TableHead>Gestionnaire</TableHead>
+                  {isAdmin && <TableHead>Gestionnaire</TableHead>}
                   <TableHead>Statut</TableHead>
                 </TableRow>
               </TableHeader>
@@ -82,17 +85,21 @@ export function RevueListPage() {
                       </div>
                     </TableCell>
                     <TableCell>{row.clientName}</TableCell>
-                    <TableCell className={confidenceColor(row.confidence)}>
-                      {row.confidence}%
-                    </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>
+                    {isAdmin && (
+                      <TableCell className={confidenceColor(row.confidence)}>
+                        {row.confidence}%
+                      </TableCell>
+                    )}
+                    {isAdmin && <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>}
                     <TableCell className="text-sm">{formatDateTime(row.date)}</TableCell>
                     <TableCell className="text-sm">
                       {row.processedAt ? formatDateTime(row.processedAt) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell className="text-sm">
-                      {row.processedBy ? row.processedBy : <span className="text-muted-foreground">—</span>}
-                    </TableCell>
+                    {isAdmin && (
+                      <TableCell className="text-sm">
+                        {row.processedBy ? row.processedBy : <span className="text-muted-foreground">—</span>}
+                      </TableCell>
+                    )}
                     <TableCell>
                       <StatusBadge status={row.status} />
                     </TableCell>
