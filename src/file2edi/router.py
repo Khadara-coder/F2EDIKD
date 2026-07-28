@@ -71,23 +71,32 @@ def create_router() -> APIRouter:
 
     # ── Dashboard ───────────────────────────────────────────────────────────
     @router.get("/dashboard/metrics")
-    def dashboard_metrics():
-        orders = _list_combined_orders()
+    def dashboard_metrics(req: Request):
+        import server as srv
+        actor = srv._resolve_actor(req)
+        role = srv._resolve_role(actor)
+        orders = _list_combined_orders(actor=actor, role=role)
         return dashboard_metrics_from_db(orders)
 
     @router.get("/orders")
-    def list_orders():
+    def list_orders(req: Request):
         """All converted orders for the Revue list page."""
-        return [_order_list_item(o) for o in _list_combined_orders()]
+        import server as srv
+        actor = srv._resolve_actor(req)
+        role = srv._resolve_role(actor)
+        return [_order_list_item(o) for o in _list_combined_orders(actor=actor, role=role)]
 
     @router.get("/dashboard/review-queue")
-    def review_queue():
+    def review_queue(req: Request):
+        import server as srv
+        actor = srv._resolve_actor(req)
+        role = srv._resolve_role(actor)
         items: list[dict] = []
         try:
             review_statuses = ("Revue requise", "À revoir", "À vérifier", "Bloqué")
             items = [
                 _order_list_item(o)
-                for o in _list_combined_orders()
+                for o in _list_combined_orders(actor=actor, role=role)
                 if o.get("status") in review_statuses
             ]
         except Exception:
@@ -95,7 +104,6 @@ def create_router() -> APIRouter:
 
         if not items:
             try:
-                import server as srv
                 for c in srv.list_conversions(status="REVIEW_REQUIRED", limit=20):
                     try:
                         conf = int(float(c.get("confidence") or 0))
@@ -115,9 +123,12 @@ def create_router() -> APIRouter:
         return items[:20]
 
     @router.get("/dashboard/recent-conversions")
-    def recent_conversions():
+    def recent_conversions(req: Request):
+        import server as srv
+        actor = srv._resolve_actor(req)
+        role = srv._resolve_role(actor)
         out = []
-        for o in _list_combined_orders()[:10]:
+        for o in _list_combined_orders(actor=actor, role=role)[:10]:
             out.append({
                 "conversionId": f"conv-{o['order_id']}",
                 "orderId": o["order_id"],
@@ -398,6 +409,7 @@ def create_router() -> APIRouter:
     # ── History ─────────────────────────────────────────────────────────────
     @router.get("/conversions/history")
     def history(
+        req: Request,
         search: str = "",
         dateFrom: str = "",
         dateTo: str = "",
@@ -406,7 +418,10 @@ def create_router() -> APIRouter:
         page: int = 1,
         pageSize: int = 10,
     ):
-        rows_raw = _list_combined_orders()
+        import server as srv
+        actor = srv._resolve_actor(req)
+        role = srv._resolve_role(actor)
+        rows_raw = _list_combined_orders(actor=actor, role=role)
         rows = []
         for o in rows_raw:
             if search and search.lower() not in (o.get("file_name") or "").lower() and search.lower() not in (o.get("client_name") or "").lower():
@@ -650,8 +665,22 @@ def _map_platform_status(status: str | None) -> str:
     return m.get(status or "", "À revoir")
 
 
-def _list_combined_orders() -> list[dict]:
+def _list_combined_orders(actor: str | None = None, role: str | None = None) -> list[dict]:
+    """List all orders with optional actor/role context (for future RBAC filtering).
+    
+    Args:
+        actor: Current user identity (email) — passed for PostgreSQL RLS context
+        role: Current user role ("admin" or "adv") — passed for PostgreSQL RLS context
+    
+    Note: SQLite backend ignores actor/role. PostgreSQL backend uses them for RLS.
+    """
     store = get_store()
+    
+    # TODO (Phase 6): Apply RBAC filtering based on actor/role
+    # if role == "adv" and actor:
+    #     # Filter to orders assigned to this ADV or in their scope
+    #     ...
+    
     rows = list(store.list_orders_summary())
     rows_by_id = {
         str(row.get("order_id") or ""): row

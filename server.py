@@ -896,11 +896,63 @@ def _test_sftp() -> tuple[bool, str]:
         return False, f"Échec ({type(exc).__name__}): {exc}"
 
 
+# ── PostgreSQL initialization (if available) ──────────────────────────────────
+async def _init_postgres_db() -> None:
+    """Initialize PostgreSQL database on startup if PG_DATABASE_URL is set."""
+    pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
+    if not pg_url:
+        log.info("PostgreSQL not configured (PG_DATABASE_URL not set) — using SQLite")
+        return
+    
+    try:
+        from database_pg import get_db
+        db = get_db()
+        await db.init_db()
+        log.info("✅ PostgreSQL database initialized with RLS policies")
+    except ImportError:
+        log.warning("PostgreSQL support not installed (sqlalchemy not available) — using SQLite")
+    except Exception as e:
+        log.error(f"Failed to initialize PostgreSQL: {e} — falling back to SQLite")
+
+
 # ── FastAPI app ────────────────────────────────────────────────────────────────
 app = FastAPI(title="EDIFACT Generator", version="4.0.0",
               docs_url="/api/docs", redoc_url=None)
 app.add_middleware(CORSMiddleware, allow_origins=["*"],
                    allow_methods=["*"], allow_headers=["*"])
+
+
+@app.on_event("startup")
+async def _startup_event() -> None:
+    """Initialize database and load master data on app startup."""
+    log.info("🚀 Application startup...")
+    await _init_postgres_db()
+    log.info("✅ Startup complete")
+
+
+@app.on_event("shutdown")
+async def _shutdown_event() -> None:
+    """Clean up resources on app shutdown."""
+    log.info("🛑 Application shutdown...")
+    try:
+        from database_pg import get_db
+        db = get_db()
+        # Cleanup if needed (close connections, etc.)
+    except Exception:
+        pass
+    log.info("✅ Shutdown complete")
+
+
+def _get_db_backend() -> str:
+    """Detect current database backend: 'postgres' or 'sqlite'."""
+    pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
+    try:
+        from sqlalchemy import text
+        if pg_url:
+            return "postgres"
+    except ImportError:
+        pass
+    return "sqlite"
 
 # Auth defaults to ON in Databricks (SSO proxy present) and OFF locally unless
 # a DEV_ACTOR is provided, so `uvicorn server:app` just works on a dev machine.
