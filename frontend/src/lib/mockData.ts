@@ -494,6 +494,7 @@ export const mockSettings: AppSettings = {
     chatPath: "/v1/chat/completions",
     authHeader: "Authorization",
     authScheme: "Bearer",
+    customHeaders: "",
   },
   validation: {
     autoValidationThreshold: 90,

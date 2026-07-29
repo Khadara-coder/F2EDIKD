@@ -52,6 +52,96 @@ def _format_amount_fr(value: float | None) -> str | None:
     return f"{value:,.2f}".replace(",", " ").replace(".", ",") + " EUR"
 
 
+def _looks_polluted_line_description(description: str) -> bool:
+    value = compact_text(description or "")
+    if not value:
+        return False
+    if len(value) > 220:
+        return True
+    if len(re.findall(r"(?:ELM|EL)?\d{7,11}", value, flags=re.IGNORECASE)) >= 2:
+        return True
+    if len(re.findall(r"\d+[,.]\d{2}", value)) >= 4:
+        return True
+    folded = fold_text(value)
+    return "page 1 sur" in folded or "a livrer" in folded or "a facturer" in folded
+
+
+def _infer_quantity_from_price_total(price: float | None, total: float | None) -> float | None:
+    if not price or not total or price <= 0 or total <= 0:
+        return None
+    ratio = total / price
+    if ratio < 0.5 or ratio > 10000:
+        return None
+    rounded_int = round(ratio)
+    if abs(ratio - rounded_int) <= 0.02:
+        return float(rounded_int)
+    rounded_3 = round(ratio, 3)
+    if abs(ratio - rounded_3) <= 0.005:
+        return rounded_3
+    return None
+
+
+def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
+    cleaned: list[dict] = []
+    next_line_num = 10
+    for line in order_lines:
+        article = compact_text(line.get("code_article") or line.get("article") or "")
+        if not article:
+            continue
+
+        qty = _to_float(line.get("quantite") if "quantite" in line else line.get("quantity"))
+        price = _to_float(line.get("prix_unitaire_ht") if "prix_unitaire_ht" in line else line.get("unit_price"))
+        total = _to_float(line.get("montant_ligne_ht") if "montant_ligne_ht" in line else line.get("amount"))
+        description = compact_text(line.get("description") or line.get("designation") or "")
+        delivery_date = line.get("date_livraison") or line.get("delivery_date")
+
+        if qty is not None and qty <= 0:
+            qty = None
+        if price is not None and price <= 0:
+            price = None
+        if total is not None and total <= 0:
+            total = None
+
+        if qty is None:
+            qty = _infer_quantity_from_price_total(price, total)
+        if qty and price and not total:
+            total = round(qty * price, 2)
+        elif qty and total and not price:
+            price = round(total / qty, 2) if qty != 0 else None
+
+        polluted = _looks_polluted_line_description(description)
+        if qty and price and total:
+            expected = qty * price
+            if expected > 0 and abs(expected - total) > max(1.0, expected * 0.15):
+                inferred_qty = _infer_quantity_from_price_total(price, total)
+                if inferred_qty:
+                    qty = inferred_qty
+                elif polluted:
+                    continue
+
+        if qty is None or qty <= 0:
+            continue
+        if price is None and total is None:
+            continue
+        if polluted and (price is None or total is None):
+            continue
+
+        cleaned.append(
+            {
+                "numero_ligne": next_line_num,
+                "code_article": article,
+                "code_article_raw": compact_text(line.get("code_article_raw") or article),
+                "description": description,
+                "quantite": qty,
+                "prix_unitaire_ht": price,
+                "montant_ligne_ht": total,
+                "date_livraison": delivery_date,
+            }
+        )
+        next_line_num += 10
+    return cleaned
+
+
 def _finalize_document_totals(totals: dict[str, str | None], order_lines: list[dict]) -> tuple[dict[str, str | None], float | None]:
     merged = dict(totals or {})
     total_lignes_ht = round(sum(l.get("montant_ligne_ht") or 0 for l in order_lines), 2) if order_lines else None
@@ -474,6 +564,8 @@ def extract_structured_fields(
                 })
         except Exception:
             pass
+
+    order_lines = _sanitize_order_lines(order_lines)
 
     # --- SHIPTO RESOLUTION VIA SCORING ENGINE ---
     # Replaces the old Level 0/1/2 cascade with evidence-based scoring.

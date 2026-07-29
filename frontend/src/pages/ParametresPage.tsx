@@ -227,6 +227,7 @@ export function ParametresPage() {
       chatPath?: string;
       authHeader?: string;
       authScheme?: string;
+      customHeaders?: string;
     }) =>
       api.testAiConnection(payload),
     onSuccess: (res) => setAiTestResult(res),
@@ -504,6 +505,11 @@ export function ParametresPage() {
                             value={form.watch("customAiConfig.authScheme")}
                             onChange={(v) => form.setValue("customAiConfig.authScheme", v)}
                           />
+                          <EditableField
+                            label="Headers custom (k:v, séparés par virgule)"
+                            value={form.watch("customAiConfig.customHeaders")}
+                            onChange={(v) => form.setValue("customAiConfig.customHeaders", v)}
+                          />
                         </>
                       )}
                     </div>
@@ -642,6 +648,11 @@ export function ParametresPage() {
                           value={form.watch("customAiConfig.authScheme")}
                           onChange={(v) => form.setValue("customAiConfig.authScheme", v)}
                         />
+                        <EditableField
+                          label="Headers custom (k:v, séparés par virgule)"
+                          value={form.watch("customAiConfig.customHeaders")}
+                          onChange={(v) => form.setValue("customAiConfig.customHeaders", v)}
+                        />
                       </>
                     )}
                   </div>
@@ -745,6 +756,7 @@ export function ParametresPage() {
                           chatPath: form.getValues("customAiConfig.chatPath"),
                           authHeader: form.getValues("customAiConfig.authHeader"),
                           authScheme: form.getValues("customAiConfig.authScheme"),
+                          customHeaders: form.getValues("customAiConfig.customHeaders"),
                         });
                       }}
                       disabled={aiTestMutation.isPending}

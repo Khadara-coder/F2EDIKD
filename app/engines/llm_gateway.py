@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 from typing import Optional
 
 import requests
@@ -13,6 +14,20 @@ logger = logging.getLogger(__name__)
 
 _DBX_CLIENT = None
 _DBX_CLIENT_INITIALIZED = False
+
+
+def _parse_custom_headers(raw: str) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for part in re.split(r"[\n,]", raw or ""):
+        chunk = part.strip()
+        if not chunk or ":" not in chunk:
+            continue
+        key, value = chunk.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and value:
+            headers[key] = value
+    return headers
 
 
 def _provider() -> str:
@@ -124,6 +139,7 @@ def _chat_custom(prompt: str, max_tokens: int) -> Optional[str]:
     model = (os.getenv("CUSTOM_LLM_MODEL") or "").strip()
     auth_header = (os.getenv("CUSTOM_LLM_AUTH_HEADER") or "Authorization").strip() or "Authorization"
     auth_scheme = (os.getenv("CUSTOM_LLM_AUTH_SCHEME") or "Bearer").strip()
+    custom_headers_raw = (os.getenv("CUSTOM_LLM_EXTRA_HEADERS") or "").strip()
     token = (os.getenv("CUSTOM_LLM_API_KEY") or "").strip()
 
     if not base_url:
@@ -133,6 +149,7 @@ def _chat_custom(prompt: str, max_tokens: int) -> Optional[str]:
     headers = {"Content-Type": "application/json"}
     if token:
         headers[auth_header] = f"{auth_scheme} {token}".strip()
+    headers.update(_parse_custom_headers(custom_headers_raw))
 
     try:
         resp = requests.post(

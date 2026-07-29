@@ -184,6 +184,7 @@ def _apply_runtime_databricks_config(settings_payload: dict | None = None) -> No
             "chatPath": "CUSTOM_LLM_CHAT_PATH",
             "authHeader": "CUSTOM_LLM_AUTH_HEADER",
             "authScheme": "CUSTOM_LLM_AUTH_SCHEME",
+            "customHeaders": "CUSTOM_LLM_EXTRA_HEADERS",
         }
         for key, env_name in cfg_map.items():
             value = str(custom_cfg.get(key) or "").strip()

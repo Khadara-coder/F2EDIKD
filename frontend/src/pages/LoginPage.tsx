@@ -18,8 +18,14 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [profileLoginEnabled, setProfileLoginEnabled] = useState(false);
-  const logoSrc = `${import.meta.env.BASE_URL}genie-commande.png`;
-  const logoFallback = `${import.meta.env.BASE_URL}file.png`;
+  const origin = typeof window !== "undefined" ? window.location.origin : "";
+  const logoCandidates = [
+    `${import.meta.env.BASE_URL}genie-commande.png`,
+    "/genie-commande.png",
+    `${origin}/genie-commande.png`,
+    `${import.meta.env.BASE_URL}file.png`,
+    "/file.png",
+  ].filter(Boolean);
 
   useEffect(() => {
     let active = true;
@@ -56,14 +62,20 @@ export function LoginPage() {
       <Card className="w-full max-w-sm shadow-xl">
         <CardHeader className="flex flex-col items-center gap-2 pb-2">
           <img
-            src={logoSrc}
+            src={logoCandidates[0]}
             alt="Genie Commande"
             className="h-28 w-auto max-w-[220px] object-contain"
+            data-logo-idx="0"
             onError={(e) => {
               const img = e.currentTarget;
-              if (!img.src.endsWith("file.png")) {
-                img.src = logoFallback;
+              const current = Number(img.dataset.logoIdx || "0");
+              const next = current + 1;
+              if (next < logoCandidates.length) {
+                img.dataset.logoIdx = String(next);
+                img.src = logoCandidates[next];
+                return;
               }
+              img.style.display = "none";
             }}
           />
           <CardTitle className="text-xl">File2EDI</CardTitle>

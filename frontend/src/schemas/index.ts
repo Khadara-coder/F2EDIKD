@@ -96,6 +96,7 @@ export const appSettingsSchema = z.object({
     chatPath: z.string(),
     authHeader: z.string(),
     authScheme: z.string(),
+    customHeaders: z.string(),
   }),
   validation: z.object({
     autoValidationThreshold: z.number().int().min(0).max(100),

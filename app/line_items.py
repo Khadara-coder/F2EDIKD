@@ -17,7 +17,7 @@ def enrich_line_items_with_materials(rows: list[dict], materials_by_id: dict[str
 
 
 def _amount_pattern() -> str:
-    return r"(?:(?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}\s?(?:EUR|E|euros?)?|\d+\.\d{2}\s?€?)"
+    return r"(?:(?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}\s?(?:€|EUR|E|euros?)?)"
 
 
 def _normalize_article_token(token: str) -> str:
@@ -31,8 +31,46 @@ def _extract_amount_tokens(text: str) -> list[str]:
     return [compact_text(m.group(0)) for m in re.finditer(_amount_pattern(), text, flags=re.IGNORECASE)]
 
 
+def _extract_article_tail_values(window_text: str, article: str) -> tuple[str, str, str]:
+    text = compact_text(window_text).replace("|", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    parts = text.split(article, 1)
+    if len(parts) != 2:
+        return "", "", ""
+    tail = parts[1]
+    amount = _amount_pattern()
+    pattern_with_u = re.match(
+        rf"^\s*(?P<qty>\d{{1,4}}(?:[.,]\d{{1,3}})?)\s+"
+        rf"(?P<amount>{amount})\s+\S+\s+U\s+"
+        rf"(?P<unit_price>{amount})",
+        tail,
+        flags=re.IGNORECASE,
+    )
+    if pattern_with_u:
+        return (
+            compact_text(pattern_with_u.group("qty")),
+            compact_text(pattern_with_u.group("unit_price")),
+            compact_text(pattern_with_u.group("amount")),
+        )
+
+    pattern_simple = re.match(
+        rf"^\s*(?P<qty>\d{{1,4}}(?:[.,]\d{{1,3}})?)\s+"
+        rf"(?P<amount>{amount})\s+"
+        rf"(?P<unit_price>{amount})",
+        tail,
+        flags=re.IGNORECASE,
+    )
+    if pattern_simple:
+        return (
+            compact_text(pattern_simple.group("qty")),
+            compact_text(pattern_simple.group("unit_price")),
+            compact_text(pattern_simple.group("amount")),
+        )
+    return "", "", ""
+
+
 def _is_unit_token(value: str) -> bool:
-    return bool(re.fullmatch(r"PCE|PIECE|PCS|PC|UN|U|EA", compact_text(value), flags=re.IGNORECASE))
+    return bool(re.fullmatch(r"PCE|PIECE|PCS|PC|UN|EA", compact_text(value), flags=re.IGNORECASE))
 
 
 def _extract_table_quantity_and_unit(cells: list[str], article_idx: int, amount_indexes: list[int]) -> tuple[str, str]:
@@ -71,8 +109,8 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
 
     article_re = re.compile(r"\b(?P<art>(?:ELM|EL)?\d{7,11})\b", flags=re.IGNORECASE)
     qty_unit_re = re.compile(
-        r"(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PIECE|PCS|PC|UN|U|EA)\b"
-        r"|\b(?P<unit2>PCE|PIECE|PCS|PC|UN|U|EA)\b\s*(?P<qty2>\d{1,4}(?:[,.]\d{1,3})?)",
+        r"(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PIECE|PCS|PC|UN|EA)\b"
+        r"|\b(?P<unit2>PCE|PIECE|PCS|PC|UN|EA)\b\s*(?P<qty2>\d{1,4}(?:[,.]\d{1,3})?)",
         flags=re.IGNORECASE,
     )
 
@@ -102,7 +140,7 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
             continue
 
         win_start = max(0, anchor_idx - 1)
-        win_end = min(len(lines), anchor_idx + 4)
+        win_end = min(len(lines), anchor_idx + 8)
         window_lines = [compact_text(x) for x in lines[win_start:win_end] if compact_text(x)]
         window_text = " | ".join(window_lines)
 
@@ -126,6 +164,15 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
             else:
                 unit_price = amounts[0]
                 amount = amounts[-1]
+
+        if not qty or (unit_price and amount and unit_price == amount):
+            tail_qty, tail_unit_price, tail_amount = _extract_article_tail_values(window_text, article)
+            if tail_qty:
+                qty = tail_qty
+            if tail_unit_price:
+                unit_price = tail_unit_price
+            if tail_amount:
+                amount = tail_amount
 
         # Pull a short designation text around article, excluding strong numeric lines.
         designation = ""
@@ -265,13 +312,13 @@ def extract_line_items_from_article_windows(text: str, materials_by_id: dict[str
         qty = ""
         unit = ""
         qty_match = re.search(
-            r"(?<!\w)(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PCS|PIECE|PC|UN|U|EA)\b",
+            r"(?<!\w)(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PCS|PIECE|PC|UN|EA)\b",
             before,
             flags=re.IGNORECASE,
         )
         if not qty_match:
             qty_match = re.search(
-                r"(?<!\w)(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PCS|PIECE|PC|UN|U|EA)\b",
+                r"(?<!\w)(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PCS|PIECE|PC|UN|EA)\b",
                 after,
                 flags=re.IGNORECASE,
             )
@@ -281,7 +328,7 @@ def extract_line_items_from_article_windows(text: str, materials_by_id: dict[str
 
         unit_price = ""
         up = re.search(
-            r"(?P<price>(?:\d{1,3}(?:[ ]\d{3})+|\d{1,6})[,.]\d{2})\s*(?:€|EUR)?\s*/\s*(?:PCE|PCS|PIECE|PC|UN|U|EA)",
+            r"(?P<price>(?:\d{1,3}(?:[ ]\d{3})+|\d{1,6})[,.]\d{2})\s*(?:€|EUR)?\s*/\s*(?:PCE|PCS|PIECE|PC|UN|EA)",
             after,
             flags=re.IGNORECASE,
         )
@@ -433,12 +480,12 @@ def extract_line_items_from_material_windows(text: str, materials_by_id: dict[st
             after = compact_text(window[match.end() - start :])
             quantity = ""
             unit = ""
-            qty_match = re.search(r"(?<!\w)(?P<qty>\d{1,4})\s*(?P<unit>PCE|PCS|PC|UN|U|EA)\b", before, flags=re.I)
+            qty_match = re.search(r"(?<!\w)(?P<qty>\d{1,4})\s*(?P<unit>PCE|PCS|PC|UN|EA)\b", before, flags=re.I)
             if qty_match:
                 quantity = qty_match.group("qty")
                 unit = qty_match.group("unit").upper()
             price = ""
-            price_match = re.search(r"(?P<price>(?:\d{1,3}(?:[ ]\d{3})+|\d{1,5})[,.]\d{2})\s*(?:€|EUR)?\s*/?\s*(?:PCE|PCS|PC|UN|U)?", after, flags=re.I)
+            price_match = re.search(r"(?P<price>(?:\d{1,3}(?:[ ]\d{3})+|\d{1,5})[,.]\d{2})\s*(?:€|EUR)?\s*/?\s*(?:PCE|PCS|PC|UN|EA)?", after, flags=re.I)
             if not price_match:
                 price_match = re.search(r"(?P<price>(?:\d{1,3}(?:[ ]\d{3})+|\d{1,5})[,.]\d{2})\s*(?:€|EUR)?", before, flags=re.I)
             if price_match:
