@@ -63,8 +63,8 @@ La VM Azure est le serveur de validation pré-prod. On y déploie la branche `st
 
 ```bash
 # Sur la VM
-git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git /root/F2EDIDK
-cd /root/F2EDIDK
+git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git /root/GenieCommande
+cd /root/GenieCommande
 git checkout staging
 cp .env.example .env
 # Renseigner .env avec les vraies valeurs staging
@@ -74,9 +74,9 @@ docker compose -f docker-compose.file2edi.yml up --build -d
 ### Mise à jour staging (après merge PR dev → staging)
 
 ```bash
-git -C /root/F2EDIDK fetch origin
-git -C /root/F2EDIDK checkout staging
-git -C /root/F2EDIDK pull origin staging
+git -C /root/GenieCommande fetch origin
+git -C /root/GenieCommande checkout staging
+git -C /root/GenieCommande pull origin staging
 docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 

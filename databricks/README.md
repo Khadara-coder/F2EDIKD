@@ -56,12 +56,12 @@ et publie les CSV dans `data/masterdata/` de l'application.
 ### Crontab recommandé (sur la VM)
 
 ```cron
-0 3 * * * /usr/bin/python3 /root/F2EDIDK/scripts/sync_masterdata_repo.py \
+0 3 * * * /usr/bin/python3 /root/GenieCommande/scripts/sync_masterdata_repo.py \
     --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
     --branch main \
-    --target-dir /root/F2EDIDK/data/masterdata/ \
+    --target-dir /root/GenieCommande/data/masterdata/ \
     --notify-api-url http://localhost:8080/api/masterdata/sync \
-    >> /root/F2EDIDK/data/logs/masterdata_sync.log 2>&1
+    >> /root/GenieCommande/data/logs/masterdata_sync.log 2>&1
 ```
 
 ### Vérification après sync

@@ -35,13 +35,13 @@ La production se synchronise depuis `https://github.boschdevcloud.com/RSR1DY/mas
 python scripts/sync_masterdata_repo.py \
     --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
     --branch main \
-    --target-dir /root/F2EDIDK/data/masterdata/ \
+    --target-dir /root/GenieCommande/data/masterdata/ \
     --notify-api-url http://localhost:8080/api/masterdata/sync
 ```
 
 Pour un sync manuel immédiat :
 ```bash
-docker compose -f /root/F2EDIDK/docker-compose.file2edi.yml exec file2edi \
+docker compose -f /root/GenieCommande/docker-compose.file2edi.yml exec file2edi \
   python scripts/sync_masterdata_repo.py \
     --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
     --branch main \
@@ -67,7 +67,7 @@ Après sync, vérifier :
 
 ```bash
 # Récupérer la dernière version de staging
-git -C /root/F2EDIDK pull origin staging
+git -C /root/GenieCommande pull origin staging
 
 # Redémarrer sans perte de données (volumes persistants)
 docker compose -f docker-compose.file2edi.yml up --build -d
@@ -87,8 +87,8 @@ Si le générateur produit des fichiers incorrects :
 
 En production VM, rollback via :
 ```bash
-git -C /root/F2EDIDK checkout <commit-précédent>
-docker compose -f /root/F2EDIDK/docker-compose.file2edi.yml up --build -d
+git -C /root/GenieCommande checkout <commit-précédent>
+docker compose -f /root/GenieCommande/docker-compose.file2edi.yml up --build -d
 ```
 
 ---

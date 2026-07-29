@@ -47,8 +47,8 @@ git push origin dev
 # Ouvrir une PR dev → staging sur GitHub, merger
 
 # Sur la VM Azure
-git -C /root/F2EDIDK pull origin staging
-git -C /root/F2EDIDK checkout staging
+git -C /root/GenieCommande pull origin staging
+git -C /root/GenieCommande checkout staging
 docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
