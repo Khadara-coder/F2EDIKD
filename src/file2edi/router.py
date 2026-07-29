@@ -494,7 +494,10 @@ def create_router() -> APIRouter:
                     "sftp": "connected" if s.get("sftp", {}).get("configured") else "disconnected",
                 },
                 "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
-                "databricksConfig": persisted.get("databricksConfig", _default_settings().get("databricksConfig", {})),
+                "databricksConfig": {
+                    **_default_settings().get("databricksConfig", {}),
+                    **(persisted.get("databricksConfig") or {}),
+                },
                 "validation": persisted.get("validation", _default_settings().get("validation", {})),
                 "notifications": persisted.get("notifications", _default_settings().get("notifications", {})),
                 "sftpConfig": {
@@ -675,6 +678,7 @@ def _default_settings() -> dict:
             "catalog": "hive_metastore",
             "schema": "edifact_generator",
             "configProfile": "",
+            "llmEnabled": True,
         },
         "validation": {
             "autoValidationThreshold": 90,

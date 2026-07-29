@@ -316,6 +316,7 @@ export interface AppSettings {
     catalog: string;
     schema: string;
     configProfile: string;
+    llmEnabled: boolean;
   };
   validation: {
     autoValidationThreshold: number;

@@ -15,11 +15,8 @@ import logging
 import re
 from typing import Optional
 
-try:
-    import mlflow.deployments
-    _client = mlflow.deployments.get_deploy_client("databricks")
-except Exception:
-    _client = None
+_client = None
+_client_initialized = False
 
 logger = logging.getLogger(__name__)
 
@@ -27,13 +24,34 @@ MODEL_ENDPOINT = "databricks-claude-sonnet-4"
 FALLBACK_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
 
 
+def _get_client():
+    """Lazily create the Databricks deploy client on first use.
+
+    Avoids paying the import/connection cost (and emitting a warning) at module
+    import time when the LLM is never solicited.
+    """
+    global _client, _client_initialized
+    from app.runtime import llm_enabled
+    if not llm_enabled():
+        return None
+    if not _client_initialized:
+        _client_initialized = True
+        try:
+            import mlflow.deployments
+            _client = mlflow.deployments.get_deploy_client("databricks")
+        except Exception:
+            _client = None
+    return _client
+
+
 def _call_llm(prompt: str, max_tokens: int = 400, endpoint: str = MODEL_ENDPOINT) -> Optional[str]:
     """Call the LLM endpoint and return the text response."""
-    if _client is None:
+    client = _get_client()
+    if client is None:
         logger.warning("mlflow.deployments client not available")
         return None
     try:
-        resp = _client.predict(
+        resp = client.predict(
             endpoint=endpoint,
             inputs={
                 "messages": [{"role": "user", "content": prompt}],
@@ -47,7 +65,7 @@ def _call_llm(prompt: str, max_tokens: int = 400, endpoint: str = MODEL_ENDPOINT
         # Try fallback
         if endpoint != FALLBACK_ENDPOINT:
             try:
-                resp = _client.predict(
+                resp = client.predict(
                     endpoint=FALLBACK_ENDPOINT,
                     inputs={
                         "messages": [{"role": "user", "content": prompt}],

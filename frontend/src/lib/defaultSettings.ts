@@ -29,6 +29,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     catalog: "hive_metastore",
     schema: "edifact_generator",
     configProfile: "",
+    llmEnabled: true,
   },
   validation: {
     autoValidationThreshold: 90,

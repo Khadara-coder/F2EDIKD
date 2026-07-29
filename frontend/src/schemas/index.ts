@@ -78,6 +78,7 @@ export const appSettingsSchema = z.object({
     catalog: z.string(),
     schema: z.string(),
     configProfile: z.string(),
+    llmEnabled: z.boolean().default(true),
   }),
   validation: z.object({
     autoValidationThreshold: z.number().int().min(0).max(100),

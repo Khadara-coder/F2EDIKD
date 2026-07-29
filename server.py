@@ -152,6 +152,13 @@ def _apply_runtime_databricks_config(settings_payload: dict | None = None) -> No
         if value:
             os.environ[env_name] = value
 
+    # LLM enable/disable toggle (independent of runtime environment).
+    if "llmEnabled" in databricks:
+        enabled = databricks.get("llmEnabled")
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in {"1", "true", "yes", "on", "y"}
+        os.environ["F2EDI_LLM_ENABLED"] = "1" if enabled else "0"
+
 
 _apply_runtime_databricks_config()
 

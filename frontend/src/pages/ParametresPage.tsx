@@ -522,6 +522,28 @@ export function ParametresPage() {
 
               <Card>
                 <CardHeader>
+                  <CardTitle className="text-base">Moteur IA (LLM Databricks)</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                    <div>
+                      <p className="font-medium text-sm">Activer le LLM</p>
+                      <p className="text-xs text-muted-foreground">
+                        Active ou désactive l&apos;appel au LLM Databricks pour l&apos;extraction,
+                        quel que soit l&apos;environnement. Désactivé, l&apos;application n&apos;utilise
+                        que les moteurs déterministes (règles + regex).
+                      </p>
+                    </div>
+                    <Switch
+                      checked={form.watch("databricksConfig.llmEnabled")}
+                      onCheckedChange={(v) => form.setValue("databricksConfig.llmEnabled", v)}
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
                   <CardTitle className="text-base">Test de connexion IA</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">

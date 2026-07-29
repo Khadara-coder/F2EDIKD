@@ -10,6 +10,20 @@ def is_databricks() -> bool:
     return bool(os.getenv("DATABRICKS_RUNTIME_VERSION"))
 
 
+def llm_enabled() -> bool:
+    """Whether the Databricks LLM may be solicited.
+
+    Controlled by the admin setting ``databricksConfig.llmEnabled`` (persisted
+    into the ``F2EDI_LLM_ENABLED`` env var). Defaults to enabled when unset so
+    existing deployments keep their behaviour. This gate is independent of the
+    runtime environment (works in local dev and on Databricks alike).
+    """
+    raw = os.getenv("F2EDI_LLM_ENABLED")
+    if raw is None:
+        return True
+    return raw.strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
 def project_root() -> Path:
     configured = os.getenv("LOCATEANYTHING_PROJECT_ROOT")
     if configured:

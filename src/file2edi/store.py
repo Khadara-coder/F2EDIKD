@@ -33,6 +33,7 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "catalog": "hive_metastore",
         "schema": "edifact_generator",
         "configProfile": "",
+        "llmEnabled": True,
     },
     "validation": {
         "autoValidationThreshold": 90,
@@ -134,6 +135,8 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ):
             if key in raw_databricks:
                 databricks[key] = str(raw_databricks.get(key) or "").strip()
+        if "llmEnabled" in raw_databricks:
+            databricks["llmEnabled"] = _as_bool(raw_databricks.get("llmEnabled"))
         if databricks:
             out["databricksConfig"] = databricks
 
