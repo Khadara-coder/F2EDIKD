@@ -4715,6 +4715,11 @@ def spa_fallback(full_path: str):
     """React Router paths (/revue, /convertir, …) — serve index.html on direct URL access."""
     if full_path.startswith(("api/", "assets/")):
         raise HTTPException(404)
+    # Serve static files at the dist root (e.g. genie-commande.png, file.png)
+    if STATIC_DIR.exists():
+        candidate = STATIC_DIR / full_path
+        if candidate.exists() and candidate.is_file():
+            return FileResponse(str(candidate))
     return _spa_index_response()
 
 
