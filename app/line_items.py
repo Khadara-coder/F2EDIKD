@@ -31,6 +31,31 @@ def _extract_amount_tokens(text: str) -> list[str]:
     return [compact_text(m.group(0)) for m in re.finditer(_amount_pattern(), text, flags=re.IGNORECASE)]
 
 
+def _is_unit_token(value: str) -> bool:
+    return bool(re.fullmatch(r"PCE|PIECE|PCS|PC|UN|U|EA", compact_text(value), flags=re.IGNORECASE))
+
+
+def _extract_table_quantity_and_unit(cells: list[str], article_idx: int, amount_indexes: list[int]) -> tuple[str, str]:
+    first_amount_idx = amount_indexes[0] if amount_indexes else len(cells)
+    numeric_indexes = [
+        idx
+        for idx, cell in enumerate(cells)
+        if idx != article_idx
+        and idx < first_amount_idx
+        and re.fullmatch(r"\d+(?:[,.]\d+)?", cell)
+    ]
+    if not numeric_indexes:
+        return "", ""
+
+    preferred_idx = numeric_indexes[-1]
+    unit = ""
+    if preferred_idx + 1 < len(cells) and _is_unit_token(cells[preferred_idx + 1]):
+        unit = compact_text(cells[preferred_idx + 1]).upper().replace("PIECE", "PCE")
+    elif preferred_idx - 1 >= 0 and _is_unit_token(cells[preferred_idx - 1]):
+        unit = compact_text(cells[preferred_idx - 1]).upper().replace("PIECE", "PCE")
+    return compact_text(cells[preferred_idx]), unit
+
+
 def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
     """Extract rows when OCR split table data across adjacent lines.
 
@@ -159,18 +184,21 @@ def extract_line_items_from_lines(lines: list[str]) -> list[dict]:
             article_idx = next((idx for idx, cell in enumerate(cells) if re.fullmatch(r"[A-Z]{0,4}\d{5,}|\d{5,}", cell, flags=re.I)), None)
             if article_idx is not None:
                 article = cells[article_idx]
-                amounts = [cell for cell in cells if re.search(r"\d[,.]\d{2}", cell)]
-                quantity_candidates = [cell for cell in cells if re.fullmatch(r"\d+(?:[,.]\d+)?", cell)]
+                amount_indexes = [idx for idx, cell in enumerate(cells) if re.search(r"\d[,.]\d{2}", cell)]
+                amounts = [cells[idx] for idx in amount_indexes]
+                quantity, unit = _extract_table_quantity_and_unit(cells, article_idx, amount_indexes)
                 designation_cells = [
                     cell
                     for idx, cell in enumerate(cells)
                     if idx != article_idx and not re.fullmatch(r"\d+(?:[,.]\d+)?", cell) and not re.search(r"\d[,.]\d{2}", cell)
+                    and not _is_unit_token(cell)
                 ]
                 row = {
                     "designation": compact_text(" ".join(designation_cells)),
                     "article": article,
                     "delivery_date": next((cell for cell in cells if re.fullmatch(r"\d{2}/\d{2}/\d{4}", cell)), ""),
-                    "quantity": quantity_candidates[-2] if len(quantity_candidates) >= 2 else (quantity_candidates[0] if quantity_candidates else ""),
+                    "quantity": quantity,
+                    "unit": unit,
                     "unit_price": amounts[0] if amounts else "",
                     "amount": amounts[-1] if amounts else "",
                     "parser": "table_lines",
@@ -357,7 +385,7 @@ def extract_line_items_from_text(text: str, materials_by_id: dict[str, str] | No
                 "designation": compact_text(match.group("designation")),
                 "article": match.group("article"),
                 "delivery_date": match.group("date"),
-                "quantity": match.group("quantity") or match.group("packaging") or "",
+                    "quantity": match.group("quantity") or "",
                 "unit_price": compact_text(match.group("unit_price")),
                 "amount": compact_text(match.group("amount")),
                 "parser": "compact_regex",

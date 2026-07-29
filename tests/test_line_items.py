@@ -40,3 +40,29 @@ def test_extract_line_items_from_multiline_split_rows():
     assert rows[0]["quantity"] in {"20,000", "20.000", "20"}
     assert rows[0]["unit"] == "PCE"
     assert rows[0]["parser"] in {"multiline_window", "table_lines", "table_line_regex"}
+
+
+def test_extract_line_items_from_table_lines_ignores_article_and_packaging_for_quantity():
+    lines = [
+        "Article  Designation  Colis  Qte  Unite  Prix unitaire  Montant",
+        "123456789  Widget premium  10  2  PCE  10,00 EUR  20,00 EUR",
+        "Total HT 20,00 EUR",
+    ]
+
+    rows = extract_line_items_from_lines(lines)
+
+    assert len(rows) == 1
+    assert rows[0]["article"] == "123456789"
+    assert rows[0]["quantity"] == "2"
+    assert rows[0]["unit"] == "PCE"
+
+
+def test_extract_line_items_from_text_does_not_use_packaging_as_quantity():
+    text = "10,00 EUR 20,00 EUR 01/01/2026 Widget premium 123456789 6"
+
+    rows = extract_line_items_from_text(text, {})
+
+    assert len(rows) == 1
+    assert rows[0]["article"] == "123456789"
+    assert rows[0]["quantity"] == ""
+    assert rows[0]["parser"] == "compact_regex"

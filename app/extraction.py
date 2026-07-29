@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import time
+from datetime import date
 
 from app.amounts import extract_document_totals, rank_amounts_by_context
 from app.document import build_cross_validation, build_debug_summary
@@ -43,6 +44,20 @@ def _to_float(value):
         return float(s)
     except (ValueError, TypeError):
         return None
+
+
+def _format_amount_fr(value: float | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value:,.2f}".replace(",", " ").replace(".", ",") + " EUR"
+
+
+def _finalize_document_totals(totals: dict[str, str | None], order_lines: list[dict]) -> tuple[dict[str, str | None], float | None]:
+    merged = dict(totals or {})
+    total_lignes_ht = round(sum(l.get("montant_ligne_ht") or 0 for l in order_lines), 2) if order_lines else None
+    if not merged.get("Total HT") and total_lignes_ht is not None and total_lignes_ht > 0:
+        merged["Total HT"] = _format_amount_fr(total_lignes_ht)
+    return merged, total_lignes_ht
 
 
 # ─── Deterministic date extraction (fallback when LLM unavailable) ────────────
@@ -138,6 +153,33 @@ def _collect_all_dates(text: str) -> list[str]:
     return out
 
 
+def _is_plausible_business_date(iso_date: str | None) -> bool:
+    if not iso_date or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", iso_date):
+        return False
+    year = int(iso_date[:4])
+    current_year = date.today().year
+    return current_year - 5 <= year <= current_year + 2
+
+
+def _choose_final_date(
+    llm_date: str | None,
+    anchored_date: str | None,
+    anchored_source: str,
+    all_dates: list[str],
+) -> str | None:
+    llm_ok = llm_date if _is_plausible_business_date(llm_date) else None
+    anchored_ok = anchored_date if _is_plausible_business_date(anchored_date) else None
+    strong_anchor = anchored_source in {"line_context", "label_window"}
+
+    if strong_anchor and anchored_ok:
+        return anchored_ok
+    if llm_ok and llm_ok in all_dates:
+        return llm_ok
+    if anchored_ok:
+        return anchored_ok
+    return llm_ok
+
+
 def _score_date_by_labels(line_folded: str, labels: list[str]) -> int:
     score = 0
     for lb in labels:
@@ -190,12 +232,20 @@ def extract_dates_anchored(text: str) -> dict:
 
     # 3) Conservative defaults: earliest as order date, latest as delivery date
     all_dates = _collect_all_dates(text)
+    order_source = "missing"
+    delivery_source = "missing"
+    if order_date:
+        order_source = "line_context"
+    if delivery_date:
+        delivery_source = "line_context"
     if all_dates:
         sorted_dates = sorted(all_dates)
         if not order_date:
             order_date = sorted_dates[0]
+            order_source = "fallback_all_dates"
         if not delivery_date:
             delivery_date = sorted_dates[-1]
+            delivery_source = "fallback_all_dates"
 
     # 4) Keep temporal consistency when both exist
     if order_date and delivery_date and delivery_date < order_date:
@@ -204,6 +254,9 @@ def extract_dates_anchored(text: str) -> dict:
     return {
         "date_commande": order_date,
         "date_livraison": delivery_date,
+        "date_commande_source": order_source,
+        "date_livraison_source": delivery_source,
+        "all_dates": all_dates,
     }
 
 
@@ -501,14 +554,22 @@ def extract_structured_fields(
 
     # --- DATES: LLM primary, deterministic label-anchored fallback ---
     _anchored_dates = extract_dates_anchored(text)
-    final_order_date = (
-        (llm_extracted.get("date_commande") if llm_extracted else None)
-        or _anchored_dates.get("date_commande")
+    final_order_date = _choose_final_date(
+        (llm_extracted.get("date_commande") if llm_extracted else None),
+        _anchored_dates.get("date_commande"),
+        str(_anchored_dates.get("date_commande_source") or "missing"),
+        list(_anchored_dates.get("all_dates") or []),
     )
-    final_delivery_date = (
-        (llm_extracted.get("date_livraison_souhaitee") if llm_extracted else None)
-        or _anchored_dates.get("date_livraison")
+    final_delivery_date = _choose_final_date(
+        (llm_extracted.get("date_livraison_souhaitee") if llm_extracted else None),
+        _anchored_dates.get("date_livraison"),
+        str(_anchored_dates.get("date_livraison_source") or "missing"),
+        list(_anchored_dates.get("all_dates") or []),
     )
+    if final_order_date and final_delivery_date and final_delivery_date < final_order_date:
+        final_delivery_date = final_order_date
+
+    totals, total_lignes_ht = _finalize_document_totals(totals, order_lines)
 
         # --- EDIFACT D96A: generate message if not blocked ---
     edifact_message = None
@@ -562,7 +623,7 @@ def extract_structured_fields(
         "lignes_commande": {
             "lignes": order_lines,
             "nb_lignes": len(order_lines),
-            "total_lignes_ht": round(sum(l.get("montant_ligne_ht") or 0 for l in order_lines), 2) if order_lines else None,
+            "total_lignes_ht": total_lignes_ht,
         },
         "rejets": rejection_result,
         "edifact": {
