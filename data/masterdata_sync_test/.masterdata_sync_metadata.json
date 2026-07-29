@@ -1,0 +1,35 @@
+{
+  "repo_url": "https://github.boschdevcloud.com/RSR1DY/masterdata.git",
+  "branch": "main",
+  "commit": "496fa8765d4a0ad22eaf59e07116e4f6aeb9b894",
+  "synced_at_utc": "2026-07-28T07:38:56Z",
+  "required_files": [
+    "10564_Customers.csv",
+    "10564_Partners.csv",
+    "10564_Materials.csv",
+    "DB_Salesorder.csv"
+  ],
+  "files": {
+    "10564_Customers.csv": {
+      "rows": 6501,
+      "sha256": "7f45ea81c09563e5e89532ffcb2bd3fbce37f8b511e211de954f5ce20b7fe618",
+      "size_bytes": 566755
+    },
+    "10564_Partners.csv": {
+      "rows": 9389,
+      "sha256": "2009f6329c0d107ebd11d5dc3867b0f6a63ef9f57e327b9471a407401558d3bd",
+      "size_bytes": 1336359
+    },
+    "10564_Materials.csv": {
+      "rows": 34684,
+      "sha256": "9f85ff28b6d71936379daefa8a039d895d78e36f58469efb8790dd94cc5b842b",
+      "size_bytes": 1242166
+    },
+    "DB_Salesorder.csv": {
+      "rows": 141895,
+      "sha256": "4335726bb24e55e9de07d56f899cb882f96307db134b81bf2c69b99ec894867f",
+      "size_bytes": 8576221
+    }
+  },
+  "sync_runner": "scripts/sync_masterdata_repo.py"
+}
