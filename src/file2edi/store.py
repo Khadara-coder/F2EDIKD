@@ -25,14 +25,32 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "csvDelimiter": ";",
         "sftpProfile": "default",
     },
+    "aiProvider": "databricks",
     "databricksConfig": {
         "host": "https://adb-5555213114570927.7.azuredatabricks.net",
         "apiBaseUrl": "https://file2edi-5555213114570927.7.azure.databricksapps.com",
         "modelEndpoint": "databricks-gpt-oss-120b",
+        "sqlWarehouseEnabled": False,
         "warehouseId": "",
         "catalog": "hive_metastore",
         "schema": "edifact_generator",
         "configProfile": "",
+        "llmEnabled": True,
+    },
+    "openaiConfig": {
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4.1-mini",
+    },
+    "ollamaConfig": {
+        "baseUrl": "http://localhost:11434",
+        "model": "llama3.1",
+    },
+    "customAiConfig": {
+        "baseUrl": "",
+        "model": "",
+        "chatPath": "/v1/chat/completions",
+        "authHeader": "Authorization",
+        "authScheme": "Bearer",
     },
     "validation": {
         "autoValidationThreshold": 90,
@@ -134,8 +152,45 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
         ):
             if key in raw_databricks:
                 databricks[key] = str(raw_databricks.get(key) or "").strip()
+        if "sqlWarehouseEnabled" in raw_databricks:
+            databricks["sqlWarehouseEnabled"] = _as_bool(raw_databricks.get("sqlWarehouseEnabled"))
+        if "llmEnabled" in raw_databricks:
+            databricks["llmEnabled"] = _as_bool(raw_databricks.get("llmEnabled"))
         if databricks:
             out["databricksConfig"] = databricks
+
+    ai_provider = payload.get("aiProvider")
+    if ai_provider is not None:
+        provider = str(ai_provider).strip().lower()
+        allowed = {"databricks", "openai", "ollama", "custom"}
+        out["aiProvider"] = provider if provider in allowed else "databricks"
+
+    raw_openai = payload.get("openaiConfig")
+    if isinstance(raw_openai, dict):
+        openai_cfg: dict[str, Any] = {}
+        for key in ("baseUrl", "model"):
+            if key in raw_openai:
+                openai_cfg[key] = str(raw_openai.get(key) or "").strip()
+        if openai_cfg:
+            out["openaiConfig"] = openai_cfg
+
+    raw_ollama = payload.get("ollamaConfig")
+    if isinstance(raw_ollama, dict):
+        ollama_cfg: dict[str, Any] = {}
+        for key in ("baseUrl", "model"):
+            if key in raw_ollama:
+                ollama_cfg[key] = str(raw_ollama.get(key) or "").strip()
+        if ollama_cfg:
+            out["ollamaConfig"] = ollama_cfg
+
+    raw_custom = payload.get("customAiConfig")
+    if isinstance(raw_custom, dict):
+        custom_cfg: dict[str, Any] = {}
+        for key in ("baseUrl", "model", "chatPath", "authHeader", "authScheme"):
+            if key in raw_custom:
+                custom_cfg[key] = str(raw_custom.get(key) or "").strip()
+        if custom_cfg:
+            out["customAiConfig"] = custom_cfg
 
     raw_validation = payload.get("validation")
     if isinstance(raw_validation, dict):

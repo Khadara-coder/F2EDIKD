@@ -66,3 +66,7 @@ static/*.bak*
 
 # Misc
 n8n workflow.txt
+
+# RAG data (local only)
+RAG Purchase Orders/
+

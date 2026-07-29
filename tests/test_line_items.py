@@ -23,3 +23,20 @@ def test_extract_line_items_from_material_window_quantity_first():
     assert rows[0]["unit"] == "PCE"
     assert rows[0]["unit_price"] == "1549,71"
     assert rows[0]["parser"] == "material_window"
+
+
+def test_extract_line_items_from_multiline_split_rows():
+    lines = [
+        "Article",
+        "7736504816",
+        "PIECE       20,000     275,00",
+        "275,00      5500,00",
+        "Montant HT : EUR      8250,00",
+    ]
+    rows = extract_line_items_from_lines(lines)
+
+    assert len(rows) >= 1
+    assert rows[0]["article"] == "7736504816"
+    assert rows[0]["quantity"] in {"20,000", "20.000", "20"}
+    assert rows[0]["unit"] == "PCE"
+    assert rows[0]["parser"] in {"multiline_window", "table_lines", "table_line_regex"}

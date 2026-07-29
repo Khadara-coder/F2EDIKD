@@ -304,7 +304,17 @@ export const api = {
       { method: "DELETE" },
     ),
 
-  testAiConnection: (payload: { host: string; token: string; modelEndpoint: string }) =>
+  testAiConnection: (payload: {
+    provider: "databricks" | "openai" | "ollama" | "custom";
+    token?: string;
+    host?: string;
+    modelEndpoint?: string;
+    baseUrl?: string;
+    model?: string;
+    chatPath?: string;
+    authHeader?: string;
+    authScheme?: string;
+  }) =>
     request<{ ok: boolean; message: string }>("/settings/ai-test", {
       method: "POST",
       body: JSON.stringify(payload),
@@ -314,5 +324,11 @@ export const api = {
     request<{ ok: boolean; message: string }>("/settings/databricks-token", {
       method: "PUT",
       body: JSON.stringify({ token }),
+    }),
+
+  updateAiToken: (payload: { provider: "databricks" | "openai" | "ollama" | "custom"; token: string }) =>
+    request<{ ok: boolean; message: string }>("/settings/ai-token", {
+      method: "PUT",
+      body: JSON.stringify(payload),
     }),
 };

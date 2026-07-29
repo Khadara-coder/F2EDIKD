@@ -70,14 +70,32 @@ export const appSettingsSchema = z.object({
     csvDelimiter: z.string().min(1).max(1),
     sftpProfile: z.string(),
   }),
+  aiProvider: z.enum(["databricks", "openai", "ollama", "custom"]).default("databricks"),
   databricksConfig: z.object({
     host: z.string(),
     apiBaseUrl: z.string(),
     modelEndpoint: z.string(),
+    sqlWarehouseEnabled: z.boolean().default(false),
     warehouseId: z.string(),
     catalog: z.string(),
     schema: z.string(),
     configProfile: z.string(),
+    llmEnabled: z.boolean().default(true),
+  }),
+  openaiConfig: z.object({
+    baseUrl: z.string(),
+    model: z.string(),
+  }),
+  ollamaConfig: z.object({
+    baseUrl: z.string(),
+    model: z.string(),
+  }),
+  customAiConfig: z.object({
+    baseUrl: z.string(),
+    model: z.string(),
+    chatPath: z.string(),
+    authHeader: z.string(),
+    authScheme: z.string(),
   }),
   validation: z.object({
     autoValidationThreshold: z.number().int().min(0).max(100),

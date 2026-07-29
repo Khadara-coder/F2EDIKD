@@ -136,7 +136,12 @@ def _apply_runtime_databricks_config(settings_payload: dict | None = None) -> No
     payload = settings_payload or _load_persisted_app_settings()
     databricks = payload.get("databricksConfig") if isinstance(payload, dict) else None
     if not isinstance(databricks, dict):
-        return
+        databricks = {}
+
+    ai_provider = str((payload or {}).get("aiProvider") or os.environ.get("F2EDI_LLM_PROVIDER") or "databricks").strip().lower()
+    if ai_provider not in {"databricks", "openai", "ollama", "custom"}:
+        ai_provider = "databricks"
+    os.environ["F2EDI_LLM_PROVIDER"] = ai_provider
 
     mapping = {
         "host": "DATABRICKS_HOST",
@@ -151,6 +156,46 @@ def _apply_runtime_databricks_config(settings_payload: dict | None = None) -> No
         value = str(databricks.get(key) or "").strip()
         if value:
             os.environ[env_name] = value
+
+    # Provider-specific non-secret runtime config.
+    openai_cfg = payload.get("openaiConfig") if isinstance(payload, dict) else None
+    if isinstance(openai_cfg, dict):
+        base_url = str(openai_cfg.get("baseUrl") or "").strip()
+        model = str(openai_cfg.get("model") or "").strip()
+        if base_url:
+            os.environ["OPENAI_BASE_URL"] = base_url
+        if model:
+            os.environ["OPENAI_MODEL"] = model
+
+    ollama_cfg = payload.get("ollamaConfig") if isinstance(payload, dict) else None
+    if isinstance(ollama_cfg, dict):
+        base_url = str(ollama_cfg.get("baseUrl") or "").strip()
+        model = str(ollama_cfg.get("model") or "").strip()
+        if base_url:
+            os.environ["OLLAMA_BASE_URL"] = base_url
+        if model:
+            os.environ["OLLAMA_MODEL"] = model
+
+    custom_cfg = payload.get("customAiConfig") if isinstance(payload, dict) else None
+    if isinstance(custom_cfg, dict):
+        cfg_map = {
+            "baseUrl": "CUSTOM_LLM_BASE_URL",
+            "model": "CUSTOM_LLM_MODEL",
+            "chatPath": "CUSTOM_LLM_CHAT_PATH",
+            "authHeader": "CUSTOM_LLM_AUTH_HEADER",
+            "authScheme": "CUSTOM_LLM_AUTH_SCHEME",
+        }
+        for key, env_name in cfg_map.items():
+            value = str(custom_cfg.get(key) or "").strip()
+            if value:
+                os.environ[env_name] = value
+
+    # LLM enable/disable toggle (independent of runtime environment).
+    if "llmEnabled" in databricks:
+        enabled = databricks.get("llmEnabled")
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in {"1", "true", "yes", "on", "y"}
+        os.environ["F2EDI_LLM_ENABLED"] = "1" if enabled else "0"
 
 
 _apply_runtime_databricks_config()
@@ -1194,8 +1239,9 @@ def _local_process_and_respond(payload: bytes, filename: str, actor: str | None 
     t0 = _t.time()
     try:
         from app.pdf_reader import pdf_pages_to_text
+        from app.ocr import ocr_image_with_layout
         from app.extraction import extract_candidate_fields
-        pages = pdf_pages_to_text(payload, "1")
+        pages = pdf_pages_to_text(payload, "1", ocr_with_layout=ocr_image_with_layout)
         if not pages:
             raise ValueError("Impossible d'extraire le texte du PDF")
         text   = pages[0]["text"]
@@ -3245,11 +3291,18 @@ def _upsert_conversion(data: dict, callback_url: str | None = None) -> None:
           ON CONFLICT(id) DO UPDATE SET
                         callback_url=COALESCE(excluded.callback_url, conversions.callback_url),
             status=excluded.status, po_number=excluded.po_number,
+                        order_date=excluded.order_date,
+                        delivery_date=excluded.delivery_date,
             soldto=excluded.soldto, shipto=excluded.shipto,
+                        customer_name=excluded.customer_name,
+                        confidence=excluded.confidence,
+                        line_count=excluded.line_count,
+                        missing_material_count=excluded.missing_material_count,
             rejection_code=excluded.rejection_code,
             rejection_message=excluded.rejection_message,
             tst_filename=excluded.tst_filename,
             edifact_content=excluded.edifact_content,
+                        extraction_json=excluded.extraction_json,
             updated_at=datetime('now')
         """, [
             data.get("pdf_hash") or str(uuid.uuid4()),

@@ -468,14 +468,32 @@ export const mockSettings: AppSettings = {
     csvDelimiter: ";",
     sftpProfile: "default",
   },
+  aiProvider: "databricks",
   databricksConfig: {
     host: "https://adb-5555213114570927.7.azuredatabricks.net",
     apiBaseUrl: "https://file2edi-5555213114570927.7.azure.databricksapps.com",
     modelEndpoint: "databricks-gpt-oss-120b",
+    sqlWarehouseEnabled: false,
     warehouseId: "",
     catalog: "hive_metastore",
     schema: "edifact_generator",
     configProfile: "",
+    llmEnabled: true,
+  },
+  openaiConfig: {
+    baseUrl: "https://api.openai.com/v1",
+    model: "gpt-4.1-mini",
+  },
+  ollamaConfig: {
+    baseUrl: "http://localhost:11434",
+    model: "llama3.1",
+  },
+  customAiConfig: {
+    baseUrl: "",
+    model: "",
+    chatPath: "/v1/chat/completions",
+    authHeader: "Authorization",
+    authScheme: "Bearer",
   },
   validation: {
     autoValidationThreshold: 90,

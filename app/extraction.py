@@ -45,6 +45,168 @@ def _to_float(value):
         return None
 
 
+# ─── Deterministic date extraction (fallback when LLM unavailable) ────────────
+
+_FR_MONTHS = {
+    "janvier": 1, "fevrier": 2, "mars": 3, "avril": 4, "mai": 5, "juin": 6,
+    "juillet": 7, "aout": 8, "septembre": 9, "octobre": 10, "novembre": 11,
+    "decembre": 12,
+}
+
+_ORDER_DATE_LABELS = [
+    "date de la commande", "date de commande", "date commande",
+    "commande du", "commande le", "date du bon de commande",
+    "date bon de commande", "date d'emission", "date d emission",
+    "date d'edition", "date d edition", "date document", "order date",
+    "date de creation",
+]
+
+_DELIVERY_DATE_LABELS = [
+    "date de livraison souhaitee", "livraison souhaitee",
+    "date de livraison prevue", "date de livraison", "date livraison",
+    "date de livraison au plus tard", "livraison prevue", "livraison le",
+    "livrer le", "livrer avant le", "livrer avant", "delai de livraison",
+    "date souhaitee", "date reception souhaitee", "reception souhaitee",
+    "a livrer le", "to be delivered", "deliver by", "delivery date",
+]
+
+# Numeric: DD/MM/YYYY or DD-MM-YY, and ISO YYYY-MM-DD
+_NUM_DATE_RE = re.compile(
+    r"(\d{4})[/.\-](\d{1,2})[/.\-](\d{1,2})"          # ISO first
+    r"|(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{2,4})"       # DD/MM/YYYY
+)
+# Textual French: "9 juillet 2026" (accents already folded away)
+_TXT_DATE_RE = re.compile(r"(\d{1,2})\s+([a-z]+)\.?\s+(\d{4})")
+
+
+def _iso_from_parts(year: int, month: int, day: int) -> str | None:
+    if year < 100:
+        year += 2000
+    if not (1 <= month <= 12 and 1 <= day <= 31 and 1900 <= year <= 2100):
+        return None
+    return f"{year:04d}-{month:02d}-{day:02d}"
+
+
+def _extract_first_date(segment: str) -> str | None:
+    """Return the first date found in a folded text segment as YYYY-MM-DD."""
+    m = _NUM_DATE_RE.search(segment)
+    if m:
+        if m.group(1):  # ISO
+            iso = _iso_from_parts(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        else:
+            iso = _iso_from_parts(int(m.group(6)), int(m.group(5)), int(m.group(4)))
+        if iso:
+            return iso
+    m = _TXT_DATE_RE.search(segment)
+    if m:
+        month = _FR_MONTHS.get(m.group(2))
+        if month:
+            return _iso_from_parts(int(m.group(3)), month, int(m.group(1)))
+    return None
+
+
+def _find_date_near_label(folded: str, labels: list[str], window: int = 40) -> str | None:
+    """Find the first date appearing within `window` chars after any label."""
+    for label in labels:
+        start = folded.find(label)
+        while start != -1:
+            segment = folded[start + len(label): start + len(label) + window]
+            iso = _extract_first_date(segment)
+            if iso:
+                return iso
+            start = folded.find(label, start + 1)
+    return None
+
+
+def _collect_all_dates(text: str) -> list[str]:
+    out: list[str] = []
+    folded = fold_text(text or "")
+    for m in _NUM_DATE_RE.finditer(folded):
+        iso = None
+        if m.group(1):
+            iso = _iso_from_parts(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        else:
+            iso = _iso_from_parts(int(m.group(6)), int(m.group(5)), int(m.group(4)))
+        if iso and iso not in out:
+            out.append(iso)
+    for m in _TXT_DATE_RE.finditer(folded):
+        month = _FR_MONTHS.get(m.group(2))
+        if month:
+            iso = _iso_from_parts(int(m.group(3)), month, int(m.group(1)))
+            if iso and iso not in out:
+                out.append(iso)
+    return out
+
+
+def _score_date_by_labels(line_folded: str, labels: list[str]) -> int:
+    score = 0
+    for lb in labels:
+        if lb in line_folded:
+            score += 10
+    return score
+
+
+def _extract_date_by_line_context(text: str, labels: list[str]) -> str | None:
+    """Find best date on a labeled line, otherwise on the immediate next line."""
+    best: tuple[int, str] | None = None
+    lines = text.splitlines()
+    for idx, raw in enumerate(lines):
+        lf = fold_text(raw)
+        base = _score_date_by_labels(lf, labels)
+        if base <= 0:
+            continue
+        same_line = _extract_first_date(lf)
+        if same_line:
+            cand = (base + 5, same_line)
+            if best is None or cand[0] > best[0]:
+                best = cand
+        if idx + 1 < len(lines):
+            next_line = fold_text(lines[idx + 1])
+            nxt = _extract_first_date(next_line)
+            if nxt:
+                cand = (base + 3, nxt)
+                if best is None or cand[0] > best[0]:
+                    best = cand
+    return best[1] if best else None
+
+
+def extract_dates_anchored(text: str) -> dict:
+    """Deterministic extraction of order/delivery dates anchored on labels.
+
+    Used as a fallback when the LLM is unavailable. Returns ISO dates
+    (YYYY-MM-DD) or None for each field.
+    """
+    folded = fold_text(text or "")
+
+    # 1) Strongest: line-level context (label + date on same/next line)
+    order_date = _extract_date_by_line_context(text, _ORDER_DATE_LABELS)
+    delivery_date = _extract_date_by_line_context(text, _DELIVERY_DATE_LABELS)
+
+    # 2) Fallback: proximity in compact folded text (wider window for noisy OCR)
+    if not order_date:
+        order_date = _find_date_near_label(folded, _ORDER_DATE_LABELS, window=140)
+    if not delivery_date:
+        delivery_date = _find_date_near_label(folded, _DELIVERY_DATE_LABELS, window=140)
+
+    # 3) Conservative defaults: earliest as order date, latest as delivery date
+    all_dates = _collect_all_dates(text)
+    if all_dates:
+        sorted_dates = sorted(all_dates)
+        if not order_date:
+            order_date = sorted_dates[0]
+        if not delivery_date:
+            delivery_date = sorted_dates[-1]
+
+    # 4) Keep temporal consistency when both exist
+    if order_date and delivery_date and delivery_date < order_date:
+        delivery_date = order_date
+
+    return {
+        "date_commande": order_date,
+        "date_livraison": delivery_date,
+    }
+
+
 def extract_structured_fields(
     text: str,
     fields: dict,
@@ -337,6 +499,17 @@ def extract_structured_fields(
     rejections = check_rejections(rejection_input, master_data=get_master_data())
     rejection_result = rejection_summary(rejections)
 
+    # --- DATES: LLM primary, deterministic label-anchored fallback ---
+    _anchored_dates = extract_dates_anchored(text)
+    final_order_date = (
+        (llm_extracted.get("date_commande") if llm_extracted else None)
+        or _anchored_dates.get("date_commande")
+    )
+    final_delivery_date = (
+        (llm_extracted.get("date_livraison_souhaitee") if llm_extracted else None)
+        or _anchored_dates.get("date_livraison")
+    )
+
         # --- EDIFACT D96A: generate message if not blocked ---
     edifact_message = None
     edifact_errors = None
@@ -346,9 +519,9 @@ def extract_structured_fields(
             edifact_input = {
                 "document": {
                     "Numero de commande": final_order_number,
-                    "Date commande LLM": llm_extracted.get("date_commande") if llm_extracted else None,
+                    "Date commande LLM": final_order_date,
                     "Date document": first_value(fields.get("dates", [])),
-                    "Date livraison souhaitee": llm_extracted.get("date_livraison_souhaitee") if llm_extracted else None,
+                    "Date livraison souhaitee": final_delivery_date,
                 },
                 "adresses": {
                     "Adresse de livraison validee": master_delivery_address,
@@ -376,8 +549,8 @@ def extract_structured_fields(
             "Commande masterdata": order_validation,
             "Reference": first_value(reference_codes),
             "Date document": first_value(fields.get("dates", [])),
-            "Date commande LLM": llm_extracted.get("date_commande") if llm_extracted else None,
-            "Date livraison souhaitee": llm_extracted.get("date_livraison_souhaitee") if llm_extracted else None,
+            "Date commande LLM": final_order_date,
+            "Date livraison souhaitee": final_delivery_date,
             "Code fournisseur": supplier_code,
             "TVA intracommunautaire": first_value(vat_numbers),
             "Identification fiscale": tax_identification,

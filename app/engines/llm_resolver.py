@@ -14,12 +14,7 @@ import json
 import logging
 import re
 from typing import Optional
-
-try:
-    import mlflow.deployments
-    _client = mlflow.deployments.get_deploy_client("databricks")
-except Exception:
-    _client = None
+from app.engines.llm_gateway import chat_completion
 
 logger = logging.getLogger(__name__)
 
@@ -28,36 +23,16 @@ FALLBACK_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
 
 
 def _call_llm(prompt: str, max_tokens: int = 400, endpoint: str = MODEL_ENDPOINT) -> Optional[str]:
-    """Call the LLM endpoint and return the text response."""
-    if _client is None:
-        logger.warning("mlflow.deployments client not available")
-        return None
+    """Call the configured LLM provider and return the text response."""
     try:
-        resp = _client.predict(
-            endpoint=endpoint,
-            inputs={
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens,
-                "temperature": 0,
-            },
+        return chat_completion(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            databricks_endpoint=endpoint,
+            databricks_fallback_endpoint=FALLBACK_ENDPOINT,
         )
-        return resp["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.warning(f"LLM call failed ({endpoint}): {e}")
-        # Try fallback
-        if endpoint != FALLBACK_ENDPOINT:
-            try:
-                resp = _client.predict(
-                    endpoint=FALLBACK_ENDPOINT,
-                    inputs={
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": max_tokens,
-                        "temperature": 0,
-                    },
-                )
-                return resp["choices"][0]["message"]["content"].strip()
-            except Exception as e2:
-                logger.warning(f"LLM fallback also failed: {e2}")
         return None
 
 
