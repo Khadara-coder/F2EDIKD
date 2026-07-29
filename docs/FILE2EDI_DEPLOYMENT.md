@@ -1,41 +1,49 @@
-# File2EDI — Build & Deploy
+# GenieCommande — Build & Deploy
 
-## Architecture (production)
+## Workflow de branches
 
 ```
-React SPA (frontend/dist)
-    ↓  served by server.py
-FastAPI server.py :8000
-    ├── /api/*           → src/file2edi/router.py (React contract)
-    ├── /api/proxy/*     → moteur extraction local
-    ├── /api/conversions → workflow revue / SFTP / email
-    └── persistence      → Delta ▶ JSONL ▶ SQLite
+dev  ──PR──▶  staging  ──PR──▶  main
+ │               │                │
+local          VM Azure        Databricks Apps
+               (ce serveur)    (production)
 ```
 
-## 1. Build frontend locally
+---
 
-```powershell
-cd frontend
-npm install
-npm run build
+## 1. Développement local
+
+### Avec Docker Compose (recommandé)
+
+```bash
+git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git
+cd GenieCommande
+git checkout dev
+cp .env.example .env    # renseigner les valeurs
+docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-Output: `frontend/dist/` — served automatically by `server.py` when present.
+- UI : http://localhost:8080
+- API health : http://localhost:8080/api/health/system
+- PostgreSQL tourne dans le même compose (`edifact-postgres:5432`)
+- `MOCK_MODE=true` → aucun envoi SFTP réel
 
-## 2. Run locally (Python unified stack)
+Arrêter :
+```bash
+docker compose -f docker-compose.file2edi.yml down
+```
 
-```powershell
-pip install -r requirements.txt
-cd frontend && npm run build && cd ..
+### Sans Docker (Python natif)
+
+```bash
+pip install -r requirements.txt -r requirements-postgres.txt
+cd frontend && npm install && npm run build && cd ..
 uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-- UI: http://localhost:8000
-- API health: http://localhost:8000/api/health/system
+### Dev hot-reload frontend
 
-### Dev mode (hot reload frontend)
-
-```powershell
+```bash
 # Terminal 1
 uvicorn server:app --reload --port 8000
 
@@ -43,44 +51,97 @@ uvicorn server:app --reload --port 8000
 cd frontend && npm run dev
 ```
 
-Frontend dev server proxies `/api` → port 8000.
+Frontend dev server proxy `/api` → :8000 — accès sur http://localhost:5173
 
-## 3. Docker Compose
+---
 
-```powershell
+## 2. Staging (VM Azure)
+
+La VM Azure est le serveur de validation pré-prod. On y déploie la branche `staging`.
+
+### Premier déploiement
+
+```bash
+# Sur la VM
+git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git /root/F2EDIDK
+cd /root/F2EDIDK
+git checkout staging
+cp .env.example .env
+# Renseigner .env avec les vraies valeurs staging
 docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-- UI: http://localhost:8080
-- Builds React + Python in one image (`Dockerfile.file2edi`)
-
-## 4. Databricks Apps deployment
-
-1. Build frontend: `cd frontend && npm run build`
-2. Push to Bosch GitHub repository (main branch)
-3. In Databricks Workspace terminal, clone once then pull updates:
+### Mise à jour staging (après merge PR dev → staging)
 
 ```bash
-git clone https://github.boschdevcloud.com/DIK1DY/F2EDIDK.git
-cd F2EDIDK
+git -C /root/F2EDIDK fetch origin
+git -C /root/F2EDIDK checkout staging
+git -C /root/F2EDIDK pull origin staging
+docker compose -f docker-compose.file2edi.yml up --build -d
+```
+
+### Vérifier l'état
+
+```bash
+docker compose -f docker-compose.file2edi.yml ps
+docker compose -f docker-compose.file2edi.yml logs file2edi --tail 50
+```
+
+---
+
+## 3. Production — Databricks Apps
+
+### Architecture
+
+```
+React SPA (frontend/dist)
+    ↓  servi par server.py
+FastAPI server.py :8000
+    ├── /api/*           → src/file2edi/router.py
+    ├── /api/proxy/*     → moteur extraction local
+    ├── /api/conversions → workflow revue / SFTP / email
+    └── persistence      → PostgreSQL (RLS) ▶ SQLite (fallback)
+```
+
+### Déploiement
+
+Après merge PR `staging → main` sur GitHub :
+
+1. Dans le workspace Databricks, ouvrir un terminal sur l'app `file2edi` :
+
+```bash
 git pull origin main
 ```
 
-4. Deploy via `app.yaml` (command: `uvicorn server:app --port 8000`)
-5. Ensure Unity Catalog Volume paths are available:
-    - Masterdata source: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
-    - PDF storage: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf/`
-    - SQLite fallback DB: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db`
-    - Outbox: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox/`
-    - Logs: `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs/`
+2. Redémarrer l'app depuis l'interface Databricks Apps (ou via CLI) :
 
-### Daily masterdata sync job (production)
+```bash
+databricks apps restart file2edi
+```
 
-Production masterdata must come from:
+3. Vérifier le healthcheck :
 
-- `https://github.boschdevcloud.com/RSR1DY/masterdata.git`
+```bash
+curl https://file2edi-5555213114570927.7.azure.databricksapps.com/api/health/system
+```
 
-Schedule a daily Databricks job that runs:
+### Chemins Unity Catalog requis en production
+
+| Variable | Chemin |
+|---|---|
+| Masterdata source | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/` |
+| PDF storage | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf/` |
+| SQLite fallback | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db` |
+| Outbox | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox/` |
+| Logs | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs/` |
+
+### Grants UC requis
+
+```sql
+GRANT CREATE, USAGE ON SCHEMA hive_metastore.file2edi TO `<service-principal-app>`;
+```
+
+### Sync masterdata quotidienne (job Databricks)
 
 ```bash
 python scripts/sync_masterdata_repo.py \
@@ -91,48 +152,36 @@ python scripts/sync_masterdata_repo.py \
     --notify-api-key "$APP_API_KEY"
 ```
 
-What the job does:
+---
 
-1. Pulls latest repo content into a local cache.
-2. Validates required files: `10564_Customers.csv`, `10564_Partners.csv`, `10564_Materials.csv`, `DB_Salesorder.csv`.
-3. Publishes files atomically to the production Volume.
-4. Writes sync metadata file `.masterdata_sync_metadata.json` (commit hash, timestamp, checksums, row counts).
-5. Optionally calls `/api/masterdata/sync` to refresh runtime cache without app restart.
+## 4. Tiers de persistance
 
-Health visibility:
+| Tier | Variable | Durabilité |
+|------|----------|------------|
+| 1 — PostgreSQL + RLS | `PG_DATABASE_URL` | Production / Staging |
+| 2 — SQLite | `DB_PATH` sur UC Volume | Fallback automatique si PG absent |
 
-- `/api/health/system` and `/api/masterdata/stats` now expose masterdata sync freshness (`fresh|stale|unknown`), age in hours, and git commit hash.
+Si `PG_DATABASE_URL` est vide ou inaccessible, l'app bascule silencieusement sur SQLite.
 
-### Persistence tiers
+---
 
-| Tier | Config | Durability |
-|------|--------|------------|
-| 1 Delta | `DATABRICKS_WAREHOUSE_ID` + UC catalog | Production |
-| 2 JSONL | `DATABRICKS_PERSIST_PATH` | Staging |
-| 3 SQLite | `DB_PATH` on UC Volume | Persistent fallback |
+## 5. Build frontend seul
 
-Run `scripts/create_delta_tables.sql` once (replace `${CATALOG}` / `${SCHEMA}`).
+Nécessaire uniquement si tu modifies le frontend avant de builder l'image Docker :
 
-### Required grants (Tier 1)
-
-```sql
-GRANT CREATE, USAGE ON SCHEMA bci_rbs_prod.file2edi TO `<app-service-principal>`;
+```bash
+cd frontend
+npm install
+npm run build
+# frontend/dist/ est versionné → commiter le résultat
 ```
 
-### Required grants (Tier 2)
+---
 
-Workspace folder `/Users/.../EDIFACT/data/persist` → CAN_EDIT for app SP.
+## 6. Endpoints API
 
-### Required grants (UC Volume)
-
-Grant the Databricks App service principal read/write access on:
-
-- `hcdap_prod.silver_hcfrdashlog.f2edi`
-
-## 5. API endpoints (React frontend)
-
-| Frontend call | Backend route |
-|---------------|---------------|
+| Appel frontend | Route backend |
+|---|---|
 | `getSystemHealth()` | `GET /api/health/system` |
 | `getDashboardMetrics()` | `GET /api/dashboard/metrics` |
 | `uploadPdf()` | `POST /api/upload` |
@@ -143,11 +192,11 @@ Grant the Databricks App service principal read/write access on:
 | `getMasterData()` | `GET /api/master-data` |
 | `getSettings()` | `GET /api/settings` |
 
-Legacy endpoints (`/api/proxy/convert`, `/api/conversions/*`) remain available for backward compatibility.
+---
 
-## 6. Business rules
+## 7. Règles métier
 
-- Global confidence < 90 % → `review_required = true`
-- Blocking anomaly open → generation blocked
-- Generation calls `api_generate()` → `src/edifact_builder.py`
-- UNB profile locked: ELM_STANDARD only
+- Confiance globale < 90 % → `review_required = true`
+- Anomalie bloquante ouverte → génération bloquée
+- Génération appelle `api_generate()` → `src/edifact_builder.py`
+- Profil UNB verrouillé : ELM_STANDARD uniquement

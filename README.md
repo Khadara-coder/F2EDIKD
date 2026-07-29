@@ -1,67 +1,88 @@
-# SAP WEB
-GESTION DE COMMANDE
+# GenieCommande
 
 Application **File2EDI** (React + FastAPI) et moteur Python de génération EDIFACT ORDERS D.96A (`.tst`) pour Bosch Thermotechnologie France.
 
-**Dépôt Bosch :** [github.boschdevcloud.com/DIK1DY/F2EDIDK](https://github.boschdevcloud.com/DIK1DY/F2EDIDK)  
-**Miroir public :** [github.com/Khadara-coder/F2EDIKD](https://github.com/Khadara-coder/F2EDIKD)
+**Dépôt :** [github.boschdevcloud.com/DIK1DY/GenieCommande](https://github.boschdevcloud.com/DIK1DY/GenieCommande)
 
 ---
 
-## Démarrage rapide (après clone)
+## Workflow de développement
 
-```powershell
-git clone https://github.boschdevcloud.com/DIK1DY/F2EDIDK.git
-cd F2EDIDK
-copy .env.example .env
-pip install -r requirements.txt
+```
+dev  ──PR──▶  staging  ──PR──▶  main
+ │               │                │
+local          VM Azure        Databricks Apps
+               (ce serveur)    (production)
 ```
 
-Cas recommande pour une VM Azure avec n8n sur la meme machine:
+| Branche | Rôle | Déploiement |
+|---------|------|-------------|
+| `dev` | Développement quotidien | Local (`docker compose`) |
+| `staging` | Validation pré-prod | VM Azure (`docker compose`) |
+| `main` | Production | Databricks Apps |
 
-```powershell
-copy .env.vm.example .env.vm
-notepad .env.vm
+### Cloner et démarrer en local
+
+```bash
+git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git
+cd GenieCommande
+git checkout dev
+cp .env.example .env
+# Renseigner les valeurs dans .env (voir section Variables d'environnement)
 ```
 
-Copiez les CSV masterdata dans `data/masterdata/` (voir [data/masterdata/README.md](data/masterdata/README.md)).
+Copier les CSV masterdata dans `data/masterdata/` (voir [data/masterdata/README.md](data/masterdata/README.md)).
 
-```powershell
-cd frontend
-npm install
-npm run build
-cd ..
-python -m uvicorn server:app --host 127.0.0.1 --port 8000
+```bash
+docker compose -f docker-compose.file2edi.yml up --build -d
+# UI  : http://localhost:8080
+# API : http://localhost:8080/api/health/system
 ```
 
-Ou, sur une VM Azure clonee pour le flux Outlook -> n8n -> API:
+### Pousser en staging (VM Azure)
 
-```powershell
-./run_vm.ps1
+```bash
+# Depuis ta branche locale dev
+git push origin dev
+# Ouvrir une PR dev → staging sur GitHub, merger
+
+# Sur la VM Azure
+git -C /root/F2EDIDK pull origin staging
+git -C /root/F2EDIDK checkout staging
+docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-- **UI :** http://localhost:8000  
-- **API :** http://localhost:8000/api/health/system  
+### Passer en production (Databricks Apps)
+
+```bash
+# PR staging → main sur GitHub, merger
+# Databricks : git pull origin main, puis redéployer l'app
+```
+
+---
+
+## Lancer sans Docker (Python natif)
+
+```bash
+pip install -r requirements.txt -r requirements-postgres.txt
+cd frontend && npm install && npm run build && cd ..
+python -m uvicorn server:app --host 0.0.0.0 --port 8000
+```
+
+- **UI :** http://localhost:8000
+- **API :** http://localhost:8000/api/health/system
 
 Pages : Cockpit · Convertir · Revue · Historique · Données maîtres · Paramètres
 
-Déploiement Docker / Databricks : [docs/FILE2EDI_DEPLOYMENT.md](docs/FILE2EDI_DEPLOYMENT.md)
-
-Runbook VM Azure + n8n : [docs/N8N_API_INTEGRATION.md](docs/N8N_API_INTEGRATION.md)
-
 ---
 
-## EDIFACT batch (moteur Python)
-
----
-
-## UNB Profile: ELM_STANDARD ONLY
+## UNB Profile : ELM_STANDARD uniquement
 
 ```
 UNB+UNOC:3+4399901876613+3015981600108+<YYMMDD>:<HHMM>+<ControlRef>'
 ```
 
-No alternate profile. No fallback. No runtime override. Startup fails if the profile is wrong.
+Aucun profil alternatif. Aucun fallback. Aucun override runtime. Le démarrage échoue si le profil est incorrect.
 
 ---
 
@@ -69,47 +90,51 @@ No alternate profile. No fallback. No runtime override. Startup fails if the pro
 
 ```
 PDF_INBOX
-  |-> pdf_extractor     (extract order data)
-  |-> matcher           (Sold-to + Ship-to resolution)
-  |-> pompac_rules      (material resolution: EAN > fourre-tout > direct > fuzzy)
-  |-> validations       (business rule checks)
-  |-> edifact_builder   (ORDERS D.96A assembly)
-  |-> sftp_delivery     (temp upload + rename + verify)
-  |-> duplicate_ledger  (composite key duplicate prevention)
-  |-> file_router       (PDF_PROCESSED or PDF_ERROR)
+  |-> pdf_extractor     (extraction données commande)
+  |-> matcher           (résolution Sold-to + Ship-to)
+  |-> pompac_rules      (résolution matière : EAN > fourre-tout > direct > fuzzy)
+  |-> validations       (contrôles métier)
+  |-> edifact_builder   (assemblage ORDERS D.96A)
+  |-> sftp_delivery     (upload temp + rename + vérification)
+  |-> duplicate_ledger  (déduplication par clé composite)
+  |-> file_router       (PDF_PROCESSED ou PDF_ERROR)
 ```
 
 ---
 
-## n8n Project Analysis
+## Flux de traitement PDF
 
-Before generation, the engine analyses the existing n8n project at:
-```
-/Workspace/Users/rsr1dy@bosch.com/n8n
-```
-and generates `docs/N8N_ANALYSIS_REPORT.md` with all verified rules.
+1. Déposer le PDF dans `PDF_INBOX`
+2. Le moteur extrait numéro de commande, date, lignes
+3. Sold-to matchée (confiance min 75, code postal/ville requis)
+4. Ship-to matchée filtrée par Sold-to (confiance min 80)
+5. Matières résolues : EAN > fourre-tout > direct > fuzzy > REJET
+6. Validation métier
+7. Contrôle doublon (clé composite : order_number + soldto + pdf_hash)
+8. Construction EDIFACT ORDERS D.96A
+9. Envoi `.tst` en SFTP (stratégie temp + rename)
+10. Vérification SFTP
+11. Mise à jour du ledger doublon
+12. PDF archivé dans `PDF_PROCESSED`
 
-To run analysis only:
-```
-python src/edifact_orders_engine.py --analyse-n8n-only
-```
+Sur tout échec : PDF vers `PDF_ERROR`, ledger NON mis à jour.
 
 ---
 
-## Master Data
+## Données maîtres
 
-Authoritative source (Databricks prod): `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
+Source autoritaire (Databricks prod) : `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/`
 
-Daily source repository (production sync job): `https://github.boschdevcloud.com/RSR1DY/masterdata.git`
+Repo source quotidien (job sync prod) : `https://github.boschdevcloud.com/RSR1DY/masterdata.git`
 
-| File | Role |
+| Fichier | Rôle |
 |---|---|
-| `10564_Customers.csv` | Sold-to lookup (SOLDTO;NAME;ORT01;PSTLZ;STRAS;LAND1;VAT_NR) |
-| `10564_Partners.csv` | Ship-to lookup (SOLDTO;SHIPTO;LAND1;NAME;ORT01;PSTLZ;STRAS) |
-| `10564_Materials.csv` | Material index (MATNR;MAKTX) |
-| `DB_Salesorder.csv` | Historical reference (comparison only) |
+| `10564_Customers.csv` | Lookup Sold-to (SOLDTO;NAME;ORT01;PSTLZ;STRAS;LAND1;VAT_NR) |
+| `10564_Partners.csv` | Lookup Ship-to (SOLDTO;SHIPTO;LAND1;NAME;ORT01;PSTLZ;STRAS) |
+| `10564_Materials.csv` | Index matières (MATNR;MAKTX) |
+| `DB_Salesorder.csv` | Référence historique (comparaison uniquement) |
 
-Daily sync into production Volume:
+Sync quotidienne en production :
 
 ```bash
 python scripts/sync_masterdata_repo.py \
@@ -121,97 +146,91 @@ python scripts/sync_masterdata_repo.py \
 
 ---
 
-## PDF Processing Flow
+## Livraison SFTP
 
-1. Drop PDF in `PDF_INBOX`
-2. Engine extracts order number, date, lines
-3. Sold-to matched (min confidence 75, postal/city required)
-4. Ship-to matched filtered by Sold-to (min confidence 80)
-5. Materials resolved: EAN > fourre-tout > direct > fuzzy > REJECT
-6. Business validation
-7. Duplicate check (composite key: order_number + soldto + pdf_hash)
-8. EDIFACT ORDERS D.96A built
-9. `.tst` submitted to SFTP (temp rename strategy)
-10. SFTP verified
-11. Duplicate ledger updated
-12. PDF archived to `PDF_PROCESSED`
+Voir `docs/SFTP_DELIVERY.md` pour la documentation complète.
 
-On any failure: PDF goes to `PDF_ERROR`, ledger NOT updated.
+Stratégie d'upload :
+1. Upload sous `<filename>.uploading`
+2. Rename atomique vers `<filename>`
+3. Vérification via `stat()`
+4. Marquage `SFTP_SUBMITTED`
 
 ---
 
-## SFTP Delivery
-
-See `docs/SFTP_DELIVERY.md` for full documentation.
-
-Upload strategy:
-1. Upload as `<filename>.uploading`
-2. Remote rename to `<filename>`
-3. Verify via `stat()`
-4. Mark `SFTP_SUBMITTED`
-
----
-
-## Project Structure
+## Structure du projet
 
 ```
-edifact_generator/
-  config.ini            # All configuration
-  requirements.txt      # pip dependencies
-  build_exe.bat         # PyInstaller build script
-  install_task.ps1      # Windows Task Scheduler setup
-  validate_project.py   # Pre-deployment validation
-  src/                  # Python source modules
-  lookups/              # CSV lookup tables
-  data/                 # Ledgers (duplicate, sftp delivery)
-  tests/                # pytest test suite (8 files)
-  docs/                 # Operational documentation
-  outbox/               # Local generated, submitted, failed archives
-  logs/                 # Rotating log files
+GenieCommande/
+  server.py               # Serveur FastAPI principal (UI + API)
+  config.ini              # Configuration moteur (chemins, EDI, SFTP)
+  requirements.txt        # Dépendances Python
+  requirements-postgres.txt
+  docker-compose.file2edi.yml  # Stack Docker principale (dev + staging)
+  Dockerfile.file2edi     # Image multi-stage (React + Python)
+  app/                    # Moteur d'extraction full-code
+  src/                    # Modules Python (config, SFTP, EDIFACT, matcher…)
+  frontend/               # Interface React + TypeScript + Tailwind
+    dist/                 # Build React versionné (prêt à servir)
+  data/
+    masterdata/           # CSV non versionnés (voir data/masterdata/README.md)
+  lookups/                # Tables de correspondance CSV (EAN, fourre-tout…)
+  tests/                  # Suite pytest (203 tests, 27 fichiers)
+  docs/                   # Documentation opérationnelle
+  scripts/                # Scripts utilitaires (sync masterdata, build…)
+  databricks/             # Configuration déploiement Databricks Apps
 ```
 
 ---
 
-## Quick Start
+## Tests
 
-See `docs/RUN_ME.md` and `docs/FILE2EDI_DEPLOYMENT.md` (React UI + Databricks).
-
-### File2EDI Web UI (React)
-
-```powershell
-.\scripts\build_file2edi.ps1 -Docker    # Docker → http://localhost:8080
-# or
-cd frontend && npm run build && uvicorn server:app --port 8000   # → http://localhost:8000
+```bash
+python -m pytest tests/ -v
 ```
 
-## Build
-
-```
-build_exe.bat
-```
-
-Output: `dist/EDIFACT_Orders_Generator.exe`
-
-## Test
-
-```
-python -m pytest tests\ -v
-```
-
-## Deploy
-
-See `docs/TASK_SCHEDULER.md` for Windows Task Scheduler configuration.
+203 tests couvrant extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures.
 
 ---
 
-## Forbidden Values
+## Variables d'environnement clés
 
-These values must NEVER appear in generated output, config, or active code:
+Copier `.env.example` → `.env` et renseigner :
+
+| Variable | Rôle | Requis |
+|---|---|---|
+| `PG_DATABASE_URL` | PostgreSQL (si vide : fallback SQLite) | Staging/Prod |
+| `SFTP_HOST` / `SFTP_USERNAME` / `SFTP_PASSWORD` | Livraison SFTP | Prod |
+| `DATABRICKS_TOKEN` | Auth Databricks Apps | Prod |
+| `DATABRICKS_SERVER_HOSTNAME` | Workspace Databricks | Prod |
+| `APP_ADMIN_USERS` | Emails admins séparés par virgule | Tous |
+| `MOCK_MODE` | `true` = pas d'envoi SFTP réel | Dev/Staging |
+
+---
+
+## Valeurs interdites
+
+Ces valeurs ne doivent **jamais** apparaître dans les fichiers générés, la config ou le code actif :
 - `3020810000707`
 - `54209794400681`
 
-The `test_forbidden_strings.py` test enforces this automatically.
+Le test `test_forbidden_strings.py` l'enforçe automatiquement.
 
 ---
 
-*Bosch Thermotechnologie France - EDIPUSHBOT / F2EDI*
+## Documentation
+
+| Doc | Contenu |
+|-----|---------|
+| [docs/FILE2EDI_DEPLOYMENT.md](docs/FILE2EDI_DEPLOYMENT.md) | Build, Docker, Databricks Apps |
+| [docs/RUN_ME.md](docs/RUN_ME.md) | Référence CLI moteur batch |
+| [docs/N8N_API_INTEGRATION.md](docs/N8N_API_INTEGRATION.md) | Runbook VM Azure + n8n |
+| [docs/SFTP_DELIVERY.md](docs/SFTP_DELIVERY.md) | Livraison SFTP détaillée |
+| [docs/POSTGRES_QUICKSTART.md](docs/POSTGRES_QUICKSTART.md) | PostgreSQL local + RBAC |
+| [docs/SUPPORT_GUIDE.md](docs/SUPPORT_GUIDE.md) | Opérations quotidiennes + codes erreur |
+| [docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md) | Checklist recette fonctionnelle |
+| [databricks/README.md](databricks/README.md) | Déploiement Databricks Apps |
+
+---
+
+*Bosch Thermotechnologie France — EDIPUSHBOT / GenieCommande*

@@ -1,78 +1,106 @@
-# SUPPORT_GUIDE.md
+# Guide de support opérationnel
 
-## Daily Operational Checks
+## Contrôles quotidiens
 
-1. New files processed today (check `logs/edifact.log`)
-2. Masterdata sync freshness on `/api/health/system` (`masterdata_sync.status` should be `fresh`)
-3. Any files in `PDF_ERROR` that need review
-4. SFTP delivery confirmations in `data/sftp_delivery_ledger.csv`
-5. Duplicate detection count in `data/duplicate_ledger.csv`
-6. `logs/edifact.log` does not show CRITICAL entries
+1. Fichiers traités aujourd'hui → `logs/edifact.log` (ou `docker compose logs file2edi`)
+2. Fraîcheur masterdata → `/api/health/system` : champ `masterdata_sync.status` doit être `fresh`
+3. Fichiers en `PDF_ERROR` à traiter manuellement
+4. Confirmations SFTP → `data/sftp_delivery_ledger.csv`
+5. Doublons détectés → `data/duplicate_ledger.csv`
+6. Aucune ligne `CRITICAL` dans `logs/edifact.log`
 
-## Common Error Codes and Resolution
+---
 
-| Error Code | Cause | Resolution |
+## Codes d'erreur courants
+
+| Code | Cause | Résolution |
 |---|---|---|
-| `PDF_EMPTY_TEXT` | PDF is image-only, no extractable text | Manual processing required |
-| `ORDER_NUMBER_MISSING` | No order number found in PDF | Check PDF format |
-| `UNKNOWN_MATERIAL` | Article not in master data or lookups | Add to fourre-tout lookup or escalate |
-| `DISCONTINUED_MATERIAL` | MATNR in discontinued list | Inform customer to use new article |
-| `ROH_NONCOMMERCIAL` | MATNR is ROH type | Cannot be ordered |
-| `SOLDTO_LOW_CONFIDENCE` | Customer not matched | Verify customer in 10564_Customers.csv |
-| `SHIPTO_WEAK_EVIDENCE` | Delivery address has no postal/city | Check PDF delivery section |
-| `SFTP_UPLOAD_FAILED` | SFTP connection or authentication issue | Check SFTP credentials and host reachability |
-| `DUPLICATE_ORDER` | Same order already submitted | Verify if order was received by ELM |
+| `PDF_EMPTY_TEXT` | PDF image sans texte extractible | Traitement manuel requis |
+| `ORDER_NUMBER_MISSING` | Numéro de commande absent du PDF | Vérifier le format PDF |
+| `UNKNOWN_MATERIAL` | Article absent des masterdata et lookups | Ajouter au lookup fourre-tout ou escalader |
+| `DISCONTINUED_MATERIAL` | MATNR dans la liste discontinued | Informer le client d'utiliser le nouvel article |
+| `ROH_NONCOMMERCIAL` | MATNR de type ROH | Non commandable |
+| `SOLDTO_LOW_CONFIDENCE` | Client non matchée | Vérifier dans `10564_Customers.csv` |
+| `SHIPTO_WEAK_EVIDENCE` | Adresse de livraison sans CP/ville | Vérifier la section livraison du PDF |
+| `SFTP_UPLOAD_FAILED` | Problème connexion ou auth SFTP | Vérifier credentials et accessibilité hôte SFTP |
+| `DUPLICATE_ORDER` | Commande déjà soumise | Vérifier si reçue par ELM |
 
-## Master Data Refresh
+---
 
-Production must sync from `https://github.boschdevcloud.com/RSR1DY/masterdata.git` daily.
+## Refresh des données maîtres
 
-Use the daily Databricks job command:
+La production se synchronise depuis `https://github.boschdevcloud.com/RSR1DY/masterdata.git` chaque nuit via un job Databricks :
 
-```
+```bash
 python scripts/sync_masterdata_repo.py \
-	--repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
-	--branch main \
-	--target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
-	--notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync \
-	--notify-api-key "$APP_API_KEY"
+    --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
+    --branch main \
+    --target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
+    --notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync \
+    --notify-api-key "$APP_API_KEY"
 ```
 
-After sync, verify:
+Après sync, vérifier :
+1. `/api/masterdata/stats` → `sync_commit` et `sync_age_hours` récents
+2. `/api/health/system` → `masterdata_sync.status = fresh`
 
-1. `/api/masterdata/stats` shows updated `sync_commit` and recent `sync_age_hours`
-2. `/api/health/system` reports `masterdata_sync.status = fresh`
-3. `.masterdata_sync_metadata.json` exists in runtime masterdata path
+---
 
-## SFTP Credential Rotation
+## Rotation des credentials SFTP
 
-1. Update `SFTP_PASSWORD` (or `SFTP_PRIVATE_KEY_PATH`) on host `DY1-C-0014E`
-2. Run `python src/edifact_orders_engine.py --validate-only` to confirm SFTP config
-3. Process a test PDF with `--dry-run` first
+1. Mettre à jour `SFTP_PASSWORD` (ou `SFTP_PRIVATE_KEY_PATH`) dans `.env`
+2. Redémarrer le service : `docker compose -f docker-compose.file2edi.yml restart file2edi`
+3. Vérifier : `python src/edifact_orders_engine.py --validate-only`
+4. Test dry-run : `python src/edifact_orders_engine.py --dry-run`
 
-## Rollback Procedure
+---
 
-If the generator produces incorrect output:
-1. Set `dry_run = true` in `config.ini` immediately
-2. Notify ELM contact to hold processing of recent `.tst` files
-3. Review `logs/edifact.log` for the affected batch
-4. Fix the issue, run `python validate_project.py`
-5. Re-enable `dry_run = false` after fix is confirmed
+## Mise à jour du code (VM Azure / staging)
 
-## n8n Analysis Report Refresh
+```bash
+# Récupérer la dernière version de staging
+git -C /root/F2EDIDK pull origin staging
 
-Run at any time:
+# Redémarrer sans perte de données (volumes persistants)
+docker compose -f docker-compose.file2edi.yml up --build -d
 ```
+
+---
+
+## Procédure de rollback
+
+Si le générateur produit des fichiers incorrects :
+
+1. Passer `MOCK_MODE=true` dans `.env` immédiatement → `docker compose restart file2edi`
+2. Prévenir le contact ELM de suspendre le traitement des `.tst` récents
+3. Analyser `logs/edifact.log` pour le batch concerné
+4. Corriger le problème, exécuter `python validate_project.py`
+5. Repasser `MOCK_MODE=false` et redémarrer après confirmation du fix
+
+En production Databricks, rollback via :
+```bash
+git -C /path/GenieCommande checkout <commit-précédent>
+databricks apps restart file2edi
+```
+
+---
+
+## Refresh du rapport n8n
+
+```bash
 python src/edifact_orders_engine.py --analyse-n8n-only
 ```
-Output: `docs/N8N_ANALYSIS_REPORT.md`
 
-## UNB Profile Lock
+Sortie : `docs/N8N_ANALYSIS_REPORT.md`
 
-The UNB profile is PERMANENTLY locked to `ELM_STANDARD`.
+---
 
-- Sender: `4399901876613`
-- Receiver: `3015981600108`
+## Profil UNB — verrouillage permanent
 
-Any attempt to change this will cause `ForbiddenProfileError` at startup.
-Do not modify `lookups/unb_profiles.csv` or the `[edi]` section of `config.ini`.
+Le profil UNB est **définitivement verrouillé** sur `ELM_STANDARD`.
+
+- Émetteur : `4399901876613`
+- Récepteur : `3015981600108`
+
+Toute tentative de modification provoque `ForbiddenProfileError` au démarrage.
+Ne pas modifier `lookups/unb_profiles.csv` ni la section `[edi]` de `config.ini`.
