@@ -87,7 +87,11 @@ export function ParametresPage() {
       documentLanguage: DEFAULT_APP_SETTINGS.documentLanguage,
       timezone: DEFAULT_APP_SETTINGS.timezone,
       connectorConfig: DEFAULT_APP_SETTINGS.connectorConfig,
+      aiProvider: DEFAULT_APP_SETTINGS.aiProvider,
       databricksConfig: DEFAULT_APP_SETTINGS.databricksConfig,
+      openaiConfig: DEFAULT_APP_SETTINGS.openaiConfig,
+      ollamaConfig: DEFAULT_APP_SETTINGS.ollamaConfig,
+      customAiConfig: DEFAULT_APP_SETTINGS.customAiConfig,
       validation: DEFAULT_APP_SETTINGS.validation,
       notifications: DEFAULT_APP_SETTINGS.notifications,
       sftpConfig: DEFAULT_APP_SETTINGS.sftpConfig,
@@ -108,7 +112,11 @@ export function ParametresPage() {
         documentLanguage: s.documentLanguage,
         timezone: s.timezone,
         connectorConfig: s.connectorConfig,
+        aiProvider: s.aiProvider,
         databricksConfig: s.databricksConfig,
+        openaiConfig: s.openaiConfig,
+        ollamaConfig: s.ollamaConfig,
+        customAiConfig: s.customAiConfig,
         validation: s.validation,
         notifications: s.notifications,
         sftpConfig: s.sftpConfig,
@@ -198,7 +206,7 @@ export function ParametresPage() {
   });
 
   const databricksTokenMutation = useMutation({
-    mutationFn: (token: string) => api.updateDatabricksToken(token),
+    mutationFn: (token: string) => api.updateAiToken({ provider: form.getValues("aiProvider"), token }),
     onSuccess: (res) => {
       setDatabricksToken("");
       setDatabricksTokenMsg(res.message || "Token Databricks enregistré");
@@ -209,13 +217,25 @@ export function ParametresPage() {
   });
 
   const aiTestMutation = useMutation({
-    mutationFn: (payload: { host: string; token: string; modelEndpoint: string }) =>
+    mutationFn: (payload: {
+      provider: "databricks" | "openai" | "ollama" | "custom";
+      token?: string;
+      host?: string;
+      modelEndpoint?: string;
+      baseUrl?: string;
+      model?: string;
+      chatPath?: string;
+      authHeader?: string;
+      authScheme?: string;
+    }) =>
       api.testAiConnection(payload),
     onSuccess: (res) => setAiTestResult(res),
     onError: (err) => setAiTestResult({ ok: false, message: err instanceof Error ? err.message : "Erreur inconnue" }),
   });
 
   const roleItems = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data]);
+  const aiProvider = form.watch("aiProvider");
+  const showDatabricksSql = aiProvider === "databricks" && form.watch("databricksConfig.sqlWarehouseEnabled");
 
   const connectors = [
     { key: "apiExtraction", label: "API extraction", icon: Wifi, status: settings.connectors.apiExtraction },
@@ -391,47 +411,102 @@ export function ParametresPage() {
                   </div>
 
                   <div className="border-t pt-4">
-                    <p className="mb-3 text-sm font-medium">API Databricks</p>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      <EditableField
-                        label="Host Databricks"
-                        value={form.watch("databricksConfig.host")}
-                        onChange={(v) => form.setValue("databricksConfig.host", v)}
-                      />
-                      <EditableField
-                        label="Base URL File2EDI"
-                        value={form.watch("databricksConfig.apiBaseUrl")}
-                        onChange={(v) => form.setValue("databricksConfig.apiBaseUrl", v)}
-                      />
-                      <EditableField
-                        label="Serving endpoint modèle"
-                        value={form.watch("databricksConfig.modelEndpoint")}
-                        onChange={(v) => form.setValue("databricksConfig.modelEndpoint", v)}
-                      />
-                      <EditableField
-                        label="Warehouse ID"
-                        value={form.watch("databricksConfig.warehouseId")}
-                        onChange={(v) => form.setValue("databricksConfig.warehouseId", v)}
-                      />
-                      <EditableField
-                        label="Catalog"
-                        value={form.watch("databricksConfig.catalog")}
-                        onChange={(v) => form.setValue("databricksConfig.catalog", v)}
-                      />
-                      <EditableField
-                        label="Schema"
-                        value={form.watch("databricksConfig.schema")}
-                        onChange={(v) => form.setValue("databricksConfig.schema", v)}
-                      />
-                      <EditableField
-                        label="Profil Databricks local"
-                        value={form.watch("databricksConfig.configProfile")}
-                        onChange={(v) => form.setValue("databricksConfig.configProfile", v)}
-                      />
+                    <p className="mb-3 text-sm font-medium">Fournisseur IA</p>
+                    <div className="space-y-2 mb-4">
+                      <Label>Provider LLM</Label>
+                      <Select
+                        value={form.watch("aiProvider")}
+                        onValueChange={(v: "databricks" | "openai" | "ollama" | "custom") => form.setValue("aiProvider", v)}
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="databricks">Databricks Model Serving</SelectItem>
+                          <SelectItem value="openai">OpenAI-compatible</SelectItem>
+                          <SelectItem value="ollama">Ollama (local)</SelectItem>
+                          <SelectItem value="custom">Custom provider</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </div>
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      Le token Databricks reste géré hors application via variables d&apos;environnement ou profil CLI.
-                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {aiProvider === "databricks" && (
+                        <>
+                          <EditableField
+                            label="Host Databricks"
+                            value={form.watch("databricksConfig.host")}
+                            onChange={(v) => form.setValue("databricksConfig.host", v)}
+                          />
+                          <EditableField
+                            label="Serving endpoint modèle"
+                            value={form.watch("databricksConfig.modelEndpoint")}
+                            onChange={(v) => form.setValue("databricksConfig.modelEndpoint", v)}
+                          />
+                          <EditableField
+                            label="Profil Databricks local"
+                            value={form.watch("databricksConfig.configProfile")}
+                            onChange={(v) => form.setValue("databricksConfig.configProfile", v)}
+                          />
+                        </>
+                      )}
+                      {aiProvider === "openai" && (
+                        <>
+                          <EditableField
+                            label="Base URL OpenAI"
+                            value={form.watch("openaiConfig.baseUrl")}
+                            onChange={(v) => form.setValue("openaiConfig.baseUrl", v)}
+                          />
+                          <EditableField
+                            label="Model"
+                            value={form.watch("openaiConfig.model")}
+                            onChange={(v) => form.setValue("openaiConfig.model", v)}
+                          />
+                        </>
+                      )}
+                      {aiProvider === "ollama" && (
+                        <>
+                          <EditableField
+                            label="Base URL Ollama"
+                            value={form.watch("ollamaConfig.baseUrl")}
+                            onChange={(v) => form.setValue("ollamaConfig.baseUrl", v)}
+                          />
+                          <EditableField
+                            label="Model"
+                            value={form.watch("ollamaConfig.model")}
+                            onChange={(v) => form.setValue("ollamaConfig.model", v)}
+                          />
+                        </>
+                      )}
+                      {aiProvider === "custom" && (
+                        <>
+                          <EditableField
+                            label="Base URL custom"
+                            value={form.watch("customAiConfig.baseUrl")}
+                            onChange={(v) => form.setValue("customAiConfig.baseUrl", v)}
+                          />
+                          <EditableField
+                            label="Model"
+                            value={form.watch("customAiConfig.model")}
+                            onChange={(v) => form.setValue("customAiConfig.model", v)}
+                          />
+                          <EditableField
+                            label="Chat path"
+                            value={form.watch("customAiConfig.chatPath")}
+                            onChange={(v) => form.setValue("customAiConfig.chatPath", v)}
+                          />
+                          <EditableField
+                            label="Auth header"
+                            value={form.watch("customAiConfig.authHeader")}
+                            onChange={(v) => form.setValue("customAiConfig.authHeader", v)}
+                          />
+                          <EditableField
+                            label="Auth scheme"
+                            value={form.watch("customAiConfig.authScheme")}
+                            onChange={(v) => form.setValue("customAiConfig.authScheme", v)}
+                          />
+                        </>
+                      )}
+                    </div>
                   </div>
                 </CardContent>
               </Card>
@@ -444,44 +519,139 @@ export function ParametresPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2 text-base">
                     <Brain className="h-4 w-4" />
-                    Configuration IA — Databricks Model Serving
+                    Configuration IA
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-6">
+                  <div className="space-y-2">
+                    <Label>Provider LLM</Label>
+                    <Select
+                      value={form.watch("aiProvider")}
+                      onValueChange={(v: "databricks" | "openai" | "ollama" | "custom") => form.setValue("aiProvider", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="databricks">Databricks Model Serving</SelectItem>
+                        <SelectItem value="openai">OpenAI-compatible</SelectItem>
+                        <SelectItem value="ollama">Ollama (local)</SelectItem>
+                        <SelectItem value="custom">Custom provider</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <div className="grid gap-4 sm:grid-cols-2">
-                    <EditableField
-                      label="Host Databricks"
-                      value={form.watch("databricksConfig.host")}
-                      onChange={(v) => form.setValue("databricksConfig.host", v)}
-                    />
-                    <EditableField
-                      label="Endpoint du modèle"
-                      value={form.watch("databricksConfig.modelEndpoint")}
-                      onChange={(v) => form.setValue("databricksConfig.modelEndpoint", v)}
-                    />
-                    <EditableField
-                      label="Catalog Unity"
-                      value={form.watch("databricksConfig.catalog")}
-                      onChange={(v) => form.setValue("databricksConfig.catalog", v)}
-                    />
-                    <EditableField
-                      label="Schema Unity"
-                      value={form.watch("databricksConfig.schema")}
-                      onChange={(v) => form.setValue("databricksConfig.schema", v)}
-                    />
-                    <EditableField
-                      label="Warehouse ID"
-                      value={form.watch("databricksConfig.warehouseId")}
-                      onChange={(v) => form.setValue("databricksConfig.warehouseId", v)}
-                    />
+                    {aiProvider === "databricks" && (
+                      <>
+                        <EditableField
+                          label="Host Databricks"
+                          value={form.watch("databricksConfig.host")}
+                          onChange={(v) => form.setValue("databricksConfig.host", v)}
+                        />
+                        <EditableField
+                          label="Endpoint du modèle"
+                          value={form.watch("databricksConfig.modelEndpoint")}
+                          onChange={(v) => form.setValue("databricksConfig.modelEndpoint", v)}
+                        />
+                        <div className="flex items-center justify-between gap-4 rounded-lg border p-4 sm:col-span-2">
+                          <div>
+                            <p className="font-medium text-sm">Activer Databricks SQL (Unity Catalog)</p>
+                            <p className="text-xs text-muted-foreground">
+                              Active uniquement si tu utilises Warehouse + Catalog + Schema pour des usages SQL.
+                            </p>
+                          </div>
+                          <Switch
+                            checked={form.watch("databricksConfig.sqlWarehouseEnabled")}
+                            onCheckedChange={(v) => form.setValue("databricksConfig.sqlWarehouseEnabled", v)}
+                          />
+                        </div>
+                        {showDatabricksSql && (
+                          <>
+                            <EditableField
+                              label="Catalog Unity"
+                              value={form.watch("databricksConfig.catalog")}
+                              onChange={(v) => form.setValue("databricksConfig.catalog", v)}
+                            />
+                            <EditableField
+                              label="Schema Unity"
+                              value={form.watch("databricksConfig.schema")}
+                              onChange={(v) => form.setValue("databricksConfig.schema", v)}
+                            />
+                            <EditableField
+                              label="Warehouse ID"
+                              value={form.watch("databricksConfig.warehouseId")}
+                              onChange={(v) => form.setValue("databricksConfig.warehouseId", v)}
+                            />
+                          </>
+                        )}
+                      </>
+                    )}
+                    {aiProvider === "openai" && (
+                      <>
+                        <EditableField
+                          label="Base URL OpenAI"
+                          value={form.watch("openaiConfig.baseUrl")}
+                          onChange={(v) => form.setValue("openaiConfig.baseUrl", v)}
+                        />
+                        <EditableField
+                          label="Model"
+                          value={form.watch("openaiConfig.model")}
+                          onChange={(v) => form.setValue("openaiConfig.model", v)}
+                        />
+                      </>
+                    )}
+                    {aiProvider === "ollama" && (
+                      <>
+                        <EditableField
+                          label="Base URL Ollama"
+                          value={form.watch("ollamaConfig.baseUrl")}
+                          onChange={(v) => form.setValue("ollamaConfig.baseUrl", v)}
+                        />
+                        <EditableField
+                          label="Model"
+                          value={form.watch("ollamaConfig.model")}
+                          onChange={(v) => form.setValue("ollamaConfig.model", v)}
+                        />
+                      </>
+                    )}
+                    {aiProvider === "custom" && (
+                      <>
+                        <EditableField
+                          label="Base URL custom"
+                          value={form.watch("customAiConfig.baseUrl")}
+                          onChange={(v) => form.setValue("customAiConfig.baseUrl", v)}
+                        />
+                        <EditableField
+                          label="Model"
+                          value={form.watch("customAiConfig.model")}
+                          onChange={(v) => form.setValue("customAiConfig.model", v)}
+                        />
+                        <EditableField
+                          label="Chat path"
+                          value={form.watch("customAiConfig.chatPath")}
+                          onChange={(v) => form.setValue("customAiConfig.chatPath", v)}
+                        />
+                        <EditableField
+                          label="Auth header"
+                          value={form.watch("customAiConfig.authHeader")}
+                          onChange={(v) => form.setValue("customAiConfig.authHeader", v)}
+                        />
+                        <EditableField
+                          label="Auth scheme"
+                          value={form.watch("customAiConfig.authScheme")}
+                          onChange={(v) => form.setValue("customAiConfig.authScheme", v)}
+                        />
+                      </>
+                    )}
                   </div>
 
                   <div className="rounded-lg border p-4 space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <div>
-                        <p className="font-medium text-sm">Token d&apos;accès Databricks</p>
+                          <p className="font-medium text-sm">Token d&apos;accès provider IA</p>
                         <p className="text-xs text-muted-foreground">
-                          Personal Access Token (PAT). Stocké en mémoire — relancer le container pour persister via variable d&apos;environnement.
+                            Jeton runtime (non persisté). Pour persistance, utiliser les variables d&apos;environnement du serveur.
                         </p>
                       </div>
                       <Badge variant="secondary">
@@ -490,7 +660,7 @@ export function ParametresPage() {
                     </div>
                     <Input
                       type="password"
-                      placeholder="dapi…"
+                      placeholder="Token provider..."
                       value={databricksToken}
                       onChange={(e) => {
                         setDatabricksToken(e.target.value);
@@ -522,14 +692,14 @@ export function ParametresPage() {
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Moteur IA (LLM Databricks)</CardTitle>
+                  <CardTitle className="text-base">Moteur IA (LLM)</CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
                     <div>
                       <p className="font-medium text-sm">Activer le LLM</p>
                       <p className="text-xs text-muted-foreground">
-                        Active ou désactive l&apos;appel au LLM Databricks pour l&apos;extraction,
+                        Active ou désactive l&apos;appel au LLM pour l&apos;extraction,
                         quel que soit l&apos;environnement. Désactivé, l&apos;application n&apos;utilise
                         que les moteurs déterministes (règles + regex).
                       </p>
@@ -556,9 +726,25 @@ export function ParametresPage() {
                       onClick={() => {
                         setAiTestResult(null);
                         aiTestMutation.mutate({
-                          host: form.getValues("databricksConfig.host"),
+                          provider: form.getValues("aiProvider"),
                           token: databricksToken,
+                          host: form.getValues("databricksConfig.host"),
                           modelEndpoint: form.getValues("databricksConfig.modelEndpoint"),
+                          baseUrl:
+                            form.getValues("aiProvider") === "openai"
+                              ? form.getValues("openaiConfig.baseUrl")
+                              : form.getValues("aiProvider") === "ollama"
+                                ? form.getValues("ollamaConfig.baseUrl")
+                                : form.getValues("customAiConfig.baseUrl"),
+                          model:
+                            form.getValues("aiProvider") === "openai"
+                              ? form.getValues("openaiConfig.model")
+                              : form.getValues("aiProvider") === "ollama"
+                                ? form.getValues("ollamaConfig.model")
+                                : form.getValues("customAiConfig.model"),
+                          chatPath: form.getValues("customAiConfig.chatPath"),
+                          authHeader: form.getValues("customAiConfig.authHeader"),
+                          authScheme: form.getValues("customAiConfig.authScheme"),
                         });
                       }}
                       disabled={aiTestMutation.isPending}
@@ -581,7 +767,7 @@ export function ParametresPage() {
                     </div>
                   )}
                   <p className="text-xs text-muted-foreground">
-                    Pour persister le token entre redémarrages, renseigner <code className="font-mono">DATABRICKS_TOKEN</code> dans le fichier <code className="font-mono">.env</code> du serveur.
+                    Variables conseillées: <code className="font-mono">DATABRICKS_TOKEN</code>, <code className="font-mono">OPENAI_API_KEY</code>, <code className="font-mono">CUSTOM_LLM_API_KEY</code> selon le provider.
                   </p>
                 </CardContent>
               </Card>

@@ -494,9 +494,22 @@ def create_router() -> APIRouter:
                     "sftp": "connected" if s.get("sftp", {}).get("configured") else "disconnected",
                 },
                 "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
+                "aiProvider": persisted.get("aiProvider", _default_settings().get("aiProvider", "databricks")),
                 "databricksConfig": {
                     **_default_settings().get("databricksConfig", {}),
                     **(persisted.get("databricksConfig") or {}),
+                },
+                "openaiConfig": {
+                    **_default_settings().get("openaiConfig", {}),
+                    **(persisted.get("openaiConfig") or {}),
+                },
+                "ollamaConfig": {
+                    **_default_settings().get("ollamaConfig", {}),
+                    **(persisted.get("ollamaConfig") or {}),
+                },
+                "customAiConfig": {
+                    **_default_settings().get("customAiConfig", {}),
+                    **(persisted.get("customAiConfig") or {}),
                 },
                 "validation": persisted.get("validation", _default_settings().get("validation", {})),
                 "notifications": persisted.get("notifications", _default_settings().get("notifications", {})),
@@ -534,9 +547,13 @@ def create_router() -> APIRouter:
             "currency": persisted.get("currency", settings["currency"]),
             "documentLanguage": persisted.get("documentLanguage", settings["documentLanguage"]),
             "timezone": persisted.get("timezone", settings["timezone"]),
+            "aiProvider": persisted.get("aiProvider", settings.get("aiProvider", "databricks")),
         })
         settings["connectorConfig"] = {**settings.get("connectorConfig", {}), **(persisted.get("connectorConfig") or {})}
         settings["databricksConfig"] = {**settings.get("databricksConfig", {}), **(persisted.get("databricksConfig") or {})}
+        settings["openaiConfig"] = {**settings.get("openaiConfig", {}), **(persisted.get("openaiConfig") or {})}
+        settings["ollamaConfig"] = {**settings.get("ollamaConfig", {}), **(persisted.get("ollamaConfig") or {})}
+        settings["customAiConfig"] = {**settings.get("customAiConfig", {}), **(persisted.get("customAiConfig") or {})}
         settings["validation"] = {**settings.get("validation", {}), **(persisted.get("validation") or {})}
         settings["notifications"] = {**settings.get("notifications", {}), **(persisted.get("notifications") or {})}
         settings["sftpConfig"] = {**settings.get("sftpConfig", {}), **(persisted.get("sftpConfig") or {})}
@@ -567,46 +584,125 @@ def create_router() -> APIRouter:
 
     @router.post("/settings/ai-test")
     def test_ai_connection(payload: dict = Body(default_factory=dict)):
-        """Test the Databricks LLM connection with current or provided config."""
+        """Test the configured AI provider connection with current or provided config."""
         import os as _os
         import requests as _requests
+        provider = str((payload or {}).get("provider") or _os.environ.get("F2EDI_LLM_PROVIDER", "databricks")).strip().lower()
+        target = str((payload or {}).get("host") or (payload or {}).get("baseUrl") or "").strip().rstrip("/")
 
-        host = str((payload or {}).get("host") or _os.environ.get("DATABRICKS_HOST", "")).strip().rstrip("/")
-        token = str((payload or {}).get("token") or _os.environ.get("DATABRICKS_TOKEN", "")).strip()
-        endpoint = str(
-            (payload or {}).get("modelEndpoint")
-            or _os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
-        ).strip()
-
-        if not host:
-            return {"ok": False, "message": "DATABRICKS_HOST non configuré"}
-
-        url = f"{host}/serving-endpoints/{endpoint}/invocations"
-        headers = {"Content-Type": "application/json"}
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
-        else:
-            try:
-                from databricks.sdk import WorkspaceClient
-                profile = _os.environ.get("DATABRICKS_CONFIG_PROFILE", "").strip()
-                w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
-                auth_h = w.config.authenticate()
-                headers.update(auth_h)
-            except Exception as exc:
-                return {"ok": False, "message": f"Authentification impossible: {exc}"}
-
-        body = {
-            "messages": [{"role": "user", "content": "ping"}],
-            "max_tokens": 5,
-        }
         try:
-            resp = _requests.post(url, headers=headers, json=body, timeout=15)
-            if resp.status_code == 200:
-                return {"ok": True, "message": f"Connexion réussie ({endpoint})"}
-            detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
-            return {"ok": False, "message": f"Erreur {resp.status_code}: {detail}"}
+            if provider == "databricks":
+                host = str((payload or {}).get("host") or _os.environ.get("DATABRICKS_HOST", "")).strip().rstrip("/")
+                target = host
+                token = str((payload or {}).get("token") or _os.environ.get("DATABRICKS_TOKEN", "")).strip()
+                endpoint = str(
+                    (payload or {}).get("modelEndpoint")
+                    or _os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
+                ).strip()
+                if not host:
+                    return {"ok": False, "message": "DATABRICKS_HOST non configuré"}
+                url = f"{host}/serving-endpoints/{endpoint}/invocations"
+                headers = {"Content-Type": "application/json"}
+                if token:
+                    headers["Authorization"] = f"Bearer {token}"
+                else:
+                    try:
+                        from databricks.sdk import WorkspaceClient
+                        profile = _os.environ.get("DATABRICKS_CONFIG_PROFILE", "").strip()
+                        w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+                        auth_h = w.config.authenticate()
+                        headers.update(auth_h)
+                    except Exception as exc:
+                        return {"ok": False, "message": f"Authentification impossible: {exc}"}
+                body = {
+                    "messages": [{"role": "user", "content": "ping"}],
+                    "max_tokens": 5,
+                }
+                resp = _requests.post(url, headers=headers, json=body, timeout=15)
+                if resp.status_code == 200:
+                    return {"ok": True, "message": f"Connexion réussie (databricks:{endpoint})"}
+                detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+                return {"ok": False, "message": f"Erreur {resp.status_code}: {detail}"}
+
+            if provider == "openai":
+                base_url = str((payload or {}).get("baseUrl") or _os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")).strip().rstrip("/")
+                target = base_url
+                api_key = str((payload or {}).get("token") or _os.environ.get("OPENAI_API_KEY", "")).strip()
+                model = str((payload or {}).get("model") or _os.environ.get("OPENAI_MODEL", "gpt-4.1-mini")).strip()
+                if not api_key:
+                    return {"ok": False, "message": "OPENAI_API_KEY non configuré"}
+                resp = _requests.post(
+                    f"{base_url}/chat/completions",
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 5,
+                        "temperature": 0,
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    return {"ok": True, "message": f"Connexion réussie (openai:{model})"}
+                detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+                return {"ok": False, "message": f"Erreur {resp.status_code}: {detail}"}
+
+            if provider == "ollama":
+                base_url = str((payload or {}).get("baseUrl") or _os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")).strip().rstrip("/")
+                target = base_url
+                model = str((payload or {}).get("model") or _os.environ.get("OLLAMA_MODEL", "llama3.1")).strip()
+                resp = _requests.post(
+                    f"{base_url}/api/chat",
+                    headers={"Content-Type": "application/json"},
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "stream": False,
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    return {"ok": True, "message": f"Connexion réussie (ollama:{model})"}
+                detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+                return {"ok": False, "message": f"Erreur {resp.status_code}: {detail}"}
+
+            if provider == "custom":
+                base_url = str((payload or {}).get("baseUrl") or _os.environ.get("CUSTOM_LLM_BASE_URL", "")).strip().rstrip("/")
+                target = base_url
+                chat_path = str((payload or {}).get("chatPath") or _os.environ.get("CUSTOM_LLM_CHAT_PATH", "/v1/chat/completions")).strip()
+                model = str((payload or {}).get("model") or _os.environ.get("CUSTOM_LLM_MODEL", "")).strip()
+                auth_header = str((payload or {}).get("authHeader") or _os.environ.get("CUSTOM_LLM_AUTH_HEADER", "Authorization")).strip() or "Authorization"
+                auth_scheme = str((payload or {}).get("authScheme") or _os.environ.get("CUSTOM_LLM_AUTH_SCHEME", "Bearer")).strip()
+                token = str((payload or {}).get("token") or _os.environ.get("CUSTOM_LLM_API_KEY", "")).strip()
+                if not base_url:
+                    return {"ok": False, "message": "CUSTOM_LLM_BASE_URL non configuré"}
+                headers = {"Content-Type": "application/json"}
+                if token:
+                    headers[auth_header] = f"{auth_scheme} {token}".strip()
+                resp = _requests.post(
+                    f"{base_url}{chat_path}",
+                    headers=headers,
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": "ping"}],
+                        "max_tokens": 5,
+                        "temperature": 0,
+                    },
+                    timeout=15,
+                )
+                if resp.status_code == 200:
+                    return {"ok": True, "message": "Connexion réussie (custom provider)"}
+                detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+                return {"ok": False, "message": f"Erreur {resp.status_code}: {detail}"}
+
+            return {"ok": False, "message": f"Provider non supporté: {provider}"}
         except _requests.exceptions.ConnectionError:
-            return {"ok": False, "message": f"Impossible de joindre {host}"}
+            if target:
+                return {"ok": False, "message": f"Impossible de joindre {target}"}
+            return {"ok": False, "message": "Impossible de joindre le provider IA"}
         except _requests.exceptions.Timeout:
             return {"ok": False, "message": "Délai d'attente dépassé (15s)"}
         except Exception as exc:
@@ -646,6 +742,35 @@ def create_router() -> APIRouter:
         os.environ["DATABRICKS_TOKEN"] = token
         return {"ok": True, "message": "Token Databricks mis à jour"}
 
+    @router.put("/settings/ai-token")
+    def put_ai_token(payload: dict, req: Request):
+        try:
+            import server as srv
+            srv._ensure_admin(req)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+        provider = str((payload or {}).get("provider") or "").strip().lower()
+        token = str((payload or {}).get("token") or "")
+        if not token.strip():
+            raise HTTPException(status_code=400, detail="Token IA requis")
+
+        if provider == "databricks":
+            os.environ["DATABRICKS_TOKEN"] = token
+            return {"ok": True, "message": "Token Databricks mis à jour"}
+        if provider == "openai":
+            os.environ["OPENAI_API_KEY"] = token
+            return {"ok": True, "message": "Token OpenAI mis à jour"}
+        if provider == "custom":
+            os.environ["CUSTOM_LLM_API_KEY"] = token
+            return {"ok": True, "message": "Token Custom provider mis à jour"}
+        if provider == "ollama":
+            return {"ok": True, "message": "Ollama ne nécessite pas de token par défaut"}
+
+        raise HTTPException(status_code=400, detail=f"Provider non supporté: {provider}")
+
     return router
 
 
@@ -670,15 +795,32 @@ def _default_settings() -> dict:
             "csvDelimiter": ";",
             "sftpProfile": "default",
         },
+        "aiProvider": "databricks",
         "databricksConfig": {
             "host": "https://adb-5555213114570927.7.azuredatabricks.net",
             "apiBaseUrl": "https://file2edi-5555213114570927.7.azure.databricksapps.com",
             "modelEndpoint": "databricks-gpt-oss-120b",
+            "sqlWarehouseEnabled": False,
             "warehouseId": "",
             "catalog": "hive_metastore",
             "schema": "edifact_generator",
             "configProfile": "",
             "llmEnabled": True,
+        },
+        "openaiConfig": {
+            "baseUrl": "https://api.openai.com/v1",
+            "model": "gpt-4.1-mini",
+        },
+        "ollamaConfig": {
+            "baseUrl": "http://localhost:11434",
+            "model": "llama3.1",
+        },
+        "customAiConfig": {
+            "baseUrl": "",
+            "model": "",
+            "chatPath": "/v1/chat/completions",
+            "authHeader": "Authorization",
+            "authScheme": "Bearer",
         },
         "validation": {
             "autoValidationThreshold": 90,

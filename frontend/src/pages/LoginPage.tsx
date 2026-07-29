@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ArrowRight, KeyRound } from "lucide-react";
+import { ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,6 +18,8 @@ export function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [profileLoginEnabled, setProfileLoginEnabled] = useState(false);
+  const logoSrc = `${import.meta.env.BASE_URL}genie-commande.png`;
+  const logoFallback = `${import.meta.env.BASE_URL}file.png`;
 
   useEffect(() => {
     let active = true;
@@ -53,9 +55,17 @@ export function LoginPage() {
     <div className="flex min-h-screen items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm shadow-xl">
         <CardHeader className="flex flex-col items-center gap-2 pb-2">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-            <KeyRound className="h-5 w-5" />
-          </div>
+          <img
+            src={logoSrc}
+            alt="Genie Commande"
+            className="h-28 w-auto max-w-[220px] object-contain"
+            onError={(e) => {
+              const img = e.currentTarget;
+              if (!img.src.endsWith("file.png")) {
+                img.src = logoFallback;
+              }
+            }}
+          />
           <CardTitle className="text-xl">File2EDI</CardTitle>
         </CardHeader>
 

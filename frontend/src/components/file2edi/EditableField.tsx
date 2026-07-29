@@ -3,7 +3,7 @@ import { Check, Pencil, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 import type { PartnerEditSource } from "@/types";
 
@@ -55,6 +55,7 @@ export function EditableField({
   };
 
   const flag = editFlag ?? (manuallyEdited ? "manual" : undefined);
+  const displayValue = type === "date" ? formatDate(value) : (value || "—");
 
   return (
     <div className={cn("group space-y-1", className)}>
@@ -96,7 +97,7 @@ export function EditableField({
               readOnly && "text-muted-foreground",
             )}
           >
-            {value || "—"}
+            {displayValue}
           </span>
           {!readOnly && onSave && (
             <button

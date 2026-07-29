@@ -20,30 +20,12 @@ import json
 import logging
 import re
 from typing import Optional
-
-_client = None
-_client_initialized = False
+from app.engines.llm_gateway import chat_completion
 
 logger = logging.getLogger(__name__)
 
 MODEL_ENDPOINT = "databricks-claude-sonnet-4"
 FALLBACK_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
-
-
-def _get_client():
-    """Lazily create the Databricks deploy client on first use."""
-    global _client, _client_initialized
-    from app.runtime import llm_enabled
-    if not llm_enabled():
-        return None
-    if not _client_initialized:
-        _client_initialized = True
-        try:
-            import mlflow.deployments
-            _client = mlflow.deployments.get_deploy_client("databricks")
-        except Exception:
-            _client = None
-    return _client
 
 
 # Lines to ignore (shipping/eco-tax surcharges)
@@ -58,36 +40,16 @@ IGNORE_PATTERNS = [
 
 
 def _call_llm(prompt: str, max_tokens: int = 1500, endpoint: str = MODEL_ENDPOINT) -> Optional[str]:
-    """Call the LLM endpoint."""
-    client = _get_client()
-    if client is None:
-        logger.warning("mlflow.deployments client not available")
-        return None
+    """Call the configured LLM provider."""
     try:
-        resp = client.predict(
-            endpoint=endpoint,
-            inputs={
-                "messages": [{"role": "user", "content": prompt}],
-                "max_tokens": max_tokens,
-                "temperature": 0,
-            },
+        return chat_completion(
+            prompt=prompt,
+            max_tokens=max_tokens,
+            databricks_endpoint=endpoint,
+            databricks_fallback_endpoint=FALLBACK_ENDPOINT,
         )
-        return resp["choices"][0]["message"]["content"].strip()
     except Exception as e:
         logger.warning(f"LLM orderlines call failed ({endpoint}): {e}")
-        if endpoint != FALLBACK_ENDPOINT:
-            try:
-                resp = client.predict(
-                    endpoint=FALLBACK_ENDPOINT,
-                    inputs={
-                        "messages": [{"role": "user", "content": prompt}],
-                        "max_tokens": max_tokens,
-                        "temperature": 0,
-                    },
-                )
-                return resp["choices"][0]["message"]["content"].strip()
-            except Exception as e2:
-                logger.warning(f"LLM orderlines fallback failed: {e2}")
         return None
 
 

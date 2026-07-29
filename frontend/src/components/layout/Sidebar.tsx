@@ -45,6 +45,8 @@ export function Sidebar() {
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("") || "OP";
+  const logoSrc = `${import.meta.env.BASE_URL}genie-commande.png`;
+  const logoFallback = `${import.meta.env.BASE_URL}file.png`;
 
   async function handleLogout() {
     try {
@@ -60,13 +62,18 @@ export function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-[260px] flex-col bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-6 py-5">
-        <div className="flex items-center gap-3">
+        <div className="flex items-center justify-center">
           <img
-            src="/genie-commande.png"
+            src={logoSrc}
             alt="Genie Commande"
-            className="h-10 w-10 rounded-md object-cover"
+            className="h-14 w-auto max-w-[180px] object-contain"
+            onError={(e) => {
+              const img = e.currentTarget;
+              if (!img.src.endsWith("file.png")) {
+                img.src = logoFallback;
+              }
+            }}
           />
-          <h1 className="text-lg font-bold tracking-tight text-white">Genie Commande</h1>
         </div>
       </div>
 

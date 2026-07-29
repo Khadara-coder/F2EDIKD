@@ -308,15 +308,32 @@ export interface AppSettings {
     csvDelimiter: string;
     sftpProfile: string;
   };
+  aiProvider: "databricks" | "openai" | "ollama" | "custom";
   databricksConfig: {
     host: string;
     apiBaseUrl: string;
     modelEndpoint: string;
+    sqlWarehouseEnabled: boolean;
     warehouseId: string;
     catalog: string;
     schema: string;
     configProfile: string;
     llmEnabled: boolean;
+  };
+  openaiConfig: {
+    baseUrl: string;
+    model: string;
+  };
+  ollamaConfig: {
+    baseUrl: string;
+    model: string;
+  };
+  customAiConfig: {
+    baseUrl: string;
+    model: string;
+    chatPath: string;
+    authHeader: string;
+    authScheme: string;
   };
   validation: {
     autoValidationThreshold: number;

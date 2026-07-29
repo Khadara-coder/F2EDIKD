@@ -66,7 +66,8 @@ _DELIVERY_DATE_LABELS = [
     "date de livraison prevue", "date de livraison", "date livraison",
     "date de livraison au plus tard", "livraison prevue", "livraison le",
     "livrer le", "livrer avant le", "livrer avant", "delai de livraison",
-    "deliver by", "delivery date",
+    "date souhaitee", "date reception souhaitee", "reception souhaitee",
+    "a livrer le", "to be delivered", "deliver by", "delivery date",
 ]
 
 # Numeric: DD/MM/YYYY or DD-MM-YY, and ISO YYYY-MM-DD
@@ -117,6 +118,58 @@ def _find_date_near_label(folded: str, labels: list[str], window: int = 40) -> s
     return None
 
 
+def _collect_all_dates(text: str) -> list[str]:
+    out: list[str] = []
+    folded = fold_text(text or "")
+    for m in _NUM_DATE_RE.finditer(folded):
+        iso = None
+        if m.group(1):
+            iso = _iso_from_parts(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+        else:
+            iso = _iso_from_parts(int(m.group(6)), int(m.group(5)), int(m.group(4)))
+        if iso and iso not in out:
+            out.append(iso)
+    for m in _TXT_DATE_RE.finditer(folded):
+        month = _FR_MONTHS.get(m.group(2))
+        if month:
+            iso = _iso_from_parts(int(m.group(3)), month, int(m.group(1)))
+            if iso and iso not in out:
+                out.append(iso)
+    return out
+
+
+def _score_date_by_labels(line_folded: str, labels: list[str]) -> int:
+    score = 0
+    for lb in labels:
+        if lb in line_folded:
+            score += 10
+    return score
+
+
+def _extract_date_by_line_context(text: str, labels: list[str]) -> str | None:
+    """Find best date on a labeled line, otherwise on the immediate next line."""
+    best: tuple[int, str] | None = None
+    lines = text.splitlines()
+    for idx, raw in enumerate(lines):
+        lf = fold_text(raw)
+        base = _score_date_by_labels(lf, labels)
+        if base <= 0:
+            continue
+        same_line = _extract_first_date(lf)
+        if same_line:
+            cand = (base + 5, same_line)
+            if best is None or cand[0] > best[0]:
+                best = cand
+        if idx + 1 < len(lines):
+            next_line = fold_text(lines[idx + 1])
+            nxt = _extract_first_date(next_line)
+            if nxt:
+                cand = (base + 3, nxt)
+                if best is None or cand[0] > best[0]:
+                    best = cand
+    return best[1] if best else None
+
+
 def extract_dates_anchored(text: str) -> dict:
     """Deterministic extraction of order/delivery dates anchored on labels.
 
@@ -124,9 +177,33 @@ def extract_dates_anchored(text: str) -> dict:
     (YYYY-MM-DD) or None for each field.
     """
     folded = fold_text(text or "")
+
+    # 1) Strongest: line-level context (label + date on same/next line)
+    order_date = _extract_date_by_line_context(text, _ORDER_DATE_LABELS)
+    delivery_date = _extract_date_by_line_context(text, _DELIVERY_DATE_LABELS)
+
+    # 2) Fallback: proximity in compact folded text (wider window for noisy OCR)
+    if not order_date:
+        order_date = _find_date_near_label(folded, _ORDER_DATE_LABELS, window=140)
+    if not delivery_date:
+        delivery_date = _find_date_near_label(folded, _DELIVERY_DATE_LABELS, window=140)
+
+    # 3) Conservative defaults: earliest as order date, latest as delivery date
+    all_dates = _collect_all_dates(text)
+    if all_dates:
+        sorted_dates = sorted(all_dates)
+        if not order_date:
+            order_date = sorted_dates[0]
+        if not delivery_date:
+            delivery_date = sorted_dates[-1]
+
+    # 4) Keep temporal consistency when both exist
+    if order_date and delivery_date and delivery_date < order_date:
+        delivery_date = order_date
+
     return {
-        "date_commande": _find_date_near_label(folded, _ORDER_DATE_LABELS),
-        "date_livraison": _find_date_near_label(folded, _DELIVERY_DATE_LABELS),
+        "date_commande": order_date,
+        "date_livraison": delivery_date,
     }
 
 
