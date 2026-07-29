@@ -60,8 +60,14 @@ export function Sidebar() {
   return (
     <aside className="fixed left-0 top-0 z-40 flex h-screen w-[260px] flex-col bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-6 py-5">
-        <h1 className="text-lg font-bold tracking-tight text-white">File2EDI</h1>
-        <p className="mt-0.5 text-xs text-slate-400">EDIFACT GENERATOR</p>
+        <div className="flex items-center gap-3">
+          <img
+            src="/genie-commande.png"
+            alt="Genie Commande"
+            className="h-10 w-10 rounded-md object-cover"
+          />
+          <h1 className="text-lg font-bold tracking-tight text-white">Genie Commande</h1>
+        </div>
       </div>
 
       <nav className="flex-1 space-y-1 px-3 py-4">
@@ -111,7 +117,7 @@ export function Sidebar() {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium text-white">{me?.actor || "adv"}</p>
-            <p className="text-xs text-slate-400">{role.toUpperCase()} · File2EDI V2</p>
+            <p className="text-xs text-slate-400">{role.toUpperCase()} · Genie Commande</p>
           </div>
           <button
             onClick={handleLogout}
