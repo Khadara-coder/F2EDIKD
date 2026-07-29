@@ -303,4 +303,16 @@ export const api = {
       `/admin/roles/${encodeURIComponent(actor)}`,
       { method: "DELETE" },
     ),
+
+  testAiConnection: (payload: { host: string; token: string; modelEndpoint: string }) =>
+    request<{ ok: boolean; message: string }>("/settings/ai-test", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  updateDatabricksToken: (token: string) =>
+    request<{ ok: boolean; message: string }>("/settings/databricks-token", {
+      method: "PUT",
+      body: JSON.stringify({ token }),
+    }),
 };

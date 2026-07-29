@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Database, FileSpreadsheet, Save, Server, Shield, Trash2, UserPlus, Wifi } from "lucide-react";
+import { Brain, CheckCircle2, Database, FileSpreadsheet, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/hooks/useFile2Edi";
 import { appSettingsSchema, type AppSettingsForm } from "@/schemas";
@@ -46,6 +46,7 @@ const TIMEZONE_OPTIONS = (() => {
 const SECTIONS = [
   { id: "profil", label: "Profil EDI" },
   { id: "connecteurs", label: "Connecteurs" },
+  { id: "ia", label: "Intelligence artificielle" },
   { id: "validation", label: "Validation" },
   { id: "notifications", label: "Notifications" },
   { id: "sftp", label: "SFTP" },
@@ -66,6 +67,9 @@ export function ParametresPage() {
   const [sftpPasswordMsg, setSftpPasswordMsg] = useState("");
   const [testingConnector, setTestingConnector] = useState<string | null>(null);
   const [connectorMessages, setConnectorMessages] = useState<Record<string, string>>({});
+  const [databricksToken, setDatabricksToken] = useState("");
+  const [databricksTokenMsg, setDatabricksTokenMsg] = useState("");
+  const [aiTestResult, setAiTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
   const rolesQuery = useQuery({
     queryKey: ["admin", "roles"],
@@ -191,6 +195,24 @@ export function ParametresPage() {
     onSettled: () => {
       setTestingConnector(null);
     },
+  });
+
+  const databricksTokenMutation = useMutation({
+    mutationFn: (token: string) => api.updateDatabricksToken(token),
+    onSuccess: (res) => {
+      setDatabricksToken("");
+      setDatabricksTokenMsg(res.message || "Token Databricks enregistré");
+    },
+    onError: (err) => {
+      setDatabricksTokenMsg(err instanceof Error ? err.message : "Échec mise à jour token");
+    },
+  });
+
+  const aiTestMutation = useMutation({
+    mutationFn: (payload: { host: string; token: string; modelEndpoint: string }) =>
+      api.testAiConnection(payload),
+    onSuccess: (res) => setAiTestResult(res),
+    onError: (err) => setAiTestResult({ ok: false, message: err instanceof Error ? err.message : "Erreur inconnue" }),
   });
 
   const roleItems = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data]);
@@ -411,6 +433,134 @@ export function ParametresPage() {
                       Le token Databricks reste géré hors application via variables d&apos;environnement ou profil CLI.
                     </p>
                   </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
+          {activeSection === "ia" && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Brain className="h-4 w-4" />
+                    Configuration IA — Databricks Model Serving
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <EditableField
+                      label="Host Databricks"
+                      value={form.watch("databricksConfig.host")}
+                      onChange={(v) => form.setValue("databricksConfig.host", v)}
+                    />
+                    <EditableField
+                      label="Endpoint du modèle"
+                      value={form.watch("databricksConfig.modelEndpoint")}
+                      onChange={(v) => form.setValue("databricksConfig.modelEndpoint", v)}
+                    />
+                    <EditableField
+                      label="Catalog Unity"
+                      value={form.watch("databricksConfig.catalog")}
+                      onChange={(v) => form.setValue("databricksConfig.catalog", v)}
+                    />
+                    <EditableField
+                      label="Schema Unity"
+                      value={form.watch("databricksConfig.schema")}
+                      onChange={(v) => form.setValue("databricksConfig.schema", v)}
+                    />
+                    <EditableField
+                      label="Warehouse ID"
+                      value={form.watch("databricksConfig.warehouseId")}
+                      onChange={(v) => form.setValue("databricksConfig.warehouseId", v)}
+                    />
+                  </div>
+
+                  <div className="rounded-lg border p-4 space-y-3">
+                    <div className="flex items-center justify-between gap-3">
+                      <div>
+                        <p className="font-medium text-sm">Token d&apos;accès Databricks</p>
+                        <p className="text-xs text-muted-foreground">
+                          Personal Access Token (PAT). Stocké en mémoire — relancer le container pour persister via variable d&apos;environnement.
+                        </p>
+                      </div>
+                      <Badge variant="secondary">
+                        {databricksTokenMsg && !databricksToken ? "Défini" : "Runtime"}
+                      </Badge>
+                    </div>
+                    <Input
+                      type="password"
+                      placeholder="dapi…"
+                      value={databricksToken}
+                      onChange={(e) => {
+                        setDatabricksToken(e.target.value);
+                        if (databricksTokenMsg) setDatabricksTokenMsg("");
+                      }}
+                    />
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          if (!databricksToken.trim()) {
+                            setDatabricksTokenMsg("Token requis");
+                            return;
+                          }
+                          databricksTokenMutation.mutate(databricksToken);
+                        }}
+                        disabled={databricksTokenMutation.isPending}
+                      >
+                        Appliquer le token
+                      </Button>
+                      {databricksTokenMsg && (
+                        <p className="text-xs text-muted-foreground">{databricksTokenMsg}</p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Test de connexion IA</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Vérifie que l&apos;endpoint de modèle est accessible avec la configuration actuelle.
+                  </p>
+                  <div className="flex items-center gap-3">
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        setAiTestResult(null);
+                        aiTestMutation.mutate({
+                          host: form.getValues("databricksConfig.host"),
+                          token: databricksToken,
+                          modelEndpoint: form.getValues("databricksConfig.modelEndpoint"),
+                        });
+                      }}
+                      disabled={aiTestMutation.isPending}
+                      className="gap-2"
+                    >
+                      <Brain className="h-4 w-4" />
+                      {aiTestMutation.isPending ? "Test en cours…" : "Tester la connexion IA"}
+                    </Button>
+                  </div>
+                  {aiTestResult && (
+                    <div className={cn(
+                      "flex items-start gap-2 rounded-lg border p-3 text-sm",
+                      aiTestResult.ok ? "border-green-200 bg-green-50 text-green-800" : "border-red-200 bg-red-50 text-red-800"
+                    )}>
+                      {aiTestResult.ok
+                        ? <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+                        : <XCircle className="h-4 w-4 mt-0.5 shrink-0" />
+                      }
+                      <span>{aiTestResult.message}</span>
+                    </div>
+                  )}
+                  <p className="text-xs text-muted-foreground">
+                    Pour persister le token entre redémarrages, renseigner <code className="font-mono">DATABRICKS_TOKEN</code> dans le fichier <code className="font-mono">.env</code> du serveur.
+                  </p>
                 </CardContent>
               </Card>
             </div>

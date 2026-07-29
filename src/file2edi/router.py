@@ -562,6 +562,53 @@ def create_router() -> APIRouter:
         except Exception as exc:
             return {"status": "disconnected", "message": str(exc)}
 
+    @router.post("/settings/ai-test")
+    def test_ai_connection(payload: dict = Body(default_factory=dict)):
+        """Test the Databricks LLM connection with current or provided config."""
+        import os as _os
+        import requests as _requests
+
+        host = str((payload or {}).get("host") or _os.environ.get("DATABRICKS_HOST", "")).strip().rstrip("/")
+        token = str((payload or {}).get("token") or _os.environ.get("DATABRICKS_TOKEN", "")).strip()
+        endpoint = str(
+            (payload or {}).get("modelEndpoint")
+            or _os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
+        ).strip()
+
+        if not host:
+            return {"ok": False, "message": "DATABRICKS_HOST non configuré"}
+
+        url = f"{host}/serving-endpoints/{endpoint}/invocations"
+        headers = {"Content-Type": "application/json"}
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        else:
+            try:
+                from databricks.sdk import WorkspaceClient
+                profile = _os.environ.get("DATABRICKS_CONFIG_PROFILE", "").strip()
+                w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+                auth_h = w.config.authenticate()
+                headers.update(auth_h)
+            except Exception as exc:
+                return {"ok": False, "message": f"Authentification impossible: {exc}"}
+
+        body = {
+            "messages": [{"role": "user", "content": "ping"}],
+            "max_tokens": 5,
+        }
+        try:
+            resp = _requests.post(url, headers=headers, json=body, timeout=15)
+            if resp.status_code == 200:
+                return {"ok": True, "message": f"Connexion réussie ({endpoint})"}
+            detail = resp.text[:200] if resp.text else f"HTTP {resp.status_code}"
+            return {"ok": False, "message": f"Erreur {resp.status_code}: {detail}"}
+        except _requests.exceptions.ConnectionError:
+            return {"ok": False, "message": f"Impossible de joindre {host}"}
+        except _requests.exceptions.Timeout:
+            return {"ok": False, "message": "Délai d'attente dépassé (15s)"}
+        except Exception as exc:
+            return {"ok": False, "message": str(exc)}
+
     @router.put("/settings/sftp-password")
     def put_sftp_password(payload: dict, req: Request):
         try:
@@ -578,6 +625,23 @@ def create_router() -> APIRouter:
 
         os.environ["SFTP_PASSWORD"] = password
         return {"ok": True, "message": "Mot de passe SFTP mis à jour"}
+
+    @router.put("/settings/databricks-token")
+    def put_databricks_token(payload: dict, req: Request):
+        try:
+            import server as srv
+            srv._ensure_admin(req)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+
+        token = str((payload or {}).get("token") or "")
+        if not token.strip():
+            raise HTTPException(status_code=400, detail="Token Databricks requis")
+
+        os.environ["DATABRICKS_TOKEN"] = token
+        return {"ok": True, "message": "Token Databricks mis à jour"}
 
     return router
 

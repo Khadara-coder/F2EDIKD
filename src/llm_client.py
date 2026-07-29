@@ -1,11 +1,13 @@
 """Shared LLM client for the EDIFACT Generator.
 
-Uses ``mlflow.deployments.get_deploy_client("databricks")`` — the idiomatic
-pattern inside Databricks Apps / notebooks.  This replaces the direct-HTTP
-``requests.post`` approach that required explicit auth headers.
+Direct REST calls to Databricks Model Serving endpoint — no mlflow dependency.
+Works both on VM (Docker Compose) and inside Databricks Apps.
+
+Auth: DATABRICKS_TOKEN env var → Bearer token
+      Fallback: databricks-sdk WorkspaceClient OAuth (requires SDK + profile)
 
 Handles the gpt-oss-120b *reasoning model* response format:
-  content is a list of blocks;
+  content is a list of blocks:
     {"type": "reasoning", "summary": [...]}  ← internal thinking (skip)
     {"type": "text",      "text": "..."}     ← actual answer (extract this)
 
@@ -19,50 +21,54 @@ import json
 import logging
 import os
 import re
-from typing import Any, Optional
+from typing import Optional
 
 log = logging.getLogger("edifact.llm_client")
 
-# ── Endpoint constants ────────────────────────────────────────────────────────
 FALLBACK_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
 
 
 def _primary_endpoint() -> str:
     return os.environ.get("DATABRICKS_MODEL_ENDPOINT", "databricks-gpt-oss-120b")
 
-# Lazy-init mlflow client (safe if not in Databricks context)
-_client: Any = None
 
-def _get_client() -> Any | None:
-    global _client
-    if _client is not None:
-        return _client
+def _databricks_host() -> str:
+    return os.environ.get("DATABRICKS_HOST", "").rstrip("/")
+
+
+def _invocation_url(endpoint: str) -> str:
+    host = _databricks_host()
+    if not host:
+        return ""
+    return f"{host}/serving-endpoints/{endpoint}/invocations"
+
+
+def _auth_headers() -> dict:
+    token = os.environ.get("DATABRICKS_TOKEN", "").strip()
+    if token:
+        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     try:
-        import mlflow.deployments
-        _client = mlflow.deployments.get_deploy_client("databricks")
-        return _client
+        from databricks.sdk import WorkspaceClient
+        profile = os.environ.get("DATABRICKS_CONFIG_PROFILE", "").strip()
+        w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+        h = w.config.authenticate()
+        h["Content-Type"] = "application/json"
+        return h
     except Exception as exc:
-        log.warning("mlflow.deployments client unavailable: %s", exc)
-        return None
+        log.warning("LLM auth unavailable (set DATABRICKS_TOKEN): %s", exc)
+        return {"Content-Type": "application/json"}
 
 
 # ── Core helpers ──────────────────────────────────────────────────────────────
 
-def _text_from_content(content: Any) -> str:
-    """Extract answer text from a reasoning-model response content block.
-
-    gpt-oss-120b returns a list:
-      [{"type": "reasoning", ...}, {"type": "text", "text": "..."}]
-    Standard models return a plain string.
-    """
+def _text_from_content(content) -> str:
+    """Extract answer text from a reasoning-model response content block."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        # Prefer explicit text block
         for block in content:
             if isinstance(block, dict) and block.get("type") == "text":
                 return block.get("text", "")
-        # Fall back: join reasoning summaries (debugging only)
         parts = []
         for block in content:
             if isinstance(block, dict) and block.get("type") == "reasoning":
@@ -73,21 +79,30 @@ def _text_from_content(content: Any) -> str:
     return str(content)
 
 
-def _predict(endpoint: str, messages: list[dict], max_tokens: int) -> Optional[str]:
-    """Single endpoint prediction, returns text or None."""
-    client = _get_client()
-    if client is None:
+def _predict(endpoint: str, messages: list, max_tokens: int) -> Optional[str]:
+    """Single endpoint prediction via direct REST. Returns text or None."""
+    url = _invocation_url(endpoint)
+    if not url:
+        log.warning("LLM: DATABRICKS_HOST not set — cannot call endpoint %s", endpoint)
         return None
+
+    import requests  # stdlib on Python 3.x — always available
+
+    headers = _auth_headers()
+    if "_auth_error" in headers:
+        log.warning("LLM auth error: %s", headers["_auth_error"])
+        return None
+
+    body = {
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": 1,  # required for reasoning models (gpt-oss-120b)
+    }
     try:
-        resp = client.predict(
-            endpoint=endpoint,
-            inputs={
-                "messages":   messages,
-                "max_tokens": max_tokens,
-                "temperature": 1,   # required for reasoning models (gpt-oss-120b)
-            },
-        )
-        raw = resp["choices"][0]["message"]["content"]
+        resp = requests.post(url, headers=headers, json=body, timeout=120)
+        resp.raise_for_status()
+        data = resp.json()
+        raw = data["choices"][0]["message"]["content"]
         return _text_from_content(raw)
     except Exception as exc:
         log.warning("LLM predict failed (endpoint=%s): %s", endpoint, exc)
@@ -97,18 +112,18 @@ def _predict(endpoint: str, messages: list[dict], max_tokens: int) -> Optional[s
 # ── Public API ────────────────────────────────────────────────────────────────
 
 def llm_call(
-    prompt:     str,
-    system:     str = "",
+    prompt: str,
+    system: str = "",
     max_tokens: int = 1500,
-    endpoint:   str | None = None,
+    endpoint: str | None = None,
 ) -> Optional[str]:
     """Call the LLM endpoint and return raw text.
 
-    Tries ``endpoint`` (default current DATABRICKS_MODEL_ENDPOINT) first, then FALLBACK_ENDPOINT.
-    Returns None if both fail or client unavailable.
+    Tries ``endpoint`` (default DATABRICKS_MODEL_ENDPOINT) first, then FALLBACK_ENDPOINT.
+    Returns None if both fail or DATABRICKS_HOST is not configured.
     """
     primary = endpoint or _primary_endpoint()
-    messages: list[dict] = []
+    messages: list = []
     if system:
         messages.append({"role": "system", "content": system})
     messages.append({"role": "user", "content": prompt})
@@ -125,10 +140,10 @@ def llm_call(
 
 
 def llm_extract_json(
-    prompt:     str,
-    system:     str = "",
+    prompt: str,
+    system: str = "",
     max_tokens: int = 1500,
-    endpoint:   str | None = None,
+    endpoint: str | None = None,
 ) -> Optional[dict | list]:
     """Call LLM and parse the response as JSON.
 
@@ -142,7 +157,6 @@ def llm_extract_json(
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError:
-        # Try to find embedded JSON object/array
         match = re.search(r"(\{.*\}|\[.*\])", cleaned, re.DOTALL)
         if match:
             try:
