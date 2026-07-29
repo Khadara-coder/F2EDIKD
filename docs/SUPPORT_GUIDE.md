@@ -29,15 +29,23 @@
 
 ## Refresh des données maîtres
 
-La production se synchronise depuis `https://github.boschdevcloud.com/RSR1DY/masterdata.git` chaque nuit via un job Databricks :
+La production se synchronise depuis `https://github.boschdevcloud.com/RSR1DY/masterdata.git` chaque nuit via un cron sur la VM :
 
 ```bash
 python scripts/sync_masterdata_repo.py \
     --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
     --branch main \
-    --target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
-    --notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync \
-    --notify-api-key "$APP_API_KEY"
+    --target-dir /root/F2EDIDK/data/masterdata/ \
+    --notify-api-url http://localhost:8080/api/masterdata/sync
+```
+
+Pour un sync manuel immédiat :
+```bash
+docker compose -f /root/F2EDIDK/docker-compose.file2edi.yml exec file2edi \
+  python scripts/sync_masterdata_repo.py \
+    --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
+    --branch main \
+    --target-dir data/masterdata/
 ```
 
 Après sync, vérifier :
@@ -77,10 +85,10 @@ Si le générateur produit des fichiers incorrects :
 4. Corriger le problème, exécuter `python validate_project.py`
 5. Repasser `MOCK_MODE=false` et redémarrer après confirmation du fix
 
-En production Databricks, rollback via :
+En production VM, rollback via :
 ```bash
-git -C /path/GenieCommande checkout <commit-précédent>
-databricks apps restart file2edi
+git -C /root/F2EDIDK checkout <commit-précédent>
+docker compose -f /root/F2EDIDK/docker-compose.file2edi.yml up --build -d
 ```
 
 ---
