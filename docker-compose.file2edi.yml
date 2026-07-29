@@ -16,8 +16,7 @@ services:
       timeout: 5s
       retries: 5
     networks:
-      edifact:
-        ipv4_address: 172.18.0.2
+      - edifact
     restart: unless-stopped
 
   file2edi:
@@ -48,7 +47,9 @@ services:
       DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
       DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
       DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-hive_metastore}
+      EDIFACT_CATALOG: ${DATABRICKS_CATALOG:-hive_metastore}
       DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-file2edi}
+      EDIFACT_SCHEMA: ${DATABRICKS_SCHEMA:-file2edi}
       DATABRICKS_WAREHOUSE_ID: ${DATABRICKS_WAREHOUSE_ID:-}
       DATABRICKS_PERSIST_PATH: ${DATABRICKS_PERSIST_PATH:-}
       SFTP_HOST: ${SFTP_HOST:-}
@@ -71,8 +72,7 @@ services:
       retries: 3
       start_period: 90s
     networks:
-      edifact:
-        ipv4_address: 172.18.0.3
+      - edifact
 
 volumes:
   file2edi_data:
@@ -83,6 +83,3 @@ volumes:
 networks:
   edifact:
     driver: bridge
-    ipam:
-      config:
-        - subnet: 172.18.0.0/16

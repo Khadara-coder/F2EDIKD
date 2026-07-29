@@ -22,7 +22,6 @@ backend/node_modules/
 .env.local
 .env.vm
 .env.*.local
-config.ini
 *.pem
 *.key
 

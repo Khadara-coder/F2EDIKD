@@ -379,10 +379,10 @@ class PostgresDB:
             raise RuntimeError("PostgreSQL not configured")
 
         async with self.SessionLocal() as session:
-            # Set RLS context variables before queries
+            # Set RLS context variables before queries (parameterised to prevent injection)
             if actor:
-                await session.execute(text(f"SET app.current_user = '{actor}';"))
-                await session.execute(text(f"SET app.current_role = '{role}';"))
+                await session.execute(text("SELECT set_config('app.current_user', :v, true)"), {"v": actor})
+                await session.execute(text("SELECT set_config('app.current_role', :v, true)"), {"v": role})
             
             yield session
 
