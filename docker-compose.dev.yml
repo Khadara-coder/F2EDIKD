@@ -1,0 +1,64 @@
+# Dev local — hot-reload Python + Vite frontend (npm run dev)
+# Usage: docker compose -f docker-compose.dev.yml up
+# Prérequis : cp .env.local.example .env.local  (puis renseigner DATABRICKS_TOKEN)
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: geniecommande-postgres-dev
+    environment:
+      POSTGRES_USER: edifact
+      POSTGRES_PASSWORD: edifact_dev_password
+      POSTGRES_DB: edifact
+    ports:
+      - "5432:5432"
+    volumes:
+      - geniecommande_postgres_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edifact -d edifact"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks:
+      - geniecommande_dev
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: geniecommande-api-dev
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env.local
+    environment:
+      MOCK_MODE: "true"
+      ENABLE_PROFILE_LOGIN: "true"
+      APP_REQUIRE_AUTH: "false"
+      PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
+      DB_PATH: /app/data/edifact_standalone.db
+      MASTERDATA_SOURCE_DIR: /app/data/masterdata
+      MASTERDATA_RUNTIME_DIR: /app/data/masterdata
+      MASTER_DATA_DIR: /app/data/masterdata
+      OUTBOX_DIR: /app/data/outbox
+      LOG_DIR: /app/data/logs
+      INTAKE_DIR: /app/data/intake
+    volumes:
+      # Code source monté — uvicorn --reload prend les changements à chaud
+      - .:/app
+      - /app/frontend/node_modules
+      - geniecommande_data_dev:/app/data
+      - ./data/masterdata:/app/data/masterdata:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - geniecommande_dev
+
+volumes:
+  geniecommande_postgres_dev:
+  geniecommande_data_dev:
+
+networks:
+  geniecommande_dev:
+    driver: bridge
