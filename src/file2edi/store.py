@@ -51,6 +51,7 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "chatPath": "/v1/chat/completions",
         "authHeader": "Authorization",
         "authScheme": "Bearer",
+        "customHeaders": "",
     },
     "validation": {
         "autoValidationThreshold": 90,
@@ -186,7 +187,7 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
     raw_custom = payload.get("customAiConfig")
     if isinstance(raw_custom, dict):
         custom_cfg: dict[str, Any] = {}
-        for key in ("baseUrl", "model", "chatPath", "authHeader", "authScheme"):
+        for key in ("baseUrl", "model", "chatPath", "authHeader", "authScheme", "customHeaders"):
             if key in raw_custom:
                 custom_cfg[key] = str(raw_custom.get(key) or "").strip()
         if custom_cfg:

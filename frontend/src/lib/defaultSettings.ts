@@ -47,6 +47,7 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     chatPath: "/v1/chat/completions",
     authHeader: "Authorization",
     authScheme: "Bearer",
+    customHeaders: "",
   },
   validation: {
     autoValidationThreshold: 90,

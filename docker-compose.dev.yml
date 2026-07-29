@@ -1,6 +1,6 @@
-# Dev local — hot-reload Python + Vite frontend (npm run dev)
-# Usage: docker compose -f docker-compose.dev.yml up
-# Prérequis : cp .env.local.example .env.local  (puis renseigner DATABRICKS_TOKEN)
+# Dev local de référence — API FastAPI + PostgreSQL + OCR Tesseract en container
+# Usage : docker compose -f docker-compose.dev.yml up --build
+# Cette stack est celle à utiliser localement pour reproduire les cas OCR/scans.
 
 services:
   postgres:
@@ -35,6 +35,7 @@ services:
       MOCK_MODE: "true"
       ENABLE_PROFILE_LOGIN: "true"
       APP_REQUIRE_AUTH: "false"
+      TESSERACT_LANG: "fra+eng"
       PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
       DB_PATH: /app/data/edifact_standalone.db
       MASTERDATA_SOURCE_DIR: /app/data/masterdata
@@ -43,15 +44,23 @@ services:
       OUTBOX_DIR: /app/data/outbox
       LOG_DIR: /app/data/logs
       INTAKE_DIR: /app/data/intake
+    command: ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     volumes:
       # Code source monté — uvicorn --reload prend les changements à chaud
       - .:/app
       - /app/frontend/node_modules
       - geniecommande_data_dev:/app/data
+      - ./data/file2edi_schema.sql:/app/data/file2edi_schema.sql:ro
       - ./data/masterdata:/app/data/masterdata:ro
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/api/health/system"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 90s
     networks:
       - geniecommande_dev
 

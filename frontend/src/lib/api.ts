@@ -314,6 +314,7 @@ export const api = {
     chatPath?: string;
     authHeader?: string;
     authScheme?: string;
+    customHeaders?: string;
   }) =>
     request<{ ok: boolean; message: string }>("/settings/ai-test", {
       method: "POST",

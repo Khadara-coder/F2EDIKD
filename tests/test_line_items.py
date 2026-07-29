@@ -66,3 +66,20 @@ def test_extract_line_items_from_text_does_not_use_packaging_as_quantity():
     assert rows[0]["article"] == "123456789"
     assert rows[0]["quantity"] == ""
     assert rows[0]["parser"] == "compact_regex"
+
+
+def test_extract_line_items_from_multiline_window_tail_pattern():
+    lines = [
+        "OFFRE 47J066 Chaudiere murale premium",
+        "7716704752 9.000 6 840.00 H51087 U 760.00",
+        "Total HT 6840.00",
+    ]
+
+    rows = extract_line_items_from_lines(lines)
+
+    assert len(rows) == 1
+    assert rows[0]["article"] == "7716704752"
+    assert rows[0]["quantity"] in {"9.000", "9,000"}
+    assert rows[0]["unit_price"] == "760.00"
+    assert rows[0]["amount"] == "6 840.00"
+    assert rows[0]["parser"] == "multiline_window"

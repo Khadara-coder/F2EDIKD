@@ -334,6 +334,7 @@ export interface AppSettings {
     chatPath: string;
     authHeader: string;
     authScheme: string;
+    customHeaders: string;
   };
   validation: {
     autoValidationThreshold: number;

@@ -18,6 +18,7 @@ Endpoint: databricks-claude-sonnet-4
 
 import json
 import logging
+import math
 import re
 from typing import Optional
 from app.engines.llm_gateway import chat_completion
@@ -26,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 MODEL_ENDPOINT = "databricks-claude-sonnet-4"
 FALLBACK_ENDPOINT = "databricks-meta-llama-3-3-70b-instruct"
+AMOUNT_PATTERN = r"(?:(?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}\s?(?:EUR|E|euros?)?|\d+\.\d{2}\s?€?)"
 
 
 # Lines to ignore (shipping/eco-tax surcharges)
@@ -138,6 +140,110 @@ def _normalize_quantity(raw) -> Optional[float]:
         return None
 
 
+def _looks_polluted_description(description: str) -> bool:
+    value = (description or "").strip()
+    if not value:
+        return False
+    if len(value) > 220:
+        return True
+    if len(re.findall(r"(?:ELM|EL)?\d{7,11}", value, flags=re.IGNORECASE)) >= 2:
+        return True
+    if len(re.findall(AMOUNT_PATTERN, value, flags=re.IGNORECASE)) >= 4:
+        return True
+    folded = value.lower()
+    return "page 1 sur" in folded or "a livrer" in folded or "a facturer" in folded
+
+
+def _infer_quantity_from_price_and_total(price: float | None, total: float | None) -> Optional[float]:
+    if not price or not total or price <= 0 or total <= 0:
+        return None
+    ratio = total / price
+    if ratio <= 0 or ratio > 10000:
+        return None
+    rounded_int = round(ratio)
+    if abs(ratio - rounded_int) <= 0.02:
+        return float(rounded_int)
+    rounded_3 = round(ratio, 3)
+    if abs(ratio - rounded_3) <= 0.005:
+        return rounded_3
+    return None
+
+
+def _cohere_line(line: dict) -> dict | None:
+    article_raw = line.get("code_article") or ""
+    article_clean = _clean_article_number(article_raw)
+    if not article_clean:
+        return None
+
+    qty = _normalize_quantity(line.get("quantite"))
+    price = _normalize_price(line.get("prix_unitaire_ht"))
+    total = _normalize_price(line.get("montant_ligne_ht"))
+    description = (line.get("description") or "").strip()
+
+    if qty is not None and qty <= 0:
+        qty = None
+    if price is not None and price <= 0:
+        price = None
+    if total is not None and total <= 0:
+        total = None
+
+    if qty is None:
+        qty = _infer_quantity_from_price_and_total(price, total)
+    if qty and price and not total:
+        total = round(qty * price, 2)
+    elif qty and total and not price:
+        price = round(total / qty, 2) if qty != 0 else None
+
+    if qty and price and total:
+        expected = qty * price
+        if expected > 0 and abs(expected - total) > max(0.5, expected * 0.08):
+            inferred_qty = _infer_quantity_from_price_and_total(price, total)
+            if inferred_qty:
+                qty = inferred_qty
+
+    polluted = _looks_polluted_description(description)
+    strong_signals = sum(1 for value in (qty, price, total) if value is not None)
+    if polluted and strong_signals < 3:
+        return None
+    if qty is None or qty <= 0:
+        return None
+    if price is None and total is None:
+        return None
+
+    return {
+        "code_article": article_clean,
+        "code_article_raw": article_raw.strip(),
+        "description": description,
+        "quantite": qty,
+        "prix_unitaire_ht": price,
+        "montant_ligne_ht": total,
+        "date_livraison": (line.get("date_livraison") or "").strip() or None,
+    }
+
+
+def _finalize_llm_lines(lines: list[dict]) -> list[dict]:
+    coherent = []
+    rejected = 0
+    line_num = 10
+    for line in lines:
+        if not isinstance(line, dict) or _should_ignore_line(line):
+            continue
+        fixed = _cohere_line(line)
+        if fixed is None:
+            rejected += 1
+            continue
+        coherent.append({"numero_ligne": line_num, **fixed})
+        line_num += 10
+
+    if not coherent:
+        return []
+    if len(coherent) == 1 and rejected >= 2:
+        return []
+    if len(coherent) < math.ceil((len(coherent) + rejected) * 0.5):
+        return []
+    return coherent
+
+
 # -------------------------------------------------------------------------
 # MAIN EXTRACTION PROMPT
 # -------------------------------------------------------------------------
@@ -190,43 +296,7 @@ def llm_extract_orderlines(text: str) -> list[dict]:
     if not lines or not isinstance(lines, list):
         return []
 
-    # Post-process lines
-    result = []
-    line_num = 10
-    for line in lines:
-        if not isinstance(line, dict):
-            continue
-        if _should_ignore_line(line):
-            continue
-
-        article_raw = line.get("code_article") or ""
-        article_clean = _clean_article_number(article_raw)
-
-        # Skip if no article number
-        if not article_clean:
-            continue
-
-        qty = _normalize_quantity(line.get("quantite"))
-        price = _normalize_price(line.get("prix_unitaire_ht"))
-        total = _normalize_price(line.get("montant_ligne_ht"))
-
-        # Infer missing values
-        if qty and price and not total:
-            total = round(qty * price, 2)
-        elif qty and total and not price:
-            price = round(total / qty, 2) if qty != 0 else None
-
-        result.append({
-            "numero_ligne": line_num,
-            "code_article": article_clean,
-            "code_article_raw": article_raw.strip(),
-            "description": (line.get("description") or "").strip(),
-            "quantite": qty,
-            "prix_unitaire_ht": price,
-            "montant_ligne_ht": total,
-            "date_livraison": (line.get("date_livraison") or "").strip() or None,
-        })
-        line_num += 10
+    result = _finalize_llm_lines(lines)
 
     logger.info(f"LLM orderlines: {len(result)} lines extracted")
     return result

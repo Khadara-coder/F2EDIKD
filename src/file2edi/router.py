@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,20 @@ from .mapper import (
 from .store import get_store
 
 DEMO_ORDER_ID = "ord-rexel-026545008"
+
+
+def _parse_custom_headers(raw: str) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    for part in re.split(r"[\n,]", raw or ""):
+        chunk = part.strip()
+        if not chunk or ":" not in chunk:
+            continue
+        key, value = chunk.split(":", 1)
+        key = key.strip()
+        value = value.strip()
+        if key and value:
+            headers[key] = value
+    return headers
 
 
 def create_router() -> APIRouter:
@@ -677,11 +692,13 @@ def create_router() -> APIRouter:
                 auth_header = str((payload or {}).get("authHeader") or _os.environ.get("CUSTOM_LLM_AUTH_HEADER", "Authorization")).strip() or "Authorization"
                 auth_scheme = str((payload or {}).get("authScheme") or _os.environ.get("CUSTOM_LLM_AUTH_SCHEME", "Bearer")).strip()
                 token = str((payload or {}).get("token") or _os.environ.get("CUSTOM_LLM_API_KEY", "")).strip()
+                custom_headers_raw = str((payload or {}).get("customHeaders") or _os.environ.get("CUSTOM_LLM_EXTRA_HEADERS", "")).strip()
                 if not base_url:
                     return {"ok": False, "message": "CUSTOM_LLM_BASE_URL non configuré"}
                 headers = {"Content-Type": "application/json"}
                 if token:
                     headers[auth_header] = f"{auth_scheme} {token}".strip()
+                headers.update(_parse_custom_headers(custom_headers_raw))
                 resp = _requests.post(
                     f"{base_url}{chat_path}",
                     headers=headers,
@@ -821,6 +838,7 @@ def _default_settings() -> dict:
             "chatPath": "/v1/chat/completions",
             "authHeader": "Authorization",
             "authScheme": "Bearer",
+            "customHeaders": "",
         },
         "validation": {
             "autoValidationThreshold": 90,
