@@ -27,6 +27,71 @@ def _normalize_article_token(token: str) -> str:
     return token
 
 
+def _extract_customer_reference(text: str) -> str:
+    """Extract customer/order reference from text.
+    
+    Patterns:
+    - ref client/commande/po
+    - votre référence
+    - order ref/number
+    """
+    if not text:
+        return ""
+    text_folded = fold_text(text)
+    
+    # Pattern 1: "ref" followed by value
+    patterns = [
+        r"(?:réf|ref|reference|po)\s+(?:client|commande)?\s*:?\s*([A-Z0-9\-]{3,20})",
+        r"(?:votre\s+)?référence\s*:?\s*([A-Z0-9\-]{3,20})",
+        r"(?:order|commande)\s+(?:ref|number|ref\.)\s*:?\s*([A-Z0-9\-]{3,20})",
+        r"^([A-Z0-9]{3,20})\s*$",  # Standalone code at line start
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text_folded, re.IGNORECASE | re.MULTILINE)
+        if match:
+            ref = match.group(1).strip()
+            if 3 <= len(ref) <= 20 and re.match(r"[A-Z0-9\-]+", ref):
+                return ref
+    return ""
+
+
+def _extract_payment_terms(text: str) -> str:
+    """Extract payment terms from text.
+    
+    Patterns:
+    - NET 30/60/90 days
+    - Payment terms: ...
+    - Conditions paiement
+    - COMPTANT, VIREMENT, CHÈQUE
+    """
+    if not text:
+        return ""
+    text_folded = fold_text(text)
+    
+    # Standard payment terms patterns
+    patterns = [
+        r"(?:conditions\s+)?paiement\s*:?\s*(NET\s+\d+[Jj]?|NET|COMPTANT|VIREMENT|CHÈQUE|CRÉDIT)",
+        r"\b(NET\s+(?:\d+[Jj])?(?:\s+jours)?|COMPTANT|VIREMENT|CHÈQUE|CRÉDIT)\b",
+        r"(?:payment\s+terms?|net|payable)\s*:?\s*(NET\s+\d+|COMPTANT|VIREMENT)",
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, text_folded, re.IGNORECASE)
+        if match:
+            term = match.group(1).strip().upper()
+            if term and len(term) <= 30:
+                return term
+    return ""
+
+
+def _normalize_article_token(token: str) -> str:
+    token = (token or "").strip().upper()
+    token = re.sub(r"\s+", "", token)
+    token = re.sub(r"^(ELM|EL)", "", token)
+    return token
+
+
 def _extract_amount_tokens(text: str) -> list[str]:
     return [compact_text(m.group(0)) for m in re.finditer(_amount_pattern(), text, flags=re.IGNORECASE)]
 
@@ -109,8 +174,8 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
 
     article_re = re.compile(r"\b(?P<art>(?:ELM|EL)?\d{7,11})\b", flags=re.IGNORECASE)
     qty_unit_re = re.compile(
-        r"(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PIECE|PCS|PC|UN|EA)\b"
-        r"|\b(?P<unit2>PCE|PIECE|PCS|PC|UN|EA)\b\s*(?P<qty2>\d{1,4}(?:[,.]\d{1,3})?)",
+        r"(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?P<unit>PCE|PIECE|PCS|PC|UN|EA|QTÉ|QTE|QTY|QNT)\b"
+        r"|\b(?P<unit2>PCE|PIECE|PCS|PC|UN|EA|QTÉ|QTE|QTY|QNT)\b\s*(?P<qty2>\d{1,4}(?:[,.]\d{1,3})?)",
         flags=re.IGNORECASE,
     )
 
@@ -198,6 +263,8 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
                 "unit": unit,
                 "unit_price": unit_price,
                 "amount": amount,
+                "customer_reference": "",
+                "payment_terms": "",
                 "parser": "multiline_window",
             }
         )
@@ -248,6 +315,8 @@ def extract_line_items_from_lines(lines: list[str]) -> list[dict]:
                     "unit": unit,
                     "unit_price": amounts[0] if amounts else "",
                     "amount": amounts[-1] if amounts else "",
+                    "customer_reference": "",
+                    "payment_terms": "",
                     "parser": "table_lines",
                 }
                 if row["article"]:
@@ -272,6 +341,8 @@ def extract_line_items_from_lines(lines: list[str]) -> list[dict]:
                     "quantity": match.group("quantity"),
                     "unit_price": compact_text(match.group("unit_price")),
                     "amount": compact_text(match.group("amount")),
+                    "customer_reference": "",
+                    "payment_terms": "",
                     "parser": "table_line_regex",
                 }
             )
@@ -372,6 +443,8 @@ def extract_line_items_from_article_windows(text: str, materials_by_id: dict[str
                 "unit": unit,
                 "unit_price": unit_price,
                 "amount": amount,
+                "customer_reference": "",
+                "payment_terms": "",
                 "designation_masterdata": materials_by_id.get(article, ""),
                 "status": "candidate" if has_signals else "a_verifier",
                 "parser": "article_window" if has_signals else "article_window_weak",
@@ -432,9 +505,11 @@ def extract_line_items_from_text(text: str, materials_by_id: dict[str, str] | No
                 "designation": compact_text(match.group("designation")),
                 "article": match.group("article"),
                 "delivery_date": match.group("date"),
-                    "quantity": match.group("quantity") or "",
+                "quantity": match.group("quantity") or "",
                 "unit_price": compact_text(match.group("unit_price")),
                 "amount": compact_text(match.group("amount")),
+                "customer_reference": "",
+                "payment_terms": "",
                 "parser": "compact_regex",
             }
         )
@@ -446,6 +521,8 @@ def extract_line_items_from_text(text: str, materials_by_id: dict[str, str] | No
             "quantity": match.group("quantity") or "",
             "unit_price": compact_text(match.group("unit_price")),
             "amount": compact_text(match.group("amount")),
+            "customer_reference": "",
+            "payment_terms": "",
             "parser": "compact_article_first",
         }
         if row not in rows:

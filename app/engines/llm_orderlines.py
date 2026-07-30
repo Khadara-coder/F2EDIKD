@@ -200,6 +200,7 @@ def _cohere_line(line: dict) -> dict | None:
     total = _normalize_price(line.get("montant_ligne_ht"))
     description = (line.get("description") or "").strip()
     customer_reference = (line.get("customer_reference") or "").strip()
+    payment_terms = (line.get("payment_terms") or "").strip()
 
     if qty is not None and qty <= 0:
         qty = None
@@ -244,6 +245,7 @@ def _cohere_line(line: dict) -> dict | None:
         "code_article_raw": article_raw.strip(),
         "description": description,
         "customer_reference": customer_reference or None,
+        "payment_terms": payment_terms or None,
         "quantite": qty,
         "prix_unitaire_ht": price,
         "montant_ligne_ht": total,

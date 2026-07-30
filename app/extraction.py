@@ -115,6 +115,7 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
         description = compact_text(line.get("description") or line.get("designation") or "")
         delivery_date = line.get("date_livraison") or line.get("delivery_date")
         customer_reference = compact_text(line.get("customer_reference") or line.get("ref_client") or "")
+        payment_terms = compact_text(line.get("payment_terms") or "")
 
         if qty is not None and qty <= 0:
             qty = None
@@ -166,6 +167,7 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
                 "prix_unitaire_ht": price,
                 "montant_ligne_ht": total,
                 "customer_reference": customer_reference,
+                "payment_terms": payment_terms,
                 "date_livraison": delivery_date,
             }
         )

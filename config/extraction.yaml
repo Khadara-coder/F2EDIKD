@@ -36,6 +36,24 @@ anchors:
     - ship to
     - delivery address
     - chantier
+  customer_reference_keywords:
+    - ref client
+    - reference client
+    - votre reference
+    - po number
+    - commande client
+    - order ref
+    - order reference
+    - num commande
+  payment_terms_keywords:
+    - conditions paiement
+    - payment terms
+    - net 30
+    - net 60
+    - net 90
+    - comptant
+    - virement
+    - cheque
   delivery_secondary:
     - destinataire
   delivery_exclude:
