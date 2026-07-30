@@ -77,6 +77,10 @@ CREATE TABLE IF NOT EXISTS file2edi_order_lines (
   status              TEXT DEFAULT 'OK',
   comment             TEXT,
   manually_edited     INTEGER DEFAULT 0,
+  payment_terms       TEXT,
+  delivery_date       TEXT,
+  special_instructions TEXT,
+  warnings            TEXT,
   FOREIGN KEY(order_id) REFERENCES file2edi_orders(order_id)
 );
 

@@ -527,14 +527,17 @@ class File2EdiStore:
                     conn.execute(
                         """INSERT INTO file2edi_order_lines
                         (line_id,order_id,line_number,customer_reference,bosch_article,designation,
-                         quantity,unit,unit_price,amount,confidence,status,comment,manually_edited)
-                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                         quantity,unit,unit_price,amount,confidence,status,comment,manually_edited,
+                         payment_terms,delivery_date,special_instructions,warnings)
+                        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         [
                             ln["lineId"], ln["orderId"], ln["lineNumber"], ln.get("customerReference"),
                             ln.get("boschArticle"), ln.get("designation"), ln.get("quantity", 0),
                             ln.get("unit", "PCE"), ln.get("unitPrice", 0), ln.get("amount", 0),
                             ln.get("confidence", 0), ln.get("status", "OK"), ln.get("comment"),
                             1 if ln.get("manuallyEdited") else 0,
+                            ln.get("paymentTerms"), ln.get("deliveryDate"),
+                            ln.get("specialInstructions"), ln.get("warnings"),
                         ],
                     )
                 for a in review.get("anomalies", []):
@@ -675,6 +678,8 @@ class File2EdiStore:
             "designation": "designation", "quantity": "quantity", "unit": "unit",
             "unit_price": "unitPrice", "amount": "amount", "confidence": "confidence",
             "status": "status", "comment": "comment", "manually_edited": "manuallyEdited",
+            "payment_terms": "paymentTerms", "delivery_date": "deliveryDate",
+            "special_instructions": "specialInstructions", "warnings": "warnings",
         }
         a_map = {
             "anomaly_id": "anomalyId", "order_id": "orderId", "line_id": "lineId",
@@ -921,13 +926,16 @@ class File2EdiStore:
         conn.execute(
             """INSERT INTO file2edi_order_lines
             (line_id,order_id,line_number,customer_reference,bosch_article,designation,
-             quantity,unit,unit_price,amount,confidence,status,manually_edited)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)""",
+             quantity,unit,unit_price,amount,confidence,status,manually_edited,
+             payment_terms,delivery_date,special_instructions,warnings)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
             [
                 line_id, order_id, n, payload.get("customerReference", ""),
                 payload.get("boschArticle", ""), payload.get("designation", ""),
                 qty, payload.get("unit", "PCE"), price, qty * price,
                 100, payload.get("status", "Corrigé manuellement"),
+                payload.get("paymentTerms"), payload.get("deliveryDate"),
+                payload.get("specialInstructions"), payload.get("warnings"),
             ],
         )
         conn.commit()
