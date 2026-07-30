@@ -169,6 +169,26 @@ def _infer_quantity_from_price_and_total(price: float | None, total: float | Non
     return None
 
 
+_QTY_IN_DESC_RE = re.compile(
+    r"(?<![\d.,])(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*"
+    r"(?:PIECE|PCE|PCS|PC|UN|EA)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _extract_qty_from_description(description: str) -> Optional[float]:
+    """Extract quantity embedded in description, e.g. '5 PIECE 25,77000 128,85000'."""
+    if not description:
+        return None
+    m = _QTY_IN_DESC_RE.search(description)
+    if m:
+        try:
+            return float(m.group("qty").replace(",", "."))
+        except (ValueError, TypeError):
+            pass
+    return None
+
+
 def _cohere_line(line: dict) -> dict | None:
     article_raw = line.get("code_article") or ""
     article_clean = _clean_article_number(article_raw)
@@ -189,6 +209,8 @@ def _cohere_line(line: dict) -> dict | None:
 
     if qty is None:
         qty = _infer_quantity_from_price_and_total(price, total)
+    if qty is None:
+        qty = _extract_qty_from_description(description)
     if qty and price and not total:
         total = round(qty * price, 2)
     elif qty and total and not price:

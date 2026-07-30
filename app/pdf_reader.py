@@ -87,6 +87,11 @@ def pdf_pages_to_text(
     limit: int | None = None,
 ) -> list[dict]:
     document = fitz.open(stream=payload, filetype="pdf")
+    # Handle encrypted/password-protected PDFs (try empty password first)
+    if document.is_encrypted:
+        authenticated = document.authenticate("") or document.authenticate(b"")
+        if not authenticated:
+            raise ValueError("PDF is password-protected and could not be opened.")
     if document.page_count == 0:
         raise ValueError("The PDF has no pages.")
 

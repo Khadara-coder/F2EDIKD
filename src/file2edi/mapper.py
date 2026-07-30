@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +10,25 @@ from typing import Any
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+_QTY_IN_DESC_RE = re.compile(
+    r"(?<![\d.,])(?P<qty>\d{1,4}(?:[,.]\d{1,3})?)\s*(?:PIECE|PCE|PCS|PC|UN|EA)\b",
+    flags=re.IGNORECASE,
+)
+
+
+def _qty_from_description(description: str) -> float:
+    """Extract quantity embedded in description, e.g. '5 PIECE 25,77000 128,85000'."""
+    if not description:
+        return 0.0
+    m = _QTY_IN_DESC_RE.search(description)
+    if m:
+        try:
+            return float(m.group("qty").replace(",", "."))
+        except (ValueError, TypeError):
+            pass
+    return 0.0
 
 
 def _status_from_engine(result: dict) -> str:
@@ -44,6 +64,11 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
     total = 0.0
     for i, ln in enumerate(line_items, start=1):
         if isinstance(ln, dict):
+            description_raw = str(
+                ln.get("Designation")
+                or ln.get("description")
+                or ""
+            )
             qty = float(
                 ln.get("Quantite")
                 or ln.get("quantite")
@@ -51,6 +76,9 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 or ln.get("qty")
                 or 0
             )
+            # Fallback: extract quantity from description when missing
+            if qty == 0:
+                qty = _qty_from_description(description_raw)
             price = float(
                 ln.get("Prix unitaire")
                 or ln.get("prix_unitaire_ht")
@@ -85,12 +113,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                     or ""
                 ),
                 "boschArticle": art,
-                "designation": str(
-                    ln.get("Designation")
-                    or ln.get("description")
-                    or ln.get("designation")
-                    or ""
-                ),
+                "designation": description_raw,
                 "quantity": qty,
                 "unit": str(ln.get("Unite") or ln.get("unit") or "PCE"),
                 "unitPrice": price,
