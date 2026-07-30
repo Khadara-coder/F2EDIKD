@@ -51,8 +51,8 @@ def _extract_customer_reference(text: str) -> str:
         match = re.search(pattern, text_folded, re.IGNORECASE | re.MULTILINE)
         if match:
             ref = match.group(1).strip()
-            if 3 <= len(ref) <= 20 and re.match(r"[A-Z0-9\-]+", ref):
-                return ref
+            if 3 <= len(ref) <= 20 and re.match(r"[A-Z0-9\-]+", ref, re.IGNORECASE):
+                return ref.upper()
     return ""
 
 
@@ -582,6 +582,8 @@ def extract_line_items_from_material_windows(text: str, materials_by_id: dict[st
                     "unit": unit,
                     "unit_price": price,
                     "amount": "",
+                    "customer_reference": "",
+                    "payment_terms": "",
                     "designation_masterdata": materials_by_id.get(article, ""),
                     "status": "a_verifier" if not quantity or not price else "candidate",
                     "parser": "material_window",
