@@ -350,7 +350,12 @@ export function ParametresPage() {
                         <Button
                           variant="outline"
                           size="sm"
-                          onClick={() => testConnectorMutation.mutate({ connector: c.key })}
+                          onClick={() => testConnectorMutation.mutate({
+                            connector: c.key,
+                            payload: c.key === "apiExtraction"
+                              ? { connectorConfig: { apiBaseUrl: form.getValues("connectorConfig.apiBaseUrl") } }
+                              : undefined,
+                          })}
                           disabled={testConnectorMutation.isPending}
                         >
                           {testingConnector === c.key ? "Test..." : "Tester"}
@@ -409,110 +414,6 @@ export function ParametresPage() {
                       value={form.watch("connectorConfig.sftpProfile")}
                       onChange={(e) => form.setValue("connectorConfig.sftpProfile", e.target.value)}
                     />
-                  </div>
-
-                  <div className="border-t pt-4">
-                    <p className="mb-3 text-sm font-medium">Fournisseur IA</p>
-                    <div className="space-y-2 mb-4">
-                      <Label>Provider LLM</Label>
-                      <Select
-                        value={form.watch("aiProvider")}
-                        onValueChange={(v: "databricks" | "openai" | "ollama" | "custom") => form.setValue("aiProvider", v)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="databricks">Databricks Model Serving</SelectItem>
-                          <SelectItem value="openai">OpenAI-compatible</SelectItem>
-                          <SelectItem value="ollama">Ollama (local)</SelectItem>
-                          <SelectItem value="custom">Custom provider</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-4 sm:grid-cols-2">
-                      {aiProvider === "databricks" && (
-                        <>
-                          <EditableField
-                            label="Host Databricks"
-                            value={form.watch("databricksConfig.host")}
-                            onChange={(v) => form.setValue("databricksConfig.host", v)}
-                          />
-                          <EditableField
-                            label="Serving endpoint modèle"
-                            value={form.watch("databricksConfig.modelEndpoint")}
-                            onChange={(v) => form.setValue("databricksConfig.modelEndpoint", v)}
-                          />
-                          <EditableField
-                            label="Profil Databricks local"
-                            value={form.watch("databricksConfig.configProfile")}
-                            onChange={(v) => form.setValue("databricksConfig.configProfile", v)}
-                          />
-                        </>
-                      )}
-                      {aiProvider === "openai" && (
-                        <>
-                          <EditableField
-                            label="Base URL OpenAI"
-                            value={form.watch("openaiConfig.baseUrl")}
-                            onChange={(v) => form.setValue("openaiConfig.baseUrl", v)}
-                          />
-                          <EditableField
-                            label="Model"
-                            value={form.watch("openaiConfig.model")}
-                            onChange={(v) => form.setValue("openaiConfig.model", v)}
-                          />
-                        </>
-                      )}
-                      {aiProvider === "ollama" && (
-                        <>
-                          <EditableField
-                            label="Base URL Ollama"
-                            value={form.watch("ollamaConfig.baseUrl")}
-                            onChange={(v) => form.setValue("ollamaConfig.baseUrl", v)}
-                          />
-                          <EditableField
-                            label="Model"
-                            value={form.watch("ollamaConfig.model")}
-                            onChange={(v) => form.setValue("ollamaConfig.model", v)}
-                          />
-                        </>
-                      )}
-                      {aiProvider === "custom" && (
-                        <>
-                          <EditableField
-                            label="Base URL custom"
-                            value={form.watch("customAiConfig.baseUrl")}
-                            onChange={(v) => form.setValue("customAiConfig.baseUrl", v)}
-                          />
-                          <EditableField
-                            label="Model"
-                            value={form.watch("customAiConfig.model")}
-                            onChange={(v) => form.setValue("customAiConfig.model", v)}
-                          />
-                          <EditableField
-                            label="Chat path"
-                            value={form.watch("customAiConfig.chatPath")}
-                            onChange={(v) => form.setValue("customAiConfig.chatPath", v)}
-                          />
-                          <EditableField
-                            label="Auth header"
-                            value={form.watch("customAiConfig.authHeader")}
-                            onChange={(v) => form.setValue("customAiConfig.authHeader", v)}
-                          />
-                          <EditableField
-                            label="Auth scheme"
-                            value={form.watch("customAiConfig.authScheme")}
-                            onChange={(v) => form.setValue("customAiConfig.authScheme", v)}
-                          />
-                          <EditableField
-                            label="Headers custom (k:v, séparés par virgule)"
-                            value={form.watch("customAiConfig.customHeaders")}
-                            onChange={(v) => form.setValue("customAiConfig.customHeaders", v)}
-                          />
-                        </>
-                      )}
-                    </div>
                   </div>
                 </CardContent>
               </Card>

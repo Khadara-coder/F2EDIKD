@@ -45,14 +45,8 @@ export function Sidebar() {
     .slice(0, 2)
     .map((p) => p[0]?.toUpperCase() ?? "")
     .join("") || "OP";
-  const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const logoCandidates = [
-    `${import.meta.env.BASE_URL}genie-commande.png`,
-    "/genie-commande.png",
-    `${origin}/genie-commande.png`,
-    `${import.meta.env.BASE_URL}file.png`,
-    "/file.png",
-  ].filter(Boolean);
+  const logoSrc = `${import.meta.env.BASE_URL}genie-commande.png`;
+  const logoFallback = `${import.meta.env.BASE_URL}file.png`;
 
   async function handleLogout() {
     try {
@@ -70,20 +64,14 @@ export function Sidebar() {
       <div className="border-b border-sidebar-border px-6 py-5">
         <div className="flex items-center justify-center">
           <img
-            src={logoCandidates[0]}
+            src={logoSrc}
             alt="Genie Commande"
             className="h-14 w-auto max-w-[180px] object-contain"
-            data-logo-idx="0"
             onError={(e) => {
               const img = e.currentTarget;
-              const current = Number(img.dataset.logoIdx || "0");
-              const next = current + 1;
-              if (next < logoCandidates.length) {
-                img.dataset.logoIdx = String(next);
-                img.src = logoCandidates[next];
-                return;
+              if (!img.src.endsWith("file.png")) {
+                img.src = logoFallback;
               }
-              img.style.display = "none";
             }}
           />
         </div>

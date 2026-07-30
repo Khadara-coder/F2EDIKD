@@ -2,15 +2,34 @@
   "name": "F2EDI VM - Email PDF to API",
   "nodes": [
     {
-      "parameters": {},
-      "id": "manual-trigger-001",
-      "name": "DEV: Manual trigger",
-      "type": "n8n-nodes-base.manualTrigger",
-      "typeVersion": 1,
+      "parameters": {
+        "formTitle": "Convertir un PDF en EDIFACT",
+        "formDescription": "Déposez votre bon de commande PDF pour le convertir via l'API File2EDI locale.",
+        "formFields": {
+          "values": [
+            {
+              "fieldLabel": "Fichier PDF",
+              "fieldType": "file",
+              "requiredField": true,
+              "acceptFileTypes": ".pdf",
+              "multipleFiles": false
+            }
+          ]
+        },
+        "options": {
+          "respondWith": "text",
+          "responseText": "✅ Fichier reçu — conversion en cours. Consultez le statut dans l'interface File2EDI."
+        }
+      },
+      "id": "form-trigger-001",
+      "name": "Formulaire: déposer un PDF",
+      "type": "n8n-nodes-base.formTrigger",
+      "typeVersion": 2.2,
       "position": [
         180,
         260
-      ]
+      ],
+      "webhookId": "form-upload-edifact-dev"
     },
     {
       "parameters": {
@@ -21,7 +40,7 @@
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
-        420,
+        440,
         260
       ]
     },
@@ -60,7 +79,7 @@
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [
-        680,
+        700,
         260
       ]
     },
@@ -265,7 +284,7 @@
     }
   ],
   "connections": {
-    "DEV: Manual trigger": {
+    "Formulaire: déposer un PDF": {
       "main": [
         [
           {

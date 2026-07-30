@@ -82,7 +82,7 @@ def create_router() -> APIRouter:
                 "csv": "connected" if h.get("masterdata", {}).get("ok") else "disconnected",
             }
         except Exception:
-            return {"api": "disconnected", "database": "connected", "csv": "connected"}
+            return {"api": "disconnected", "database": "disconnected", "csv": "disconnected"}
 
     # ── Dashboard ───────────────────────────────────────────────────────────
     @router.get("/dashboard/metrics")
@@ -207,6 +207,63 @@ def create_router() -> APIRouter:
         return engine_to_extraction_preview(
             upload_id, order_id, result, len(payload), page_count=page_count,
         )
+
+    @router.post("/extraction/convert")
+    async def extract_pdf_direct(req: Request, pdf: UploadFile = File(...)):
+        """One-shot local extraction API: upload + extract in a single call."""
+        if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
+            raise HTTPException(400, "PDF requis")
+        payload = await pdf.read()
+        if len(payload) > 20 * 1024 * 1024:
+            raise HTTPException(400, "Fichier trop volumineux (max 20 Mo)")
+
+        store = get_store()
+        upload_id = f"upl-{uuid.uuid4().hex[:12]}"
+        dest = store.intake_dir / f"{upload_id}.pdf"
+        dest.write_bytes(payload)
+
+        import server as srv
+        uploaded_by = srv._resolve_actor(req)
+        meta = store.save_upload_with_id(upload_id, pdf.filename, len(payload), str(dest), uploaded_by=uploaded_by)
+
+        result = srv._local_process_and_respond(payload, pdf.filename, actor=uploaded_by)
+        assigned_actor = srv._resolve_processing_actor(uploaded_by, result)
+        order_id = result.get("pdf_hash") or f"ord-{uuid.uuid4().hex[:12]}"
+
+        page_count = 3
+        try:
+            import pdfplumber
+
+            with pdfplumber.open(dest) as opened:
+                page_count = len(opened.pages)
+        except Exception:
+            pass
+
+        review = engine_to_order_review(order_id, upload_id, result)
+        review["order"]["fileName"] = meta.get("file_name") or pdf.filename
+        review["order"]["pdfPath"] = str(dest)
+        review["order"]["processedBy"] = assigned_actor
+        store.save_order_review(review)
+
+        try:
+            srv._init_db()
+            srv._upsert_conversion(_conversion_from_engine(order_id, upload_id, result, operator=assigned_actor))
+        except Exception:
+            pass
+
+        preview = engine_to_extraction_preview(
+            upload_id,
+            order_id,
+            result,
+            len(payload),
+            page_count=page_count,
+        )
+        return {
+            "uploadId": upload_id,
+            "orderId": order_id,
+            "preview": preview,
+            "result": result,
+        }
 
     # ── Orders / revue ──────────────────────────────────────────────────────
     @router.get("/orders/{order_id}/review")
@@ -493,7 +550,9 @@ def create_router() -> APIRouter:
         try:
             import server as srv
             s = srv.api_settings()
+            h = srv.api_proxy_health()
             persisted = get_store().load_app_settings()
+            csv_rows = int(s.get("masterdata", {}).get("customers", {}).get("rows", 0) or 0)
             return {
                 "ediProfile": s.get("profile", {}).get("name", "ELM_STANDARD"),
                 "standard": "UN/EDIFACT",
@@ -503,9 +562,9 @@ def create_router() -> APIRouter:
                 "documentLanguage": persisted.get("documentLanguage", "Français (FR)"),
                 "timezone": persisted.get("timezone", "(UTC+01:00) Europe/Paris"),
                 "connectors": {
-                    "apiExtraction": "connected" if s.get("api", {}).get("status") == "ok" else "disconnected",
-                    "database": "connected" if s.get("storage_mode", {}).get("persistent") else "connected",
-                    "csvExport": "connected" if s.get("masterdata", {}).get("customers", {}).get("rows", 0) > 0 else "disconnected",
+                    "apiExtraction": "connected" if h.get("api", {}).get("ok") else "disconnected",
+                    "database": "connected" if h.get("database", {}).get("ok") else "disconnected",
+                    "csvExport": "connected" if h.get("masterdata", {}).get("ok") and csv_rows > 0 else "disconnected",
                     "sftp": "connected" if s.get("sftp", {}).get("configured") else "disconnected",
                 },
                 "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
@@ -591,9 +650,60 @@ def create_router() -> APIRouter:
                 ok, msg = srv._test_sftp()
                 return {"status": "connected" if ok else "disconnected", "message": msg}
             if connector == "apiExtraction":
+                configured_base = str(((payload or {}).get("connectorConfig") or {}).get("apiBaseUrl") or "").strip().rstrip("/")
+                if configured_base:
+                    import requests as _requests
+
+                    candidate_paths = ["", "/health", "/api/health", "/api/proxy/health"]
+                    for path in candidate_paths:
+                        url = f"{configured_base}{path}"
+                        try:
+                            resp = _requests.get(url, timeout=5)
+                            if resp.status_code < 500:
+                                return {
+                                    "status": "connected",
+                                    "message": f"API extraction joignable: {url}",
+                                }
+                        except Exception:
+                            continue
+                    return {
+                        "status": "disconnected",
+                        "message": f"API extraction indisponible sur {configured_base}",
+                    }
+
                 h = srv.api_proxy_health()
-                return {"status": "connected" if h.get("api", {}).get("ok") else "disconnected"}
-            return {"status": "connected"}
+                ok = bool(h.get("api", {}).get("ok"))
+                return {
+                    "status": "connected" if ok else "disconnected",
+                    "message": "API extraction locale opérationnelle" if ok else "API extraction indisponible",
+                }
+            if connector == "database":
+                h = srv.api_proxy_health()
+                db = h.get("database", {}) if isinstance(h, dict) else {}
+                ok = bool(db.get("ok"))
+                backend = str(db.get("backend") or "unknown")
+                return {
+                    "status": "connected" if ok else "disconnected",
+                    "message": f"Backend: {backend}",
+                }
+            if connector == "csvExport":
+                stats = srv._masterdata_stats()
+                if not isinstance(stats, dict) or not stats:
+                    return {"status": "disconnected", "message": "Aucune source CSV chargée"}
+                missing_rows = [name for name, st in stats.items() if int((st or {}).get("rows") or 0) <= 0]
+                invalid_schema = [name for name, st in stats.items() if (st or {}).get("schema_valid") is False]
+                if missing_rows:
+                    return {
+                        "status": "disconnected",
+                        "message": f"CSV sans données: {', '.join(missing_rows)}",
+                    }
+                if invalid_schema:
+                    return {
+                        "status": "disconnected",
+                        "message": f"Schéma CSV invalide: {', '.join(invalid_schema)}",
+                    }
+                return {"status": "connected", "message": "Sources CSV chargées et valides"}
+            return {"status": "disconnected", "message": f"Connecteur non supporté: {connector}"}
         except Exception as exc:
             return {"status": "disconnected", "message": str(exc)}
 
