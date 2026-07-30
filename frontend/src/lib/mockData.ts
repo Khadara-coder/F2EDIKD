@@ -23,6 +23,7 @@ export const mockSystemHealth: SystemHealth = {
   api: "disconnected",
   database: "connected",
   csv: "connected",
+  sftp: "disconnected",
 };
 
 export const mockDashboardMetrics: DashboardMetrics = {

@@ -24,12 +24,16 @@ function SystemBadges() {
       ok: data?.api === "connected",
     },
     {
-      label: "BDD OK",
+      label: data?.database === "connected" ? "BDD OK" : "BDD X",
       ok: data?.database === "connected",
     },
     {
-      label: "CSV OK",
+      label: data?.csv === "connected" ? "CSV OK" : "CSV X",
       ok: data?.csv === "connected",
+    },
+    {
+      label: data?.sftp === "connected" ? "SFTP OK" : "SFTP X",
+      ok: data?.sftp === "connected",
     },
   ];
 

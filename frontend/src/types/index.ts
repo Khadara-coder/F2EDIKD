@@ -49,6 +49,7 @@ export interface SystemHealth {
   api: ConnectorStatus;
   database: ConnectorStatus;
   csv: ConnectorStatus;
+  sftp: ConnectorStatus;
 }
 
 export interface DashboardMetrics {
