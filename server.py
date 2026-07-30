@@ -411,13 +411,40 @@ def _extract_api_key(req: Request | None) -> str:
 
 
 def _api_key_authenticated(req: Request | None) -> bool:
+    import hashlib
     provided = _extract_api_key(req)
     if not provided:
         return False
+    # Check env vars (plaintext comparison)
     for expected in _api_key_values():
         if hmac.compare_digest(provided, expected):
             return True
+    # Check database (hash comparison)
+    try:
+        provided_hash = hashlib.sha256(provided.encode()).hexdigest()
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        row = conn.execute(
+            "SELECT id FROM api_keys WHERE key_hash=? AND is_active=1",
+            [provided_hash],
+        ).fetchone()
+        conn.close()
+        if row:
+            # Update last_used_at
+            try:
+                conn2 = sqlite3.connect(DB_PATH, timeout=5)
+                conn2.execute(
+                    "UPDATE api_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?",
+                    [row[0]],
+                )
+                conn2.commit()
+                conn2.close()
+            except Exception:
+                pass
+            return True
+    except Exception:
+        pass
     return False
+
 
 
 def _extract_actor_from_request(req: Request | None) -> str:
@@ -2223,20 +2250,6 @@ async def api_admin_create_key(req: Request):
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                key_hash TEXT NOT NULL UNIQUE,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                last_used_at TEXT,
-                is_active INTEGER DEFAULT 1
-            )
-            """
-        )
-
-        conn.execute(
-            """
             INSERT INTO api_keys (id, name, key_hash, created_by, is_active)
             VALUES (?, ?, ?, ?, 1)
             """,
@@ -2407,6 +2420,20 @@ def _init_db() -> None:
             conn.execute("ALTER TABLE conversions ADD COLUMN callback_url TEXT")
         if "order_key" not in cols:
             conn.execute("ALTER TABLE conversions ADD COLUMN order_key TEXT")
+        # Ensure api_keys table exists
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                key_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_by TEXT,
+                last_used_at TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+            """
+        )
         conn.commit()
         conn.close()
     except Exception as e:
