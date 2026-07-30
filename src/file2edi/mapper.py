@@ -90,8 +90,17 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 ln.get("Montant")
                 or ln.get("montant_ligne_ht")
                 or ln.get("amount")
-                or qty * price
+                or 0
             )
+            # NEW: Calculate qty from amount/price when qty missing but both exist
+            if qty == 0 and amount > 0 and price > 0:
+                calculated_qty = round(amount / price, 2)
+                if 0 < calculated_qty <= 9999:  # Reasonable bounds
+                    qty = calculated_qty
+            # Fallback: estimate amount if still missing
+            if amount == 0 and qty > 0 and price > 0:
+                amount = qty * price
+            
             art = str(
                 ln.get("Article Bosch")
                 or ln.get("code_article")

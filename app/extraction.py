@@ -114,6 +114,7 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
         total = _to_float(line.get("montant_ligne_ht") if "montant_ligne_ht" in line else line.get("amount"))
         description = compact_text(line.get("description") or line.get("designation") or "")
         delivery_date = line.get("date_livraison") or line.get("delivery_date")
+        customer_reference = compact_text(line.get("customer_reference") or line.get("ref_client") or "")
 
         if qty is not None and qty <= 0:
             qty = None
@@ -122,10 +123,17 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
         if total is not None and total <= 0:
             total = None
 
+        # Try multiple fallbacks for quantity
         if qty is None:
             qty = _infer_quantity_from_price_total(price, total)
         if qty is None:
             qty = _extract_qty_from_description(description)
+        # NEW: Calculate qty from total/price when both exist
+        if qty is None and total is not None and price is not None and price > 0:
+            calculated_qty = round(total / price, 2)
+            if 0 < calculated_qty <= 9999:  # Reasonable bounds
+                qty = calculated_qty
+        
         if qty and price and not total:
             total = round(qty * price, 2)
         elif qty and total and not price:
@@ -157,6 +165,7 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
                 "quantite": qty,
                 "prix_unitaire_ht": price,
                 "montant_ligne_ht": total,
+                "customer_reference": customer_reference,
                 "date_livraison": delivery_date,
             }
         )

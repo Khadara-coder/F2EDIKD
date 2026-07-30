@@ -199,6 +199,7 @@ def _cohere_line(line: dict) -> dict | None:
     price = _normalize_price(line.get("prix_unitaire_ht"))
     total = _normalize_price(line.get("montant_ligne_ht"))
     description = (line.get("description") or "").strip()
+    customer_reference = (line.get("customer_reference") or "").strip()
 
     if qty is not None and qty <= 0:
         qty = None
@@ -211,6 +212,12 @@ def _cohere_line(line: dict) -> dict | None:
         qty = _infer_quantity_from_price_and_total(price, total)
     if qty is None:
         qty = _extract_qty_from_description(description)
+    # NEW: Calculate qty from total/price when both exist
+    if qty is None and total is not None and price is not None and price > 0:
+        calculated_qty = round(total / price, 2)
+        if 0 < calculated_qty <= 9999:  # Reasonable bounds
+            qty = calculated_qty
+    
     if qty and price and not total:
         total = round(qty * price, 2)
     elif qty and total and not price:
@@ -236,6 +243,7 @@ def _cohere_line(line: dict) -> dict | None:
         "code_article": article_clean,
         "code_article_raw": article_raw.strip(),
         "description": description,
+        "customer_reference": customer_reference or None,
         "quantite": qty,
         "prix_unitaire_ht": price,
         "montant_ligne_ht": total,
