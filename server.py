@@ -2157,6 +2157,135 @@ def api_admin_delete_role(actor: str, req: Request):
         "effective_role": _resolve_role(target),
     }
 
+
+# ── API Keys Management ────────────────────────────────────────────────────────
+@app.get("/api/admin/api-keys")
+def api_admin_list_keys(req: Request):
+    """List all active API keys (masked)."""
+    admin_actor, _ = _ensure_admin(req)
+    _init_db()
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        rows = conn.execute(
+            """
+            SELECT id, name, created_at, created_by, last_used_at, is_active
+            FROM api_keys
+            WHERE is_active=1
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+        conn.close()
+
+        return {
+            "ok": True,
+            "items": [
+                {
+                    "id": r[0],
+                    "name": r[1],
+                    "created_at": r[2],
+                    "created_by": r[3],
+                    "last_used_at": r[4],
+                    "is_active": bool(r[5]),
+                }
+                for r in rows
+            ],
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erreur: {exc}")
+
+
+@app.post("/api/admin/api-keys")
+async def api_admin_create_key(req: Request):
+    """Generate a new API key."""
+    import secrets
+    import hashlib
+
+    admin_actor, _ = _ensure_admin(req)
+    _init_db()
+
+    body = {}
+    try:
+        body = await req.json()
+    except:
+        pass
+
+    name = (body.get("name") or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="Nom requis")
+
+    # Generate secure API key
+    api_key = secrets.token_urlsafe(32)
+    key_id = f"key_{secrets.token_hex(8)}"
+    key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                key_hash TEXT NOT NULL UNIQUE,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                created_by TEXT,
+                last_used_at TEXT,
+                is_active INTEGER DEFAULT 1
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            INSERT INTO api_keys (id, name, key_hash, created_by, is_active)
+            VALUES (?, ?, ?, ?, 1)
+            """,
+            [key_id, name, key_hash, admin_actor],
+        )
+        conn.commit()
+        conn.close()
+
+        save_audit_event(
+            "__api_keys__", "key_create", admin_actor, {"name": name, "key_id": key_id}, "ok"
+        )
+
+        return {
+            "ok": True,
+            "key_id": key_id,
+            "name": name,
+            "api_key": api_key,
+            "message": "⚠️ Copiez cette clé maintenant, elle ne sera plus affichée!",
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erreur: {exc}")
+
+
+@app.delete("/api/admin/api-keys/{key_id}")
+def api_admin_delete_key(key_id: str, req: Request):
+    """Revoke an API key."""
+    admin_actor, _ = _ensure_admin(req)
+    _init_db()
+
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=5)
+        cur = conn.execute(
+            """
+            UPDATE api_keys
+            SET is_active=0
+            WHERE id=?
+            """,
+            [key_id],
+        )
+        conn.commit()
+        conn.close()
+
+        save_audit_event("__api_keys__", "key_delete", admin_actor, {"key_id": key_id}, "ok")
+
+        return {"ok": True, "key_id": key_id, "removed": cur.rowcount > 0}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Erreur: {exc}")
+
+
 @app.post("/api/settings/sftp-test")
 def api_sftp_test():
     ok, msg = _test_sftp()

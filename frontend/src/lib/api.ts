@@ -304,6 +304,37 @@ export const api = {
       { method: "DELETE" },
     ),
 
+  getApiKeys: () =>
+    request<{
+      ok: boolean;
+      items: Array<{
+        id: string;
+        name: string;
+        created_at: string;
+        created_by: string;
+        last_used_at: string | null;
+        is_active: boolean;
+      }>;
+    }>("/admin/api-keys"),
+
+  createApiKey: (payload: { name: string }) =>
+    request<{
+      ok: boolean;
+      key_id: string;
+      name: string;
+      api_key: string;
+      message: string;
+    }>("/admin/api-keys", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  deleteApiKey: (keyId: string) =>
+    request<{ ok: boolean; key_id: string; removed: boolean }>(
+      `/admin/api-keys/${encodeURIComponent(keyId)}`,
+      { method: "DELETE" },
+    ),
+
   testAiConnection: (payload: {
     provider: "databricks" | "openai" | "ollama" | "custom";
     token?: string;

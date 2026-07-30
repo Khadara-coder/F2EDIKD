@@ -50,6 +50,7 @@ const SECTIONS = [
   { id: "validation", label: "Validation" },
   { id: "notifications", label: "Notifications" },
   { id: "utilisateurs", label: "Utilisateurs" },
+  { id: "api-keys", label: "Clés API" },
   { id: "sftp", label: "SFTP" },
   { id: "securite", label: "Sécurité" },
 ] as const;
@@ -235,7 +236,33 @@ export function ParametresPage() {
     onError: (err) => setAiTestResult({ ok: false, message: err instanceof Error ? err.message : "Erreur inconnue" }),
   });
 
+  const [newKeyName, setNewKeyName] = useState("");
+  const [generatedKey, setGeneratedKey] = useState<{ key_id: string; api_key: string; message: string } | null>(null);
+
+  const apiKeysQuery = useQuery({
+    queryKey: ["admin", "api-keys"],
+    queryFn: () => api.getApiKeys(),
+    retry: 1,
+  });
+
+  const createKeyMutation = useMutation({
+    mutationFn: (name: string) => api.createApiKey({ name }),
+    onSuccess: (res) => {
+      setGeneratedKey(res);
+      setNewKeyName("");
+      queryClient.invalidateQueries({ queryKey: ["admin", "api-keys"] });
+    },
+  });
+
+  const deleteKeyMutation = useMutation({
+    mutationFn: (keyId: string) => api.deleteApiKey(keyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin", "api-keys"] });
+    },
+  });
+
   const roleItems = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data]);
+  const apiKeyItems = useMemo(() => apiKeysQuery.data?.items ?? [], [apiKeysQuery.data]);
   const aiProvider = form.watch("aiProvider");
   const showDatabricksSql = aiProvider === "databricks" && form.watch("databricksConfig.sqlWarehouseEnabled");
 
@@ -1083,6 +1110,137 @@ export function ParametresPage() {
                     <p className="text-sm text-blue-900 dark:text-blue-100">
                       <strong>Astuce:</strong> Les utilisateurs avec source "ENV" sont gérés via app.yaml et ne peuvent pas être supprimés ici.
                       Les utilisateurs "DB" sont gérés par la base de données et peuvent être modifiés.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
+
+          {activeSection === "api-keys" && (
+            <>
+              <Card>
+                <CardHeader className="pb-4">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <h2 className="text-2xl font-bold">Clés API</h2>
+                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                        Générez et gérez les clés API pour accéder à l&apos;API File2EDI de manière programmatique.
+                      </p>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {generatedKey && (
+                    <div className="bg-green-50 dark:bg-green-950 border border-green-200 dark:border-green-800 rounded-lg p-4 space-y-3">
+                      <p className="text-sm font-medium text-green-900 dark:text-green-100">
+                        {generatedKey.message}
+                      </p>
+                      <div className="bg-white dark:bg-gray-900 p-3 rounded font-mono text-sm break-all border border-green-200 dark:border-green-800">
+                        {generatedKey.api_key}
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => {
+                            navigator.clipboard.writeText(generatedKey.api_key);
+                          }}
+                          className="px-3 py-1 bg-green-600 text-white text-sm rounded hover:bg-green-700"
+                        >
+                          📋 Copier
+                        </button>
+                        <button
+                          onClick={() => setGeneratedKey(null)}
+                          className="px-3 py-1 bg-gray-300 dark:bg-gray-600 text-sm rounded hover:bg-gray-400"
+                        >
+                          Masquer
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm">Générer une nouvelle clé</h3>
+                    <div className="flex gap-2">
+                      <input
+                        type="text"
+                        placeholder="Nom de la clé (ex: n8n-production, mobile-app)"
+                        value={newKeyName}
+                        onChange={(e) => setNewKeyName(e.target.value)}
+                        className="flex-1 px-3 py-2 border rounded bg-white dark:bg-gray-900 dark:border-gray-700"
+                      />
+                      <button
+                        onClick={() => createKeyMutation.mutate(newKeyName)}
+                        disabled={!newKeyName.trim() || createKeyMutation.isPending}
+                        className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                      >
+                        {createKeyMutation.isPending ? "⏳ Création..." : "🔑 Créer"}
+                      </button>
+                    </div>
+                    {createKeyMutation.isError && (
+                      <p className="text-xs text-red-600 dark:text-red-400">
+                        Erreur: {(createKeyMutation.error as Error)?.message}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <h3 className="font-semibold text-sm">Clés API actives</h3>
+                    {apiKeysQuery.isLoading ? (
+                      <p className="text-sm text-gray-600">Chargement des clés...</p>
+                    ) : apiKeyItems.length === 0 ? (
+                      <p className="text-sm text-gray-600">Aucune clé API créée</p>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b dark:border-gray-700">
+                              <th className="text-left py-2 px-2">Nom</th>
+                              <th className="text-left py-2 px-2">Créée par</th>
+                              <th className="text-left py-2 px-2">Créée le</th>
+                              <th className="text-left py-2 px-2">Dernière utilisation</th>
+                              <th className="text-left py-2 px-2">Actif</th>
+                              <th className="text-left py-2 px-2">Action</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {apiKeyItems.map((key) => (
+                              <tr key={key.id} className="border-b dark:border-gray-700">
+                                <td className="py-2 px-2">{key.name}</td>
+                                <td className="py-2 px-2">{key.created_by || "—"}</td>
+                                <td className="py-2 px-2">
+                                  {new Date(key.created_at).toLocaleDateString("fr-FR")}
+                                </td>
+                                <td className="py-2 px-2">
+                                  {key.last_used_at
+                                    ? new Date(key.last_used_at).toLocaleDateString("fr-FR")
+                                    : "Jamais"}
+                                </td>
+                                <td className="py-2 px-2">
+                                  <span className="px-2 py-1 bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300 text-xs rounded">
+                                    ✓ Actif
+                                  </span>
+                                </td>
+                                <td className="py-2 px-2">
+                                  <button
+                                    onClick={() => deleteKeyMutation.mutate(key.id)}
+                                    disabled={deleteKeyMutation.isPending}
+                                    className="text-red-600 dark:text-red-400 hover:text-red-700 text-sm"
+                                  >
+                                    🗑️ Révoquer
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="bg-yellow-50 dark:bg-yellow-950 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
+                    <p className="text-sm text-yellow-900 dark:text-yellow-100">
+                      <strong>⚠️ Sécurité:</strong> Les clés API accordent un accès complet à l&apos;API. Conservez-les en sécurité et ne les
+                      partagez pas. Utilisez l&apos;en-tête &quot;X-API-Key&quot; pour l&apos;authentification.
                     </p>
                   </div>
                 </CardContent>
