@@ -139,8 +139,61 @@
 
 ---
 
+## Extraction Quality UAT (Phase 1+2+3)
+
+### EQ-01: Quantité — Variantes keywords
+- **Input**: PDF avec "QTÉ 5" ou "QTY 3" ou "QNT 2" dans les lignes
+- **Expected**: `quantity` extrait correctement (pas NULL, pas 0)
+- **Vérifier**: `scripts/test_random_pdfs.py` → colonne Qty ≥ 80%
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-02: Référence client
+- **Input**: PDF avec "Réf client: ABC123" ou "PO number: XYZ"
+- **Expected**: `customer_reference` = `ABC123` ou `XYZ` dans DB
+- **Requête**: `SELECT customer_reference FROM file2edi_order_lines WHERE customer_reference != ''`
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-03: Conditions de paiement
+- **Input**: PDF avec "Conditions paiement : NET 30J" ou "COMPTANT"
+- **Expected**: `payment_terms` renseigné dans `file2edi_order_lines`
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-04: Date de livraison par ligne
+- **Input**: PDF avec "Date livraison : 15/08/2026" ou "URGENT livraison le 25/07/2026"
+- **Expected**: `delivery_date` = `2026-08-15` ou `2026-07-25` (format ISO)
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-05: Instructions spéciales
+- **Input**: PDF avec "Remarques : fragile, ne pas plier"
+- **Expected**: `special_instructions` non NULL dans DB
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-06: Avertissements (warnings)
+- **Input**: PDF contenant "URGENT" ou "⚠️ ATTENTION"
+- **Expected**: `warnings` = "URGENT" ou "⚠️ | ATTENTION"
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-07: Colonnes Phase 3 présentes en DB
+- **Run**: `PRAGMA table_info(file2edi_order_lines)`
+- **Expected**: colonnes `payment_terms`, `delivery_date`, `special_instructions`, `warnings` présentes
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-08: Migration idempotente
+- **Run**: `python scripts/migrate_add_fields.py` deux fois de suite
+- **Expected**: deuxième exécution → "toutes colonnes déjà présentes", aucune erreur
+- **Result**: [ ] PASS / [ ] FAIL
+
+### EQ-09: Test extraction batch 50 PDFs
+- **Run**: `python scripts/test_random_pdfs.py --source "RAG Purchase Orders" --n 50`
+- **Expected**: ≥ 75% docs traités, Qty ≥ 80%, Date livraison ≥ 80%
+- **Résultats connus (seed=42)**: 39/50 (78%), Qty 100%, Dlv 84% ✓
+- **Result**: [ ] PASS / [ ] FAIL
+
+---
+
 ## Go/No-Go Criteria
 
 All TC-01 through TC-12 must PASS before production cutover.
 TC-13 and TC-14 are required for operational readiness.
 RC-01 through RC-08 must PASS for role-based traceability readiness.
+EQ-01 through EQ-09 required for Phase 1+2+3 extraction quality validation.

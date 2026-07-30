@@ -8,6 +8,39 @@
 4. Confirmations SFTP → `data/sftp_delivery_ledger.csv`
 5. Doublons détectés → `data/duplicate_ledger.csv`
 6. Aucune ligne `CRITICAL` dans `logs/edifact.log`
+7. Qualité d'extraction → `python scripts/analyze_columns_quality.py`
+
+---
+
+## Qualité d'extraction — Cibles
+
+| Colonne DB | Cible prod | Commande de vérification |
+|---|---|---|
+| `bosch_article` | 99%+ | `analyze_columns_quality.py` |
+| `quantity` | 80%+ | `analyze_columns_quality.py` |
+| `unit_price` | 90%+ | `analyze_columns_quality.py` |
+| `amount` | 85%+ | `analyze_columns_quality.py` |
+| `customer_reference` | 5%+ | Phase 1 |
+| `payment_terms` | 10%+ | Phase 1 |
+| `delivery_date` | 84%+ | Phase 2 |
+| `special_instructions` | 5%+ | Phase 2 |
+
+```bash
+# Test qualité sur 50 PDFs aléatoires
+docker compose exec api python scripts/test_random_pdfs.py \
+  --source "RAG Purchase Orders" --n 50 --seed 42
+```
+
+---
+
+## Migration de schéma (Phase 3)
+
+Si les colonnes Phase 1+2 sont absentes après une mise à jour :
+
+```bash
+docker compose exec api python scripts/migrate_add_fields.py
+docker compose exec api python scripts/backfill_new_fields.py
+```
 
 ---
 
@@ -16,7 +49,9 @@
 | Code | Cause | Résolution |
 |---|---|---|
 | `PDF_EMPTY_TEXT` | PDF image sans texte extractible | Traitement manuel requis |
+| `PDF_ENCRYPTED` | PDF protégé par mot de passe non vide | Demander version non protégée |
 | `ORDER_NUMBER_MISSING` | Numéro de commande absent du PDF | Vérifier le format PDF |
+| `QUANTITY_MISSING` | Quantité non extraite | Vérifier les variantes : QTÉ/QTE/QTY/PCE |
 | `UNKNOWN_MATERIAL` | Article absent des masterdata et lookups | Ajouter au lookup fourre-tout ou escalader |
 | `DISCONTINUED_MATERIAL` | MATNR dans la liste discontinued | Informer le client d'utiliser le nouvel article |
 | `ROH_NONCOMMERCIAL` | MATNR de type ROH | Non commandable |

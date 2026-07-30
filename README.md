@@ -169,15 +169,29 @@ GenieCommande/
   docker-compose.file2edi.yml  # Stack Docker principale (dev + staging)
   Dockerfile.file2edi     # Image multi-stage (React + Python)
   app/                    # Moteur d'extraction full-code
+    engines/
+      delivery_date.py        # Extraction date livraison + urgence  [Phase 2]
+      special_instructions.py # Extraction notes / instructions  [Phase 2]
+      llm_orderlines.py       # LLM (Claude Sonnet 4) extraction lignes
+      delivery_address.py     # Résolution adresse livraison
   src/                    # Modules Python (config, SFTP, EDIFACT, matcher…)
+    file2edi/
+      store.py            # Persistance SQLite file2edi_order_lines
+      mapper.py           # Mapping engine → React API contract
   frontend/               # Interface React + TypeScript + Tailwind
     dist/                 # Build React versionné (prêt à servir)
+  config/
+    extraction.yaml       # Anchors OCR, scoring, keywords
   data/
     masterdata/           # CSV non versionnés (voir data/masterdata/README.md)
+    file2edi_schema.sql   # Schéma SQLite file2edi_order_lines
   lookups/                # Tables de correspondance CSV (EAN, fourre-tout…)
-  tests/                  # Suite pytest (203 tests, 27 fichiers)
+  tests/                  # Suite pytest (265 tests, 28 fichiers)
   docs/                   # Documentation opérationnelle
-  scripts/                # Scripts utilitaires (sync masterdata, build…)
+  scripts/                # Scripts utilitaires
+    migrate_add_fields.py # Migration DB Phase 3
+    backfill_new_fields.py # Backfill historique Phase 3
+    test_random_pdfs.py   # Test extraction sur N PDFs aléatoires
   databricks/             # Configuration déploiement Databricks Apps
 ```
 
@@ -189,7 +203,23 @@ GenieCommande/
 python -m pytest tests/ -v
 ```
 
-203 tests couvrant extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures.
+265 tests couvrant extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines.
+
+```bash
+# Test extraction sur 50 PDFs aléatoires (RAG Purchase Orders)
+python scripts/test_random_pdfs.py --source "RAG Purchase Orders" --n 50 --seed 42
+```
+
+| Résultats seed=42 (50 PDFs) | Score |
+|---|---|
+| Documents traités | 39/50 (78%) |
+| Numéro commande | 100% |
+| Date commande | 100% |
+| Total HT | 95% |
+| Code article | 100% |
+| Quantité | 100% |
+| Prix unitaire | 100% |
+| Date livraison | 84% |
 
 ---
 
@@ -215,6 +245,47 @@ Ces valeurs ne doivent **jamais** apparaître dans les fichiers générés, la c
 - `54209794400681`
 
 Le test `test_forbidden_strings.py` l'enforçe automatiquement.
+
+---
+
+## Extraction — Champs extraits par ligne de commande
+
+| Champ | Source | Phase |
+|-------|--------|-------|
+| `bosch_article` | Article number (ELM/direct) | Core |
+| `designation` | Description OCR | Core |
+| `quantity` | QTÉ / PCE / ratio montant/prix | Core + Phase 1 |
+| `unit_price` | Prix HT | Core |
+| `amount` | Montant ligne HT | Core |
+| `customer_reference` | Réf client / PO / commande client | Phase 1 |
+| `payment_terms` | Conditions paiement (NET 30J, COMPTANT…) | Phase 1 |
+| `delivery_date` | Date livraison souhaitée par ligne | Phase 2 |
+| `special_instructions` | Remarques, instructions, FRAGILE… | Phase 2 |
+| `warnings` | ⚠️ URGENT, IMPORTANT, ATTENTION | Phase 2 |
+
+### Schéma DB `file2edi_order_lines`
+
+```sql
+CREATE TABLE file2edi_order_lines (
+  line_id, order_id, line_number,
+  customer_reference,        -- Phase 1
+  bosch_article, designation, quantity, unit, unit_price, amount,
+  confidence, status, comment, manually_edited,
+  payment_terms,             -- Phase 1
+  delivery_date,             -- Phase 2
+  special_instructions,      -- Phase 2
+  warnings                   -- Phase 2
+);
+```
+
+### Migration
+
+```bash
+# Ajouter les colonnes Phase 1+2 (idempotent)
+docker compose exec api python scripts/migrate_add_fields.py
+# Backfill lignes existantes
+docker compose exec api python scripts/backfill_new_fields.py
+```
 
 ---
 

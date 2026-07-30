@@ -1,6 +1,19 @@
 📊 ANALYSE COMPLÈTE DES MOTS-CLÉS MANQUANTS
 ═════════════════════════════════════════════════════════════════════════════════════════
 
+⚡ STATUT D'IMPLÉMENTATION (mis à jour 2026-07-30)
+──────────────────────────────────────────────────
+Phase 1 ✅ DÉPLOYÉE  — Qty variants + customer_reference + payment_terms
+Phase 2 ✅ DÉPLOYÉE  — delivery_date + special_instructions + warnings engines
+Phase 3 ✅ DÉPLOYÉE  — Migration DB + backfill + persistence store.py
+
+Résultats tests batch (50 PDFs RAG, seed=42):
+  • Documents traités   : 39/50 (78%)
+  • Numéro commande     : 100%
+  • Code article        : 100%
+  • Quantité            : 100%  ← Phase 1 ✅
+  • Date livraison      : 84%   ← Phase 2 ✅
+
 🎯 RÉSUMÉ EXÉCUTIF
 ──────────────────
 Après analyse des 533 lignes et 221 commandes en base de données, nous avons identifié
@@ -16,15 +29,15 @@ Fréquence totale (top 24):
 │ Mot-clé          │ Occurrences │ Catégorie                                   │
 ├──────────────────┼──────────────────────────────────────────────────────────┤
 │ PIECE            │     55x     │ ✓ Unit (déjà géré)                          │
-│ QTÉ / QUANTITÉ   │     28x     │ ⚠ À améliorer: regex pour variants          │
+│ QTÉ / QUANTITÉ   │     28x     │ ✅ Variants ajoutés Phase 1 (QTÉ/QTE/QTY)  │
 │ DÉSIGNATION      │     27x     │ ✓ Colonne (déjà géré)                       │
-│ RÉF / RÉFÉRENCE  │    25x      │ ❌ Customer reference (0% - À AJOUTER)      │
+│ RÉF / RÉFÉRENCE  │    25x      │ ✅ customer_reference implémenté Phase 1    │
 │ FOURNISSEUR      │     20x     │ ⚠ Supplier code (parcellement)              │
 │ KIT              │     19x     │ ✓ Product type (aucun impact)               │
-│ LIVR* (livr...)  │     18x     │ ⚠ Delivery hints (À améliorer)              │
-│ NET              │     18x     │ ⚠ Price type (HT/TTC - À ajouter)           │
+│ LIVR* (livr...)  │     18x     │ ✅ delivery_date engine Phase 2             │
+│ NET              │     18x     │ ✅ payment_terms implémenté Phase 1         │
 │ R32 / R290       │     16x     │ ✓ Refrigerant codes (aucun impact)          │
-│ TÉL / TÉLÉPHONE  │     15x     │ ❌ Contact info (0% - À AJOUTER)            │
+│ TÉL / TÉLÉPHONE  │     15x     │ ❌ Contact info (non traité)                │
 │ UNITAIRE         │     14x     │ ⚠ Prix unitaire (peut aider le parsing)     │
 │ GAZ              │     14x     │ ✓ Product property (aucun impact)           │
 │ RUE              │     14x     │ ⚠ Delivery hint (already in anchors)        │
