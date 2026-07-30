@@ -49,6 +49,7 @@ const SECTIONS = [
   { id: "ia", label: "Intelligence artificielle" },
   { id: "validation", label: "Validation" },
   { id: "notifications", label: "Notifications" },
+  { id: "utilisateurs", label: "Utilisateurs" },
   { id: "sftp", label: "SFTP" },
   { id: "securite", label: "Sécurité" },
 ] as const;
@@ -933,6 +934,160 @@ export function ParametresPage() {
                 </p>
               </CardContent>
             </Card>
+          )}
+
+          {activeSection === "utilisateurs" && (
+            <>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <UserPlus className="h-5 w-5" />
+                    Gestion des utilisateurs
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="rounded-lg border bg-muted/30 p-4">
+                    <p className="text-sm text-muted-foreground">
+                      Gérez l&apos;ensemble des utilisateurs de la plateforme File2EDI. Contrôlez les accès, les rôles et les autorisations.
+                    </p>
+                  </div>
+
+                  <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-[1fr_1fr_120px_auto]">
+                    <div className="space-y-1.5">
+                      <Label>Email utilisateur</Label>
+                      <Input
+                        placeholder="prenom.nom@bosch.com"
+                        value={newActor}
+                        onChange={(e) => setNewActor(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Nom complet</Label>
+                      <Input placeholder="Prénom Nom" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Rôle</Label>
+                      <Select value={newRole} onValueChange={(v: "admin" | "adv") => setNewRole(v)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="adv">ADV</SelectItem>
+                          <SelectItem value="admin">Admin</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-end">
+                      <Button
+                        className="gap-2"
+                        onClick={() => {
+                          const actor = newActor.trim();
+                          if (!actor) {
+                            setRoleError("Email utilisateur requis");
+                            return;
+                          }
+                          roleUpsertMutation.mutate({ actor, role: newRole });
+                        }}
+                        disabled={roleUpsertMutation.isPending}
+                      >
+                        <UserPlus className="h-4 w-4" />
+                        Créer
+                      </Button>
+                    </div>
+                  </div>
+
+                  {roleError && <p className="text-sm text-destructive">{roleError}</p>}
+
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant="outline" className="gap-1">
+                      <Shield className="h-3 w-3" />
+                      Admins: {rolesQuery.data?.env_admin_count ?? 0}
+                    </Badge>
+                    <Badge variant="outline" className="gap-1">
+                      Total utilisateurs: {roleItems.length}
+                    </Badge>
+                    <Badge variant="outline" className="gap-1">
+                      Affectations DB: {rolesQuery.data?.db_assignment_count ?? 0}
+                    </Badge>
+                  </div>
+
+                  <div className="overflow-x-auto rounded-lg border">
+                    <table className="w-full text-sm">
+                      <thead className="bg-muted/50">
+                        <tr>
+                          <th className="px-4 py-3 text-left font-medium">Identifiant</th>
+                          <th className="px-4 py-3 text-left font-medium">Nom complet</th>
+                          <th className="px-4 py-3 text-left font-medium">Rôle</th>
+                          <th className="px-4 py-3 text-left font-medium">Source</th>
+                          <th className="px-4 py-3 text-left font-medium">Créé par</th>
+                          <th className="px-4 py-3 text-left font-medium">Maj</th>
+                          <th className="px-4 py-3 text-right font-medium">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rolesQuery.isLoading && (
+                          <tr>
+                            <td className="px-4 py-4 text-center text-muted-foreground" colSpan={7}>
+                              Chargement des utilisateurs...
+                            </td>
+                          </tr>
+                        )}
+                        {!rolesQuery.isLoading && roleItems.length === 0 && (
+                          <tr>
+                            <td className="px-4 py-4 text-center text-muted-foreground" colSpan={7}>
+                              Aucun utilisateur configuré.
+                            </td>
+                          </tr>
+                        )}
+                        {!rolesQuery.isLoading && roleItems.map((item) => (
+                          <tr key={`${item.actor}-${item.source}`} className="border-t hover:bg-muted/30">
+                            <td className="px-4 py-3 font-mono text-xs">{item.actor}</td>
+                            <td className="px-4 py-3 font-medium">{item.display_name || "—"}</td>
+                            <td className="px-4 py-3">
+                              <Badge
+                                variant={item.effective_role === "admin" ? "default" : "secondary"}
+                                className="gap-1"
+                              >
+                                <Shield className="h-3 w-3" />
+                                {item.effective_role.toUpperCase()}
+                              </Badge>
+                            </td>
+                            <td className="px-4 py-3 text-xs">
+                              <Badge variant="outline">{item.source === "env" ? "ENV" : "DB"}</Badge>
+                            </td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground">{item.updated_by || "system"}</td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground">{item.source === "db" ? "Modifiable" : "Lecture seule"}</td>
+                            <td className="px-4 py-3 text-right">
+                              {item.source === "db" ? (
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1 text-destructive hover:text-destructive"
+                                  onClick={() => roleDeleteMutation.mutate(item.actor)}
+                                  disabled={roleDeleteMutation.isPending}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                  Supprimer
+                                </Button>
+                              ) : (
+                                <span className="text-xs text-muted-foreground">app.yaml</span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-950">
+                    <p className="text-sm text-blue-900 dark:text-blue-100">
+                      <strong>Astuce:</strong> Les utilisateurs avec source "ENV" sont gérés via app.yaml et ne peuvent pas être supprimés ici.
+                      Les utilisateurs "DB" sont gérés par la base de données et peuvent être modifiés.
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
           )}
 
           {activeSection === "securite" && (
