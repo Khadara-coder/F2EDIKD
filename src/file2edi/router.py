@@ -198,6 +198,7 @@ def create_router() -> APIRouter:
             review["order"]["fileName"] = upload_meta["file_name"]
         review["order"]["pdfPath"] = str(pdf_path)
         review["order"]["processedBy"] = assigned_actor
+        review["order"]["source"] = "ui"
         store.save_order_review(review)
         try:
             srv._init_db()
@@ -207,8 +208,6 @@ def create_router() -> APIRouter:
         return engine_to_extraction_preview(
             upload_id, order_id, result, len(payload), page_count=page_count,
         )
-
-    @router.post("/extraction/convert")
     async def extract_pdf_direct(req: Request, pdf: UploadFile = File(...)):
         """One-shot local extraction API: upload + extract in a single call."""
         if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
@@ -243,6 +242,7 @@ def create_router() -> APIRouter:
         review["order"]["fileName"] = meta.get("file_name") or pdf.filename
         review["order"]["pdfPath"] = str(dest)
         review["order"]["processedBy"] = assigned_actor
+        review["order"]["source"] = "api"
         store.save_order_review(review)
 
         try:
@@ -1102,6 +1102,7 @@ def _order_list_item(o: dict) -> dict:
         "status": o.get("status", "À revoir"),
         "processedAt": processed_at,
         "processedBy": o.get("processed_by"),
+        "source": o.get("source") or "unknown",
     }
 
 

@@ -349,6 +349,7 @@ class File2EdiStore:
         _ensure_column("file2edi_orders", "status", "status TEXT DEFAULT 'Revue requise'")
         _ensure_column("file2edi_orders", "created_at", "created_at TEXT")
         _ensure_column("file2edi_orders", "updated_at", "updated_at TEXT")
+        _ensure_column("file2edi_orders", "source", "source TEXT DEFAULT 'unknown'")
 
         _ensure_column("file2edi_pdf_uploads", "file_name", "file_name TEXT")
 
@@ -465,9 +466,9 @@ class File2EdiStore:
                     """INSERT INTO file2edi_orders (
                       order_id,upload_id,file_name,client_name,customer_order_number,document_reference,
                       order_date,requested_delivery_date,currency,incoterm,delivery_mode,message_type,vendor,
-                      total_amount,global_confidence,status,review_required,line_count,pdf_hash,pdf_path,
+                      total_amount,global_confidence,status,review_required,line_count,pdf_hash,pdf_path,source,
                       extraction_json,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(order_id) DO UPDATE SET
                       upload_id=excluded.upload_id,
                       file_name=excluded.file_name,
@@ -485,6 +486,7 @@ class File2EdiStore:
                       review_required=excluded.review_required,
                       line_count=excluded.line_count,
                       pdf_path=excluded.pdf_path,
+                      source=excluded.source,
                       extraction_json=excluded.extraction_json,
                       updated_at=excluded.updated_at
                     """,
@@ -499,6 +501,7 @@ class File2EdiStore:
                         o.get("lineCount", 0),
                         (engine or {}).get("pdf_hash"),
                         pdf_path,
+                        str(o.get("source") or "unknown"),
                         json.dumps(engine) if engine else None,
                         o.get("createdAt", _now()), _now(),
                     ],
@@ -697,6 +700,7 @@ class File2EdiStore:
             "status": row["status"],
             "reviewRequired": bool(row["review_required"]),
             "lineCount": row["line_count"],
+            "source": row.get("source") or "unknown",
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
@@ -755,6 +759,7 @@ class File2EdiStore:
             """SELECT o.order_id,
                       COALESCE(u.file_name, o.file_name) AS file_name,
                       o.client_name, o.global_confidence, o.status,
+                      o.source,
                       o.created_at, o.updated_at,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o

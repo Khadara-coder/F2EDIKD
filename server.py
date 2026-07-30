@@ -1490,7 +1490,7 @@ def api_me_debug(req: Request):
 
 
 @app.post("/api/proxy/convert")
-async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback_url: str = Form("")):
+async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback_url: str = Form(""), source: str = Form("n8n")):
     """Run the local F2EDIV2 engine on an uploaded PDF."""
     actor = _resolve_actor(req)
     payload = await file.read()
@@ -1512,6 +1512,26 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
                                    "decision": result.get("rejection", {}).get("decision")})
     except Exception:
         pass
+
+    # Sync vers file2edi_orders pour que le PDF soit visible dans la Revue React
+    try:
+        from src.file2edi.router import engine_to_order_review, _conversion_from_engine
+        from src.file2edi.store import get_store as _get_f2e_store
+        order_id = result.get("pdf_hash") or ""
+        upload_id = f"proxy-{order_id[:12]}"
+        assigned_actor = _resolve_processing_actor(actor, result)
+        review = engine_to_order_review(order_id, upload_id, result)
+        review["order"]["fileName"] = file.filename or "commande.pdf"
+        review["order"]["processedBy"] = assigned_actor
+        review["order"]["source"] = str(source or "n8n").strip().lower() or "n8n"
+        # Attacher le chemin PDF pour que la visionneuse fonctionne
+        pdf_path = result.get("pdf_storage_path") or ""
+        if pdf_path:
+            review["order"]["pdfPath"] = pdf_path
+        _get_f2e_store().save_order_review(review)
+    except Exception as _f2e_exc:
+        log.warning("proxy/convert: file2edi_orders sync failed (non-fatal): %s", _f2e_exc)
+
     return result
 
 

@@ -1,10 +1,10 @@
 {
-  "name": "F2EDI VM - Email PDF to API",
+  "name": "F2EDI - Convertir PDF en EDIFACT",
   "nodes": [
     {
       "parameters": {
         "formTitle": "Convertir un PDF en EDIFACT",
-        "formDescription": "Déposez votre bon de commande PDF pour le convertir via l'API File2EDI locale.",
+        "formDescription": "Déposez votre bon de commande PDF pour le convertir en message EDIFACT.",
         "formFields": {
           "values": [
             {
@@ -47,16 +47,9 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.EDIFACT_API_BASE || 'http://127.0.0.1:8000') + '/api/proxy/convert' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-API-Key",
-              "value": "={{ $env.EDIFACT_API_KEY || 'change-me-in-vm' }}"
-            }
-          ]
-        },
+        "url": "https://adv.bosch-homecomfort.com/api/proxy/convert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "contentType": "multipart-form-data",
         "bodyParameters": {
@@ -67,12 +60,18 @@
               "inputDataFieldName": "document"
             },
             {
-              "name": "callback_url",
-              "value": "={{ $env.EDIFACT_CALLBACK_URL || '' }}"
+              "name": "source",
+              "value": "n8n"
             }
           ]
         },
         "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "file2edi-api-key",
+          "name": "File2EDI API Key"
+        }
       },
       "id": "api-convert-001",
       "name": "API: convert PDF",
@@ -119,17 +118,16 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ ($env.EDIFACT_API_BASE || 'http://127.0.0.1:8000') + '/api/conversions/' + $json.pdf_hash + '/send-sftp' }}",
-        "sendHeaders": true,
-        "headerParameters": {
-          "parameters": [
-            {
-              "name": "X-API-Key",
-              "value": "={{ $env.EDIFACT_API_KEY || 'change-me-in-vm' }}"
-            }
-          ]
-        },
+        "url": "=https://adv.bosch-homecomfort.com/api/conversions/{{ $json.pdf_hash }}/send-sftp",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
         "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "file2edi-api-key",
+          "name": "File2EDI API Key"
+        }
       },
       "id": "api-send-sftp-001",
       "name": "API: send SFTP",

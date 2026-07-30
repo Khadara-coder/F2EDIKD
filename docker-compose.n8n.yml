@@ -1,0 +1,62 @@
+# Stack n8n autonome — simule un déploiement séparé de l'orchestrateur
+# Usage : docker compose -f docker-compose.n8n.yml up -d
+#
+# n8n appelle l'API File2EDI via host.docker.internal:8000,
+# exactement comme en production (deux services séparés).
+# Prérequis : la stack dev principale doit tourner sur le port 8000.
+#   docker compose -f docker-compose.dev.yml up -d
+#
+# Importer les workflows :
+#   Ouvrir http://localhost:5678 → Settings → Import workflow
+#   Fichiers : n8n_vm_email_to_edifact.json, n8n_vm_status_callback_receiver.json
+
+services:
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: geniecommande-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      # ── Réseau interne n8n ──────────────────────────────────────────────
+      N8N_HOST: "localhost"
+      N8N_PORT: "5678"
+      N8N_PROTOCOL: "http"
+      WEBHOOK_URL: "http://localhost:5678"
+
+      # ── Authentification UI n8n ─────────────────────────────────────────
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: "admin"
+      N8N_BASIC_AUTH_PASSWORD: "admin123"
+
+      # ── Variables lues par les workflows File2EDI ───────────────────────
+      # Pointe vers l'API File2EDI (stack dev séparée)
+      EDIFACT_API_BASE: "http://host.docker.internal:8000"
+      # URL de callback que l'API appelle après traitement
+      EDIFACT_CALLBACK_URL: "http://host.docker.internal:5678/webhook/f2edi-status"
+
+      # ── Timezone ────────────────────────────────────────────────────────
+      GENERIC_TIMEZONE: "Europe/Paris"
+      TZ: "Europe/Paris"
+
+      # ── Persistence SQLite (pas besoin de Postgres pour n8n en dev) ─────
+      DB_TYPE: "sqlite"
+
+    volumes:
+      - geniecommande_n8n_data:/home/node/.n8n
+      # Dossier de dépôt PDF — pour tester des triggers fichiers locaux
+      - ./data/intake:/data/intake:ro
+
+    # Permet d'atteindre host.docker.internal sur Linux
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5678/healthz"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  geniecommande_n8n_data:

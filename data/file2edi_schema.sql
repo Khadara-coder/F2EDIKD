@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS file2edi_orders (
   line_count                INTEGER DEFAULT 0,
   pdf_hash                  TEXT,
   pdf_path                  TEXT,
+  source                    TEXT DEFAULT 'unknown',
   edifact_content           TEXT,
   edifact_filename          TEXT,
   extraction_json           TEXT,

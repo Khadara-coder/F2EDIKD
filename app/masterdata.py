@@ -932,7 +932,7 @@ def build_soldto_billing_result(
         validated["Code postal"] = shipto_partner.get("postal", validated.get("Code postal"))
         validated["Ville"] = shipto_partner.get("city", validated.get("Ville"))
     else:
-        validated["SHIPTO"] = ""
+        validated["SHIPTO"] = best_soldto  # SHIPTO = SOLDTO (livraison = facturation)
         validated["Livraison egale facturation SOLDTO"] = "oui"
     return detected, validated
 

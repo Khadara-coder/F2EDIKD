@@ -79,6 +79,7 @@ export interface ReviewQueueItem {
   status: OrderStatus;
   processedAt?: string;
   processedBy?: string;
+  source?: "ui" | "n8n" | "api" | "unknown";
 }
 
 export interface ConversionHistoryItem {

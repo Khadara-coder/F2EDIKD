@@ -20,6 +20,22 @@ import {
 import { confidenceColor, formatDateTime, cn } from "@/lib/utils";
 import type { OrderStatus } from "@/types";
 
+function SourceBadge({ source }: { source?: string }) {
+  const map: Record<string, { label: string; className: string }> = {
+    n8n:     { label: "n8n",    className: "bg-blue-100 text-blue-800 border-blue-200" },
+    ui:      { label: "UI",     className: "bg-green-100 text-green-800 border-green-200" },
+    api:     { label: "API",    className: "bg-orange-100 text-orange-800 border-orange-200" },
+    unknown: { label: "?",      className: "bg-gray-100 text-gray-500 border-gray-200" },
+  };
+  const key = (source || "unknown").toLowerCase();
+  const cfg = map[key] ?? map.unknown;
+  return (
+    <span className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[10px] font-semibold ${cfg.className}`}>
+      {cfg.label}
+    </span>
+  );
+}
+
 type ReviewManagerFilter = "all" | "human" | "system";
 type ReviewStatusFilter = "all" | "toProcess" | "processed" | "partial" | "rejected" | "deliveryFailed";
 type BusinessStatusGroup = Exclude<ReviewStatusFilter, "all">;
@@ -335,12 +351,8 @@ export function RevueListPage() {
                       </button>
                     </TableHead>
                   )}
-                  <TableHead>
-                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("status")}>
-                      Statut
-                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                  </TableHead>
+                  <TableHead>Statut</TableHead>
+                  <TableHead>Source</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -376,6 +388,9 @@ export function RevueListPage() {
                       <Badge variant={GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].variant}>
                         {GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].label}
                       </Badge>
+                    </TableCell>
+                    <TableCell>
+                      <SourceBadge source={row.source} />
                     </TableCell>
                   </TableRow>
                 ))}

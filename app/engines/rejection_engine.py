@@ -81,9 +81,13 @@ def _check_delivery_address(validated: dict) -> list[dict]:
     rejections = []
     confidence = validated.get("Confiance", 0)
     shipto = validated.get("SHIPTO", "")
+    soldto = validated.get("SOLDTO", "")
 
     if not shipto or shipto == "-":
-        # Distinguish between "no address detected" and "address invalid"
+        # SHIPTO vide peut être légitime si SHIPTO = SOLDTO (livraison = facturation)
+        if soldto and validated.get("Livraison egale facturation SOLDTO") == "oui":
+            return []  # adresse valide, SOLDTO utilisé comme SHIPTO
+
         statut = validated.get("Statut", "")
         if "non identifie" in statut.lower() or not statut:
             rejections.append({
