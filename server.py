@@ -1437,8 +1437,15 @@ async def api_proxy_convert_batch(req: Request, files: list[UploadFile] = File(.
 @app.get("/api/health")
 @app.get("/api/health/system")
 def api_health_alias():
-    """Alias for /api/proxy/health — satisfies health checks and legacy frontend calls."""
-    return api_proxy_health()
+    """Health check — retourne le format normalisé attendu par le frontend React.
+    Format: {api, database, csv} avec valeurs 'connected'|'disconnected'.
+    """
+    h = api_proxy_health()
+    return {
+        "api":      "connected" if h.get("api", {}).get("ok") else "disconnected",
+        "database": "connected" if h.get("database", {}).get("ok") else "disconnected",
+        "csv":      "connected" if h.get("masterdata", {}).get("ok") else "disconnected",
+    }
 
 
 @app.get("/api/me")
