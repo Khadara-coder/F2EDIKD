@@ -121,6 +121,10 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                     or ln.get("customer_reference")
                     or ""
                 ),
+                "paymentTerms": str(ln.get("payment_terms") or ""),
+                "deliveryDate": str(ln.get("date_livraison") or ""),
+                "specialInstructions": str(ln.get("special_instructions") or ""),
+                "warnings": str(ln.get("warnings") or ""),
                 "boschArticle": art,
                 "designation": description_raw,
                 "quantity": qty,

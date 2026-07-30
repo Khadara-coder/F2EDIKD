@@ -9,8 +9,10 @@ from app.amounts import extract_document_totals, rank_amounts_by_context
 from app.document import build_cross_validation, build_debug_summary
 from app.engines.customer_order import CustomerOrderNumberEngine
 from app.engines.delivery_address import DeliveryAddressEngine
+from app.engines.delivery_date import extract_delivery_info
 from app.engines.order_lines import OrderLinesEngine
 from app.engines.shipto_matching import ShipToMatchingEngine
+from app.engines.special_instructions import extract_special_instructions, extract_warnings
 from app.engines.tax_identification import TaxIdentificationEngine
 from app.engines.cross_resolver import cross_resolve
 from app.engines.llm_resolver import llm_resolve, llm_validate
@@ -116,6 +118,14 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
         delivery_date = line.get("date_livraison") or line.get("delivery_date")
         customer_reference = compact_text(line.get("customer_reference") or line.get("ref_client") or "")
         payment_terms = compact_text(line.get("payment_terms") or "")
+        
+        # Extract delivery info and special instructions from description context
+        delivery_info = extract_delivery_info(description)
+        if not delivery_date and delivery_info.get("delivery_date"):
+            delivery_date = delivery_info["delivery_date"]
+        
+        special_instructions = extract_special_instructions(description)
+        warnings = extract_warnings(description)
 
         if qty is not None and qty <= 0:
             qty = None
@@ -169,6 +179,8 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
                 "customer_reference": customer_reference,
                 "payment_terms": payment_terms,
                 "date_livraison": delivery_date,
+                "special_instructions": special_instructions,
+                "warnings": warnings,
             }
         )
         next_line_num += 10

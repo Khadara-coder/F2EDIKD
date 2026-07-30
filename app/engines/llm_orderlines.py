@@ -22,6 +22,8 @@ import math
 import re
 from typing import Optional
 from app.engines.llm_gateway import chat_completion
+from app.engines.delivery_date import extract_delivery_info
+from app.engines.special_instructions import extract_special_instructions, extract_warnings
 
 logger = logging.getLogger(__name__)
 
@@ -201,6 +203,12 @@ def _cohere_line(line: dict) -> dict | None:
     description = (line.get("description") or "").strip()
     customer_reference = (line.get("customer_reference") or "").strip()
     payment_terms = (line.get("payment_terms") or "").strip()
+    
+    # Extract delivery info and special instructions from description
+    delivery_info = extract_delivery_info(description)
+    delivery_date_extracted = line.get("date_livraison") or delivery_info.get("delivery_date")
+    special_instructions = extract_special_instructions(description)
+    warnings = extract_warnings(description)
 
     if qty is not None and qty <= 0:
         qty = None
@@ -249,7 +257,9 @@ def _cohere_line(line: dict) -> dict | None:
         "quantite": qty,
         "prix_unitaire_ht": price,
         "montant_ligne_ht": total,
-        "date_livraison": (line.get("date_livraison") or "").strip() or None,
+        "date_livraison": delivery_date_extracted,
+        "special_instructions": special_instructions or None,
+        "warnings": warnings or None,
     }
 
 
