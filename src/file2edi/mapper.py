@@ -303,9 +303,18 @@ def engine_to_extraction_preview(upload_id: str, order_id: str, result: dict, fi
     }
 
 
+def _date_key(value: object) -> str:
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc).date().isoformat()
+    text = str(value or "").strip()
+    return text[:10] if text else ""
+
+
 def dashboard_metrics_from_db(orders: list[dict]) -> dict:
     today = datetime.now(timezone.utc).date().isoformat()
-    today_count = sum(1 for o in orders if (o.get("created_at") or "")[:10] == today)
+    today_count = sum(1 for o in orders if _date_key(o.get("created_at")) == today)
 
     def cnt(status: str) -> int:
         return sum(1 for o in orders if o.get("status") == status)

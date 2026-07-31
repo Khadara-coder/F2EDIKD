@@ -1082,8 +1082,14 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None) -> 
     except Exception:
         pass
     rows = list(rows_by_id.values())
-    rows.sort(key=lambda row: row.get("updated_at") or row.get("created_at") or "", reverse=True)
+    rows.sort(key=_row_sort_timestamp, reverse=True)
     return rows[:200]
+
+
+def _row_sort_timestamp(row: dict) -> datetime:
+    """Sort mixed SQLite/PostgreSQL timestamp values safely."""
+    parsed = _parse_timestamp(row.get("updated_at")) or _parse_timestamp(row.get("created_at"))
+    return parsed or datetime.min.replace(tzinfo=timezone.utc)
 
 
 def _is_timestamp_newer(candidate: str | None, current: str | None) -> bool:
@@ -1096,9 +1102,13 @@ def _is_timestamp_newer(candidate: str | None, current: str | None) -> bool:
     return False
 
 
-def _parse_timestamp(value: str | None) -> datetime | None:
+def _parse_timestamp(value: Any) -> datetime | None:
     if not value:
         return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
     text = str(value).strip()
     if not text:
         return None
