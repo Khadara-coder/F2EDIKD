@@ -142,8 +142,8 @@ def _to_natural_qty_str(value: str) -> str:
     """Convert an extracted quantity string to a natural integer string.
     
     Business rule: quantities are always exact natural integers >= 1.
-    No rounding tolerance: only exact integers are accepted.
-    Returns "" if value is not an exact positive integer.
+    Tiny epsilon allowed for floating point imprecision.
+    Rejects genuine non-integers: 0.5, 1.5, 1.98, 3.072.
     """
     if not value:
         return ""
@@ -156,10 +156,10 @@ def _to_natural_qty_str(value: str) -> str:
     rounded = round(v)
     if rounded < 1:
         return ""
-    # Require exact integer — no rounding tolerance
-    if v == float(rounded):
+    # Allow tiny epsilon for floating point arithmetic
+    if abs(v - rounded) < 1e-6:
         return str(rounded)
-    return ""  # Non-integer — reject
+    return ""  # Genuine non-integer — reject
 
 
 def _extract_table_quantity_and_unit(cells: list[str], article_idx: int, amount_indexes: list[int]) -> tuple[str, str]:

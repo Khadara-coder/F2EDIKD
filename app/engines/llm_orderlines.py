@@ -163,25 +163,26 @@ def _infer_quantity_from_price_and_total(price: float | None, total: float | Non
     if ratio < 1 or ratio > 10000:
         return None
     rounded_int = round(ratio)
-    # Require exact integer — no tolerance
-    if ratio == float(rounded_int):
+    # Allow tiny epsilon for floating point arithmetic (e.g. 445.38/222.69 = 1.9999...)
+    if abs(ratio - rounded_int) < 1e-6:
         return float(rounded_int)
     return None
 
 
 def _to_natural_qty(value: float | None) -> Optional[float]:
     """Enforce business rule: quantities are always exact natural integers >= 1.
-    No rounding tolerance: 1.98, 2.03 are rejected like 0.5 or 0.03.
+    Tiny epsilon (1e-6) allowed for floating point imprecision.
+    Rejects genuine non-integers: 0.5, 1.5, 1.98, 3.072.
     """
     if value is None or value <= 0:
         return None
     rounded = round(value)
     if rounded < 1:
         return None
-    # Require exact integer — no tolerance
-    if value == float(rounded):
+    # Allow tiny epsilon for floating point arithmetic
+    if abs(value - rounded) < 1e-6:
         return float(rounded)
-    return None  # Non-integer — reject (0.5, 1.98, 3.072 …)
+    return None  # Genuine non-integer — reject
 
 
 _QTY_IN_DESC_RE = re.compile(
