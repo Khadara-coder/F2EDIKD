@@ -72,30 +72,31 @@ def _infer_quantity_from_price_total(price: float | None, total: float | None) -
     if not price or not total or price <= 0 or total <= 0:
         return None
     ratio = total / price
-    if ratio < 0.5 or ratio > 10000:
+    if ratio < 1 or ratio > 10000:
         return None
     rounded_int = round(ratio)
-    if abs(ratio - rounded_int) <= 0.02:
+    # Require exact integer result — no tolerance
+    if ratio == float(rounded_int):
         return float(rounded_int)
-    # Quantities are natural integers — do NOT return decimals
+    # Quantities are natural integers — reject any decimal ratio
     return None
 
 
 def _to_natural_qty(value: float | None) -> float | None:
-    """Enforce business rule: quantities are always natural integers >= 1.
+    """Enforce business rule: quantities are always exact natural integers >= 1.
     
-    Returns the integer if value rounds cleanly to one (tolerance 2%).
-    Returns None for any decimal/fractional value that can't be rounded safely.
+    No rounding tolerance: 1.98, 2.03 are rejected just like 0.5 or 0.03.
+    Only exactly representable integers (1.0, 2.0, 5.0 …) are accepted.
     """
     if value is None or value <= 0:
         return None
     rounded = round(value)
     if rounded < 1:
         return None
-    # Accept only if within 2% of the nearest integer
-    if abs(value - rounded) / rounded <= 0.02:
+    # Require exact integer — no tolerance at all
+    if value == float(rounded):
         return float(rounded)
-    # Non-integer quantity — reject (likely extraction artifact)
+    # Reject anything non-integer (0.5, 1.98, 3.072 …)
     return None
 
 

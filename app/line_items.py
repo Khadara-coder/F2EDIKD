@@ -141,8 +141,9 @@ def _is_unit_token(value: str) -> bool:
 def _to_natural_qty_str(value: str) -> str:
     """Convert an extracted quantity string to a natural integer string.
     
-    Business rule: quantities are always natural integers >= 1.
-    Returns "" if value cannot be safely rounded to a natural integer.
+    Business rule: quantities are always exact natural integers >= 1.
+    No rounding tolerance: only exact integers are accepted.
+    Returns "" if value is not an exact positive integer.
     """
     if not value:
         return ""
@@ -155,10 +156,10 @@ def _to_natural_qty_str(value: str) -> str:
     rounded = round(v)
     if rounded < 1:
         return ""
-    # Accept only if within 2% of nearest integer
-    if abs(v - rounded) / rounded <= 0.02:
+    # Require exact integer — no rounding tolerance
+    if v == float(rounded):
         return str(rounded)
-    return ""  # Non-integer — likely extraction artifact
+    return ""  # Non-integer — reject
 
 
 def _extract_table_quantity_and_unit(cells: list[str], article_idx: int, amount_indexes: list[int]) -> tuple[str, str]:

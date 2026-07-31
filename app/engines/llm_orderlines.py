@@ -160,25 +160,28 @@ def _infer_quantity_from_price_and_total(price: float | None, total: float | Non
     if not price or not total or price <= 0 or total <= 0:
         return None
     ratio = total / price
-    if ratio <= 0 or ratio > 10000:
+    if ratio < 1 or ratio > 10000:
         return None
     rounded_int = round(ratio)
-    if abs(ratio - rounded_int) <= 0.02:
+    # Require exact integer — no tolerance
+    if ratio == float(rounded_int):
         return float(rounded_int)
-    # Quantities are natural integers — do NOT return decimals
     return None
 
 
 def _to_natural_qty(value: float | None) -> Optional[float]:
-    """Enforce business rule: quantities are always natural integers >= 1."""
+    """Enforce business rule: quantities are always exact natural integers >= 1.
+    No rounding tolerance: 1.98, 2.03 are rejected like 0.5 or 0.03.
+    """
     if value is None or value <= 0:
         return None
     rounded = round(value)
     if rounded < 1:
         return None
-    if abs(value - rounded) / rounded <= 0.02:
+    # Require exact integer — no tolerance
+    if value == float(rounded):
         return float(rounded)
-    return None  # Non-integer — likely extraction artifact
+    return None  # Non-integer — reject (0.5, 1.98, 3.072 …)
 
 
 _QTY_IN_DESC_RE = re.compile(
