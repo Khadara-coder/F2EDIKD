@@ -1160,6 +1160,9 @@ class PostgresFile2EdiStore(File2EdiStore):
           edifact_filename          TEXT,
           extraction_json           TEXT,
           corrections_json          TEXT,
+          processed_by              TEXT,
+          soldto                    TEXT,
+          uploaded_by               TEXT DEFAULT 'operator',
           created_at                TEXT NOT NULL,
           updated_at                TEXT NOT NULL
         );
@@ -1241,11 +1244,28 @@ class PostgresFile2EdiStore(File2EdiStore):
             # have these tables but miss newer File2EDI UI columns. Keep startup
             # self-healing so migration order does not matter.
             for statement in (
+                "ALTER TABLE file2edi_pdf_uploads ALTER COLUMN upload_id TYPE TEXT",
+                "ALTER TABLE file2edi_orders ALTER COLUMN order_id TYPE TEXT",
+                "ALTER TABLE file2edi_orders ALTER COLUMN upload_id TYPE TEXT",
+                "ALTER TABLE file2edi_order_partners ALTER COLUMN partner_id TYPE TEXT",
+                "ALTER TABLE file2edi_order_partners ALTER COLUMN order_id TYPE TEXT",
+                "ALTER TABLE file2edi_order_lines ALTER COLUMN line_id TYPE TEXT",
+                "ALTER TABLE file2edi_order_lines ALTER COLUMN order_id TYPE TEXT",
+                "ALTER TABLE file2edi_order_anomalies ALTER COLUMN anomaly_id TYPE TEXT",
+                "ALTER TABLE file2edi_order_anomalies ALTER COLUMN order_id TYPE TEXT",
+                "ALTER TABLE file2edi_conversion_history ALTER COLUMN conversion_id TYPE TEXT",
+                "ALTER TABLE file2edi_conversion_history ALTER COLUMN order_id TYPE TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'unknown'",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS edifact_content TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS edifact_filename TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS extraction_json TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS corrections_json TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS processed_by TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS soldto TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS uploaded_by TEXT DEFAULT 'operator'",
+                "ALTER TABLE file2edi_orders ALTER COLUMN uploaded_by SET DEFAULT 'operator'",
+                "UPDATE file2edi_orders SET uploaded_by='operator' WHERE uploaded_by IS NULL",
+                "ALTER TABLE file2edi_orders ALTER COLUMN uploaded_by SET NOT NULL",
                 "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS payment_terms TEXT",
                 "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS delivery_date TEXT",
                 "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS special_instructions TEXT",
