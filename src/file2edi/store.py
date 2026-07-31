@@ -507,19 +507,7 @@ class File2EdiStore:
                     ],
                 )
                 conn.execute("DELETE FROM file2edi_order_partners WHERE order_id=?", [o["orderId"]])
-                # Only delete lines that were NOT manually edited — preserve human corrections
-                has_manual = conn.execute(
-                    "SELECT COUNT(*) FROM file2edi_order_lines WHERE order_id=? AND manually_edited=1",
-                    [o["orderId"]]
-                ).fetchone()[0]
-                if has_manual:
-                    # Keep manually edited lines — only replace auto-extracted ones
-                    conn.execute(
-                        "DELETE FROM file2edi_order_lines WHERE order_id=? AND manually_edited=0",
-                        [o["orderId"]]
-                    )
-                else:
-                    conn.execute("DELETE FROM file2edi_order_lines WHERE order_id=?", [o["orderId"]])
+                conn.execute("DELETE FROM file2edi_order_lines WHERE order_id=?", [o["orderId"]])
                 conn.execute("DELETE FROM file2edi_order_anomalies WHERE order_id=?", [o["orderId"]])
                 for p in review.get("partners", []):
                     conn.execute(

@@ -1563,6 +1563,32 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
         pdf_path = result.get("pdf_storage_path") or ""
         if pdf_path:
             review["order"]["pdfPath"] = pdf_path
+
+        # Détecter si ce PDF a déjà été soumis et injecter une anomalie informative
+        try:
+            _store = _get_f2e_store()
+            existing = _store.load_order_review(order_id)
+            if existing:
+                prev_status = existing.get("order", {}).get("status") or "inconnu"
+                prev_created = existing.get("order", {}).get("createdAt") or ""
+                prev_lines = len(existing.get("lines") or [])
+                prev_total = existing.get("order", {}).get("totalAmount") or 0
+                review["anomalies"].append({
+                    "anomalyId": f"resubmit-{order_id[:12]}",
+                    "orderId": order_id,
+                    "severity": "info",
+                    "fieldName": "resubmission",
+                    "message": (
+                        f"Ce PDF a déjà été soumis (première soumission: {prev_created[:10] if prev_created else '—'}). "
+                        f"État précédent: {prev_status} — {prev_lines} ligne(s) — {prev_total:,.2f} €. "
+                        f"La commande est entièrement recalculée avec les patterns d'extraction actuels."
+                    ),
+                    "status": "Info",
+                    "createdAt": datetime.now(timezone.utc).isoformat(),
+                })
+        except Exception as _resub_exc:
+            log.debug("resubmission check: %s", _resub_exc)
+
         _get_f2e_store().save_order_review(review)
     except Exception as _f2e_exc:
         log.warning("proxy/convert: file2edi_orders sync failed (non-fatal): %s", _f2e_exc)
