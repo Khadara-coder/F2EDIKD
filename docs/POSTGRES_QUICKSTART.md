@@ -14,7 +14,8 @@ python migrate_to_postgres.py \
   --src data/file2edi.db \
   --dst "postgresql://edifact:edifact_dev_password@localhost:5432/edifact"
 
-# 4. Set environment
+# 4. Set environment.
+# When PG_DATABASE_URL is set, src.file2edi.store.get_store() uses PostgreSQL.
 export PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact"
 
 # 5. Start server
@@ -46,6 +47,8 @@ See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md#cloud-deployment-azure) for Az
 **App still uses SQLite?**
 - Check: `echo $PG_DATABASE_URL`
 - Must be set before `python server.py`
+- In non-strict mode, the app falls back to SQLite if `psycopg` is not installed
+- To fail fast instead of falling back, set `FILE2EDI_POSTGRES_STRICT=true`
 
 **RLS not restricting?**
 - Check postgres logs: `docker-compose -f docker-compose-pg.yml logs postgres`

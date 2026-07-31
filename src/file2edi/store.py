@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[2] / "data" / "file2edi_schema.sql"
 _APP_SETTINGS_KEY = "app_settings_v1"
@@ -1052,6 +1053,263 @@ class File2EdiStore:
         return self._execute_write(_write)
 
 
+class _PostgresCursor:
+    """Tiny DB-API compatibility wrapper around psycopg cursors.
+
+    The SQLite store uses ``?`` placeholders everywhere.  Translating them here
+    lets the Postgres store reuse the battle-tested File2EdiStore methods while
+    keeping the backend selection isolated.
+    """
+
+    def __init__(self, cursor) -> None:
+        self._cursor = cursor
+
+    def fetchone(self):
+        return self._cursor.fetchone()
+
+    def fetchall(self):
+        return self._cursor.fetchall()
+
+
+class _PostgresConnection:
+    def __init__(self, conn) -> None:
+        self._conn = conn
+
+    def execute(self, sql: str, params: list | tuple | None = None) -> _PostgresCursor:
+        stripped = sql.strip().upper()
+        if stripped.startswith("PRAGMA"):
+            return _PostgresCursor(self._conn.cursor())
+        translated = sql.replace("?", "%s")
+        return _PostgresCursor(self._conn.execute(translated, params or []))
+
+    def commit(self) -> None:
+        self._conn.commit()
+
+    def rollback(self) -> None:
+        self._conn.rollback()
+
+    def close(self) -> None:
+        self._conn.close()
+
+
+class PostgresFile2EdiStore(File2EdiStore):
+    """PostgreSQL-backed implementation of the File2EDI store contract."""
+
+    def __init__(self, database_url: str, intake_dir: str) -> None:
+        self.database_url = _normalize_postgres_url(database_url)
+        self.db_path = self.database_url
+        requested_intake = Path(intake_dir)
+        try:
+            requested_intake.mkdir(parents=True, exist_ok=True)
+            self.intake_dir = requested_intake
+        except (PermissionError, OSError):
+            app_root = Path(__file__).resolve().parents[2]
+            local_intake = app_root / "data" / "intake"
+            local_intake.mkdir(parents=True, exist_ok=True)
+            self.intake_dir = local_intake
+        self._init_schema()
+
+    def _conn(self) -> _PostgresConnection:
+        try:
+            import psycopg
+            from psycopg.rows import dict_row
+        except ImportError as exc:
+            raise RuntimeError(
+                "PostgreSQL support requires psycopg. Install requirements-postgres.txt."
+            ) from exc
+        return _PostgresConnection(psycopg.connect(self.database_url, row_factory=dict_row))
+
+    def _execute_write(self, fn):
+        return fn()
+
+    def _init_schema(self) -> None:
+        ddl = """
+        CREATE TABLE IF NOT EXISTS file2edi_pdf_uploads (
+          upload_id     TEXT PRIMARY KEY,
+          file_name     TEXT NOT NULL,
+          file_size     INTEGER NOT NULL,
+          file_path     TEXT NOT NULL,
+          uploaded_at   TEXT NOT NULL,
+          uploaded_by   TEXT DEFAULT 'operator',
+          status        TEXT DEFAULT 'RECEIVED'
+        );
+
+        CREATE TABLE IF NOT EXISTS file2edi_orders (
+          order_id                  TEXT PRIMARY KEY,
+          upload_id                 TEXT,
+          file_name                 TEXT,
+          client_name               TEXT,
+          customer_order_number     TEXT,
+          document_reference        TEXT,
+          order_date                TEXT,
+          requested_delivery_date   TEXT,
+          currency                  TEXT DEFAULT 'EUR',
+          incoterm                  TEXT DEFAULT 'DAP',
+          delivery_mode             TEXT,
+          message_type              TEXT DEFAULT 'ORDERS',
+          vendor                    TEXT,
+          total_amount              DOUBLE PRECISION DEFAULT 0,
+          global_confidence         DOUBLE PRECISION DEFAULT 0,
+          status                    TEXT DEFAULT 'Revue requise',
+          review_required           INTEGER DEFAULT 1,
+          line_count                INTEGER DEFAULT 0,
+          pdf_hash                  TEXT,
+          pdf_path                  TEXT,
+          source                    TEXT DEFAULT 'unknown',
+          edifact_content           TEXT,
+          edifact_filename          TEXT,
+          extraction_json           TEXT,
+          corrections_json          TEXT,
+          created_at                TEXT NOT NULL,
+          updated_at                TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_f2e_orders_status ON file2edi_orders(status);
+        CREATE INDEX IF NOT EXISTS idx_f2e_orders_upload ON file2edi_orders(upload_id);
+
+        CREATE TABLE IF NOT EXISTS file2edi_order_partners (
+          partner_id         TEXT PRIMARY KEY,
+          order_id           TEXT NOT NULL REFERENCES file2edi_orders(order_id) ON DELETE CASCADE,
+          partner_function   TEXT NOT NULL,
+          partner_code       TEXT,
+          partner_name       TEXT,
+          address_line_1     TEXT,
+          address_line_2     TEXT,
+          postal_code        TEXT,
+          city               TEXT,
+          country            TEXT DEFAULT 'FR',
+          confidence         DOUBLE PRECISION DEFAULT 0,
+          manually_edited    INTEGER DEFAULT 0,
+          edited_fields_json TEXT,
+          previous_value     TEXT
+        );
+
+        CREATE TABLE IF NOT EXISTS file2edi_order_lines (
+          line_id              TEXT PRIMARY KEY,
+          order_id             TEXT NOT NULL REFERENCES file2edi_orders(order_id) ON DELETE CASCADE,
+          line_number          INTEGER NOT NULL,
+          customer_reference   TEXT,
+          bosch_article        TEXT,
+          designation          TEXT,
+          quantity             DOUBLE PRECISION DEFAULT 0,
+          unit                 TEXT DEFAULT 'PCE',
+          unit_price           DOUBLE PRECISION DEFAULT 0,
+          amount               DOUBLE PRECISION DEFAULT 0,
+          confidence           DOUBLE PRECISION DEFAULT 0,
+          status               TEXT DEFAULT 'OK',
+          comment              TEXT,
+          manually_edited      INTEGER DEFAULT 0,
+          payment_terms        TEXT,
+          delivery_date        TEXT,
+          special_instructions TEXT,
+          warnings             TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_f2e_lines_order ON file2edi_order_lines(order_id);
+
+        CREATE TABLE IF NOT EXISTS file2edi_order_anomalies (
+          anomaly_id TEXT PRIMARY KEY,
+          order_id   TEXT NOT NULL REFERENCES file2edi_orders(order_id) ON DELETE CASCADE,
+          line_id    TEXT,
+          severity   TEXT DEFAULT 'warning',
+          field_name TEXT,
+          message    TEXT NOT NULL,
+          status     TEXT DEFAULT 'Ouverte',
+          created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS file2edi_conversion_history (
+          conversion_id TEXT PRIMARY KEY,
+          order_id      TEXT NOT NULL REFERENCES file2edi_orders(order_id) ON DELETE CASCADE,
+          file_name     TEXT,
+          status        TEXT,
+          confidence    DOUBLE PRECISION,
+          edifact_path  TEXT,
+          processed_at  TEXT NOT NULL,
+          processed_by  TEXT DEFAULT 'system'
+        );
+
+        CREATE TABLE IF NOT EXISTS file2edi_settings (
+          setting_key   TEXT PRIMARY KEY,
+          setting_value TEXT NOT NULL,
+          updated_at    TEXT NOT NULL
+        );
+        """
+        conn = self._conn()
+        try:
+            for statement in [s.strip() for s in ddl.split(";") if s.strip()]:
+                conn.execute(statement)
+            # Databases created by the earlier SQLAlchemy migration may already
+            # have these tables but miss newer File2EDI UI columns. Keep startup
+            # self-healing so migration order does not matter.
+            for statement in (
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS source TEXT DEFAULT 'unknown'",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS edifact_content TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS edifact_filename TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS extraction_json TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS corrections_json TEXT",
+                "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS payment_terms TEXT",
+                "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS delivery_date TEXT",
+                "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS special_instructions TEXT",
+                "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS warnings TEXT",
+                "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS edited_fields_json TEXT",
+                "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS previous_value TEXT",
+            ):
+                conn.execute(statement)
+            conn.commit()
+        finally:
+            conn.close()
+
+    def _recalc_order_total(self, conn: _PostgresConnection, order_id: str) -> None:
+        total = conn.execute(
+            "SELECT COALESCE(SUM(amount),0) AS total_amount, COUNT(*) AS line_count "
+            "FROM file2edi_order_lines WHERE order_id=?",
+            [order_id],
+        ).fetchone()
+        conn.execute(
+            "UPDATE file2edi_orders SET total_amount=?, line_count=?, updated_at=? WHERE order_id=?",
+            [total["total_amount"], total["line_count"], _now(), order_id],
+        )
+        conn.commit()
+
+    def mark_edifact_generated(self, order_id: str, filename: str, content: str, actor: str = "operator") -> None:
+        conn = self._conn()
+        try:
+            conn.execute(
+                "UPDATE file2edi_orders SET status='Généré', edifact_filename=?, "
+                "edifact_content=?, review_required=0, updated_at=? WHERE order_id=?",
+                [filename, content, _now(), order_id],
+            )
+            conn.execute(
+                """INSERT INTO file2edi_conversion_history
+                (conversion_id,order_id,file_name,status,confidence,edifact_path,processed_at,processed_by)
+                SELECT order_id, order_id, file_name, 'Généré', global_confidence, ?, ?, ?
+                FROM file2edi_orders WHERE order_id=?
+                ON CONFLICT(conversion_id) DO UPDATE SET
+                  file_name=excluded.file_name,
+                  status=excluded.status,
+                  confidence=excluded.confidence,
+                  edifact_path=excluded.edifact_path,
+                  processed_at=excluded.processed_at,
+                  processed_by=excluded.processed_by""",
+                [filename, _now(), actor or "operator", order_id],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        self._sync_order_graph(self.load_order_review(order_id))
+
+
+def _normalize_postgres_url(database_url: str) -> str:
+    """Accept SQLAlchemy-style PostgreSQL URLs as psycopg connection URLs."""
+    if database_url.startswith("postgresql+psycopg://"):
+        return "postgresql://" + database_url.split("://", 1)[1]
+    if database_url.startswith("postgresql+asyncpg://"):
+        return "postgresql://" + database_url.split("://", 1)[1]
+    parsed = urlsplit(database_url)
+    if parsed.scheme == "postgres":
+        return urlunsplit(("postgresql", parsed.netloc, parsed.path, parsed.query, parsed.fragment))
+    return database_url
+
+
 _store: File2EdiStore | None = None
 
 
@@ -1061,12 +1319,23 @@ def get_store() -> File2EdiStore:
         import os
         from pathlib import Path
         app_root = Path(__file__).resolve().parents[2]
+        pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
+        intake = os.environ.get("INTAKE_DIR", str(app_root / "data" / "intake"))
+        if pg_url:
+            try:
+                _store = PostgresFile2EdiStore(pg_url, intake)
+                _log.info("File2EDI store backend: PostgreSQL")
+                return _store
+            except Exception as exc:
+                if os.environ.get("FILE2EDI_POSTGRES_STRICT", "false").strip().lower() in {"1", "true", "yes", "on"}:
+                    raise
+                _log.warning("PostgreSQL store unavailable, falling back to SQLite: %s", exc)
         db = os.environ.get(
             "FILE2EDI_DB_PATH",
             os.environ.get("DB_PATH", str(app_root / "data" / "file2edi.db")),
         )
         if db.endswith("edifact_standalone.db"):
             db = str(app_root / "data" / "file2edi.db")
-        intake = os.environ.get("INTAKE_DIR", str(app_root / "data" / "intake"))
         _store = File2EdiStore(db, intake)
+        _log.info("File2EDI store backend: SQLite at %s", db)
     return _store

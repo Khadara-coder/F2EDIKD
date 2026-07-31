@@ -1,11 +1,12 @@
+# syntax=docker/dockerfile:1
+
 FROM python:3.12-slim
 
 WORKDIR /app
 
 # Install dependencies first (cache layer)
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir uvicorn[standard] fastapi pydantic python-multipart
+COPY requirements.txt requirements-postgres.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt
 
 # Copy project source
 COPY . .

@@ -145,37 +145,21 @@ curl -H "X-Forwarded-User: adv.pierre@bosch.com" -H "X-Forwarded-Role: adv" \
 
 ---
 
-## ⏳ What's Next (Phase 4 - Integration)
+## ✅ Phase 4 - App Integration
 
-To actually **use** PostgreSQL in your app (instead of SQLite fallback), you need:
+The active File2EDI store now auto-detects PostgreSQL:
 
-1. **Update `server.py`:**
-   ```python
-   # Auto-detect PostgreSQL
-   from src.database_pg import get_db, PostgresDB
-   
-   @app.on_event("startup")
-   async def startup():
-       db = get_db()
-       if os.getenv("PG_DATABASE_URL"):
-           await db.init_db()
-           log.info("PostgreSQL ready with RLS policies")
-   ```
+```bash
+export PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact"
+python server.py
+```
 
-2. **Update `src/file2edi/router.py`:**
-   ```python
-   # Pass actor context to store for RLS
-   actor = srv._resolve_actor(req)
-   role = srv._resolve_role(actor)
-   
-   async with db.get_session(actor=actor, role=role) as session:
-       orders = await db.get_orders(session, status_filter=status)
-   ```
+When `PG_DATABASE_URL` is set, `src.file2edi.store.get_store()` uses PostgreSQL with the same synchronous interface already consumed by `src/file2edi/router.py`. If PostgreSQL support is unavailable, the app falls back to SQLite by default; set `FILE2EDI_POSTGRES_STRICT=true` to fail fast instead.
 
-3. **Create dual-mode store adapter:**
-   - Detect if `PG_DATABASE_URL` set
-   - Use PostgreSQL if available, else SQLite
-   - Same interface to router (zero breaking changes)
+Current integration scope:
+- File2EDI uploads, orders, partners, lines, anomalies, conversion history, EDIFACT exports, and app settings are stored in PostgreSQL.
+- SQLite remains the no-config local fallback.
+- The legacy `server.py` platform/conversions persistence still has its existing Delta / JSONL / SQLite adapter and can be migrated separately if you want a full single-database cutover.
 
 ---
 

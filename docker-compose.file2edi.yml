@@ -3,13 +3,13 @@ name: geniecommande
 services:
   postgres:
     image: postgres:15-alpine
-    container_name: edifact-postgres
+    container_name: geniecommande-postgres
     environment:
       POSTGRES_USER: edifact
       POSTGRES_PASSWORD: edifact_dev_password
       POSTGRES_DB: edifact
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - edifact_postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,14 +26,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.file2edi
-    container_name: file2edi
+    container_name: geniecommande-file2edi
     ports:
       - "${FILE2EDI_PORT:-8080}:8000"
     environment:
       MOCK_MODE: "true"
-      ENABLE_PROFILE_LOGIN: "true"
-      APP_REQUIRE_AUTH: "true"
-      APP_ADMIN_USERS: "dik1dy@bosch.com,dik1dy,khadara"
+      ENABLE_PROFILE_LOGIN: "${ENABLE_PROFILE_LOGIN:-true}"
+      APP_REQUIRE_AUTH: "${APP_REQUIRE_AUTH:-true}"
+      APP_ADMIN_USERS: "${APP_ADMIN_USERS:-dik1dy@bosch.com,dik1dy,khadara}"
       EDIFACT_PROFILE: "ELM_STANDARD"
       UNB_SENDER_GLN: "4399901876613"
       UNB_RECEIVER_GLN: "3015981600108"

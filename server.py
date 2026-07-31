@@ -1375,14 +1375,25 @@ def api_proxy_health():
     md_rows_ok   = all(v.get("rows", 0) > 0 for v in local_md.values()) if local_md else False
     md_schema_ok = all(v.get("schema_valid", True) is not False
                        for v in local_md.values()) if local_md else True
+    pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
+    db_backend = "postgres" if pg_url else "sqlite"
     db_ok = True
-    try:
-        import sqlite3 as _sq2
-        _c = _sq2.connect(DB_PATH, timeout=1)
-        _c.execute("SELECT 1").fetchone()
-        _c.close()
-    except Exception:
-        db_ok = False
+    if pg_url:
+        try:
+            import psycopg
+            from src.file2edi.store import _normalize_postgres_url
+            with psycopg.connect(_normalize_postgres_url(pg_url), connect_timeout=2) as _c:
+                _c.execute("SELECT 1").fetchone()
+        except Exception:
+            db_ok = False
+    else:
+        try:
+            import sqlite3 as _sq2
+            _c = _sq2.connect(DB_PATH, timeout=1)
+            _c.execute("SELECT 1").fetchone()
+            _c.close()
+        except Exception:
+            db_ok = False
     storage = get_storage_mode()
     return {
         # ── Top-level contract (required by frontend) ───────────────────────
@@ -1391,7 +1402,7 @@ def api_proxy_health():
         # ── Structured sections ─────────────────────────────────────────────
         "api":      {"ok": True, "status": "ok", "version": "2.1.0"},
         "database": {"ok": db_ok, "status": "ok" if db_ok else "ERROR",
-                     "backend": storage.get("backend", "sqlite")},
+                     "backend": db_backend if pg_url else storage.get("backend", "sqlite")},
         "masterdata": {
             "ok": md_rows_ok,
             "schema_ok": md_schema_ok,

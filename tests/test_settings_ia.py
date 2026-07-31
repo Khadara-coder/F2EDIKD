@@ -174,3 +174,16 @@ class TestDatabricksToken:
     def test_whitespace_only_rejected(self, client):
         resp = client.put("/api/settings/databricks-token", json={"token": "   "})
         assert resp.status_code == 400
+
+
+def test_postgres_url_normalization_accepts_sqlalchemy_driver():
+    from src.file2edi.store import _normalize_postgres_url
+
+    assert (
+        _normalize_postgres_url("postgresql+psycopg://edifact:secret@postgres:5432/edifact")
+        == "postgresql://edifact:secret@postgres:5432/edifact"
+    )
+    assert (
+        _normalize_postgres_url("postgres://edifact:secret@postgres:5432/edifact")
+        == "postgresql://edifact:secret@postgres:5432/edifact"
+    )

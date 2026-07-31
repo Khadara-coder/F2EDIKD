@@ -1,43 +1,76 @@
-version: "3.9"
+name: geniecommande
 
 services:
-  api:
+  postgres:
+    image: postgres:15-alpine
+    container_name: geniecommande-postgres
+    environment:
+      POSTGRES_USER: edifact
+      POSTGRES_PASSWORD: edifact_dev_password
+      POSTGRES_DB: edifact
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U edifact -d edifact"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  file2edi:
     build:
       context: .
-      dockerfile: Dockerfile.py
+      dockerfile: Dockerfile.file2edi
+    container_name: geniecommande-file2edi
     ports:
-      - "${APP_PORT:-8088}:8088"
-    volumes:
-      - edifact_data:/data
-      - ${MASTER_DATA_DIR:-./masterdata}:/masterdata:ro
-    env_file:
-      - .env
+      - "${FILE2EDI_PORT:-8080}:8000"
     environment:
-      - APP_HOST=0.0.0.0
-      - APP_PORT=8088
-    restart: unless-stopped
+      MOCK_MODE: "${MOCK_MODE:-true}"
+      ENABLE_PROFILE_LOGIN: "${ENABLE_PROFILE_LOGIN:-true}"
+      APP_REQUIRE_AUTH: "${APP_REQUIRE_AUTH:-true}"
+      APP_ADMIN_USERS: "${APP_ADMIN_USERS:-dik1dy@bosch.com,dik1dy,khadara}"
+      EDIFACT_PROFILE: "ELM_STANDARD"
+      UNB_SENDER_GLN: "4399901876613"
+      UNB_RECEIVER_GLN: "3015981600108"
+      PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
+      DB_PATH: /app/data/edifact_standalone.db
+      INTAKE_DIR: /app/data/intake
+      OUTBOX_DIR: /app/data/outbox
+      LOG_DIR: /app/data/logs
+      MASTERDATA_SOURCE_DIR: /app/data/masterdata
+      MASTERDATA_RUNTIME_DIR: /app/data/masterdata
+      MASTER_DATA_DIR: /app/data/masterdata
+      DATABRICKS_SERVER_HOSTNAME: "${DATABRICKS_SERVER_HOSTNAME:-}"
+      DATABRICKS_HTTP_PATH: "${DATABRICKS_HTTP_PATH:-}"
+      DATABRICKS_TOKEN: "${DATABRICKS_TOKEN:-}"
+      DATABRICKS_CATALOG: "${DATABRICKS_CATALOG:-hive_metastore}"
+      EDIFACT_CATALOG: "${DATABRICKS_CATALOG:-hive_metastore}"
+      DATABRICKS_SCHEMA: "${DATABRICKS_SCHEMA:-file2edi}"
+      EDIFACT_SCHEMA: "${DATABRICKS_SCHEMA:-file2edi}"
+      DATABRICKS_WAREHOUSE_ID: "${DATABRICKS_WAREHOUSE_ID:-}"
+      DATABRICKS_PERSIST_PATH: "${DATABRICKS_PERSIST_PATH:-}"
+      SFTP_HOST: "${SFTP_HOST:-}"
+      SFTP_USERNAME: "${SFTP_USERNAME:-}"
+      SFTP_PASSWORD: "${SFTP_PASSWORD:-}"
+      SFTP_REMOTE_DIR: "${SFTP_REMOTE_DIR:-}"
+    volumes:
+      - file2edi_data:/app/data
+      - ./data/masterdata:/app/data/masterdata:ro
+      - ./lookups:/app/lookups:ro
+      - ./config.ini:/app/config.ini:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8088/health')"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:8000/api/health/system"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.py
-    command: python run_worker.py
-    volumes:
-      - edifact_data:/data
-      - ${MASTER_DATA_DIR:-./masterdata}:/masterdata:ro
-    env_file:
-      - .env
-    depends_on:
-      api:
-        condition: service_healthy
+      start_period: 90s
     restart: unless-stopped
 
 volumes:
-  edifact_data:
-    driver: local
+  file2edi_data:
+  postgres_data:
