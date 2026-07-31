@@ -1568,18 +1568,20 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
         try:
             _store = _get_f2e_store()
             existing = _store.load_order_review(order_id)
+            log.info("resubmission check: order_id=%s existing=%s", order_id[:16], "FOUND" if existing else "NONE")
             if existing:
                 prev_status = existing.get("order", {}).get("status") or "inconnu"
-                prev_created = existing.get("order", {}).get("createdAt") or ""
+                prev_created = (existing.get("order", {}).get("createdAt") or "")[:10]
                 prev_lines = len(existing.get("lines") or [])
                 prev_total = existing.get("order", {}).get("totalAmount") or 0
+                log.info("resubmission: prev_status=%s prev_lines=%d prev_total=%s", prev_status, prev_lines, prev_total)
                 review["anomalies"].append({
                     "anomalyId": f"resubmit-{order_id[:12]}",
                     "orderId": order_id,
                     "severity": "info",
                     "fieldName": "resubmission",
                     "message": (
-                        f"Ce PDF a déjà été soumis (première soumission: {prev_created[:10] if prev_created else '—'}). "
+                        f"Ce PDF a déjà été soumis (première soumission: {prev_created or '—'}). "
                         f"État précédent: {prev_status} — {prev_lines} ligne(s) — {prev_total:,.2f} €. "
                         f"La commande est entièrement recalculée avec les patterns d'extraction actuels."
                     ),
@@ -1587,7 +1589,7 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
                     "createdAt": datetime.now(timezone.utc).isoformat(),
                 })
         except Exception as _resub_exc:
-            log.debug("resubmission check: %s", _resub_exc)
+            log.warning("resubmission check FAILED: %s", _resub_exc, exc_info=True)
 
         _get_f2e_store().save_order_review(review)
     except Exception as _f2e_exc:

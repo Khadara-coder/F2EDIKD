@@ -21,6 +21,33 @@ from .store import get_store
 DEMO_ORDER_ID = "ord-rexel-026545008"
 
 
+def _inject_resubmission_anomaly(store, order_id: str, review: dict) -> None:
+    """Inject an informative anomaly if this PDF has already been submitted."""
+    try:
+        existing = store.load_order_review(order_id)
+        if not existing:
+            return
+        prev_status = existing.get("order", {}).get("status") or "inconnu"
+        prev_created = (existing.get("order", {}).get("createdAt") or "")[:10]
+        prev_lines = len(existing.get("lines") or [])
+        prev_total = existing.get("order", {}).get("totalAmount") or 0
+        review["anomalies"].append({
+            "anomalyId": f"resubmit-{order_id[:12]}",
+            "orderId": order_id,
+            "severity": "info",
+            "fieldName": "resubmission",
+            "message": (
+                f"Ce PDF a déjà été soumis (première soumission: {prev_created or '—'}). "
+                f"État précédent: {prev_status} — {prev_lines} ligne(s) — {prev_total:,.2f} €. "
+                f"La commande est entièrement recalculée avec les patterns d'extraction actuels."
+            ),
+            "status": "Info",
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        })
+    except Exception:
+        pass  # non-bloquant
+
+
 def _parse_custom_headers(raw: str) -> dict[str, str]:
     headers: dict[str, str] = {}
     for part in re.split(r"[\n,]", raw or ""):
@@ -199,6 +226,8 @@ def create_router() -> APIRouter:
         review["order"]["pdfPath"] = str(pdf_path)
         review["order"]["processedBy"] = assigned_actor
         review["order"]["source"] = "ui"
+        # Détecter re-soumission
+        _inject_resubmission_anomaly(store, order_id, review)
         store.save_order_review(review)
         try:
             srv._init_db()
@@ -243,6 +272,8 @@ def create_router() -> APIRouter:
         review["order"]["pdfPath"] = str(dest)
         review["order"]["processedBy"] = assigned_actor
         review["order"]["source"] = "api"
+        # Détecter re-soumission
+        _inject_resubmission_anomaly(store, order_id, review)
         store.save_order_review(review)
 
         try:
