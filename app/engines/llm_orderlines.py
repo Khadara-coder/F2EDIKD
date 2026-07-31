@@ -165,10 +165,20 @@ def _infer_quantity_from_price_and_total(price: float | None, total: float | Non
     rounded_int = round(ratio)
     if abs(ratio - rounded_int) <= 0.02:
         return float(rounded_int)
-    rounded_3 = round(ratio, 3)
-    if abs(ratio - rounded_3) <= 0.005:
-        return rounded_3
+    # Quantities are natural integers — do NOT return decimals
     return None
+
+
+def _to_natural_qty(value: float | None) -> Optional[float]:
+    """Enforce business rule: quantities are always natural integers >= 1."""
+    if value is None or value <= 0:
+        return None
+    rounded = round(value)
+    if rounded < 1:
+        return None
+    if abs(value - rounded) / rounded <= 0.02:
+        return float(rounded)
+    return None  # Non-integer — likely extraction artifact
 
 
 _QTY_IN_DESC_RE = re.compile(
@@ -221,12 +231,14 @@ def _cohere_line(line: dict) -> dict | None:
         qty = _infer_quantity_from_price_and_total(price, total)
     if qty is None:
         qty = _extract_qty_from_description(description)
-    # NEW: Calculate qty from total/price when both exist
+    # Fallback: only accept natural integers
     if qty is None and total is not None and price is not None and price > 0:
-        calculated_qty = round(total / price, 2)
-        if 0 < calculated_qty <= 9999:  # Reasonable bounds
-            qty = calculated_qty
-    
+        qty = _to_natural_qty(total / price)
+
+    # Enforce business rule: quantity must be a natural integer
+    if qty is not None:
+        qty = _to_natural_qty(qty)
+
     if qty and price and not total:
         total = round(qty * price, 2)
     elif qty and total and not price:

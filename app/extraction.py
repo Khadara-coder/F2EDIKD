@@ -77,9 +77,25 @@ def _infer_quantity_from_price_total(price: float | None, total: float | None) -
     rounded_int = round(ratio)
     if abs(ratio - rounded_int) <= 0.02:
         return float(rounded_int)
-    rounded_3 = round(ratio, 3)
-    if abs(ratio - rounded_3) <= 0.005:
-        return rounded_3
+    # Quantities are natural integers — do NOT return decimals
+    return None
+
+
+def _to_natural_qty(value: float | None) -> float | None:
+    """Enforce business rule: quantities are always natural integers >= 1.
+    
+    Returns the integer if value rounds cleanly to one (tolerance 2%).
+    Returns None for any decimal/fractional value that can't be rounded safely.
+    """
+    if value is None or value <= 0:
+        return None
+    rounded = round(value)
+    if rounded < 1:
+        return None
+    # Accept only if within 2% of the nearest integer
+    if abs(value - rounded) / rounded <= 0.02:
+        return float(rounded)
+    # Non-integer quantity — reject (likely extraction artifact)
     return None
 
 
@@ -139,12 +155,15 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
             qty = _infer_quantity_from_price_total(price, total)
         if qty is None:
             qty = _extract_qty_from_description(description)
-        # NEW: Calculate qty from total/price when both exist
+        # Fallback: calculate from total/price — only accept if result is a natural integer
         if qty is None and total is not None and price is not None and price > 0:
-            calculated_qty = round(total / price, 2)
-            if 0 < calculated_qty <= 9999:  # Reasonable bounds
-                qty = calculated_qty
-        
+            calculated_qty = total / price
+            qty = _to_natural_qty(calculated_qty)  # rejects 0.03, 0.5, 3.072 etc.
+
+        # Enforce business rule: quantity must be a natural integer
+        if qty is not None:
+            qty = _to_natural_qty(qty)
+
         if qty and price and not total:
             total = round(qty * price, 2)
         elif qty and total and not price:

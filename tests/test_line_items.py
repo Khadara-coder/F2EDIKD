@@ -79,7 +79,7 @@ def test_extract_line_items_from_multiline_window_tail_pattern():
 
     assert len(rows) == 1
     assert rows[0]["article"] == "7716704752"
-    assert rows[0]["quantity"] in {"9.000", "9,000"}
+    assert rows[0]["quantity"] in {"9.000", "9,000", "9"}  # natural integer rule returns "9"
     assert rows[0]["unit_price"] == "760.00"
     assert rows[0]["amount"] == "6 840.00"
     assert rows[0]["parser"] == "multiline_window"

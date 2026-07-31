@@ -135,7 +135,30 @@ def _extract_article_tail_values(window_text: str, article: str) -> tuple[str, s
 
 
 def _is_unit_token(value: str) -> bool:
-    return bool(re.fullmatch(r"PCE|PIECE|PCS|PC|UN|EA", compact_text(value), flags=re.IGNORECASE))
+    return bool(re.fullmatch(r"PCE|PIECE|PCS|PC|UN|EA|PI|P", compact_text(value), flags=re.IGNORECASE))
+
+
+def _to_natural_qty_str(value: str) -> str:
+    """Convert an extracted quantity string to a natural integer string.
+    
+    Business rule: quantities are always natural integers >= 1.
+    Returns "" if value cannot be safely rounded to a natural integer.
+    """
+    if not value:
+        return ""
+    try:
+        v = float(value.replace(",", ".").replace(" ", ""))
+    except (ValueError, TypeError):
+        return ""
+    if v <= 0:
+        return ""
+    rounded = round(v)
+    if rounded < 1:
+        return ""
+    # Accept only if within 2% of nearest integer
+    if abs(v - rounded) / rounded <= 0.02:
+        return str(rounded)
+    return ""  # Non-integer — likely extraction artifact
 
 
 def _extract_table_quantity_and_unit(cells: list[str], article_idx: int, amount_indexes: list[int]) -> tuple[str, str]:
@@ -259,7 +282,7 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
                 "designation": designation,
                 "article": article,
                 "delivery_date": "",
-                "quantity": qty,
+                "quantity": _to_natural_qty_str(qty),
                 "unit": unit,
                 "unit_price": unit_price,
                 "amount": amount,
@@ -311,7 +334,7 @@ def extract_line_items_from_lines(lines: list[str]) -> list[dict]:
                     "designation": compact_text(" ".join(designation_cells)),
                     "article": article,
                     "delivery_date": next((cell for cell in cells if re.fullmatch(r"\d{2}/\d{2}/\d{4}", cell)), ""),
-                    "quantity": quantity,
+                    "quantity": _to_natural_qty_str(quantity),
                     "unit": unit,
                     "unit_price": amounts[0] if amounts else "",
                     "amount": amounts[-1] if amounts else "",
@@ -338,7 +361,7 @@ def extract_line_items_from_lines(lines: list[str]) -> list[dict]:
                     "designation": compact_text(match.group("designation")),
                     "article": match.group("article"),
                     "delivery_date": "",
-                    "quantity": match.group("quantity"),
+                    "quantity": _to_natural_qty_str(match.group("quantity")),
                     "unit_price": compact_text(match.group("unit_price")),
                     "amount": compact_text(match.group("amount")),
                     "customer_reference": "",
