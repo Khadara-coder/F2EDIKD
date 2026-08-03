@@ -37,7 +37,7 @@ function SourceBadge({ source }: { source?: string }) {
 }
 
 type ReviewManagerFilter = "all" | "human" | "system";
-type ReviewStatusFilter = "all" | "toProcess" | "processed" | "partial" | "rejected" | "deliveryFailed";
+type ReviewStatusFilter = "all" | "toProcess" | "onHold" | "processed" | "sentSap" | "transferred" | "partial" | "rejected" | "deliveryFailed";
 type BusinessStatusGroup = Exclude<ReviewStatusFilter, "all">;
 type ReviewSortKey =
   | "fileName"
@@ -51,38 +51,39 @@ type ReviewSortKey =
 type SortDirection = "asc" | "desc";
 
 const STATUS_FILTERS: Array<{ value: ReviewStatusFilter; label: string; className: string }> = [
-  { value: "all", label: "Tous", className: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100" },
-  { value: "toProcess", label: "À traiter", className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
-  { value: "processed", label: "Traité", className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
-  { value: "partial", label: "Partiel", className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
-  { value: "rejected", label: "Rejeté", className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
-  { value: "deliveryFailed", label: "Échec d'envoi", className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
+  { value: "all",           label: "Tous",          className: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100" },
+  { value: "toProcess",     label: "À traiter",     className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
+  { value: "onHold",        label: "En attente",    className: "border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100" },
+  { value: "processed",     label: "Traité",         className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
+  { value: "sentSap",       label: "Envoyé SAP",    className: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" },
+  { value: "transferred",   label: "Transféré",      className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
+  { value: "partial",       label: "Partiel",        className: "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" },
+  { value: "rejected",      label: "Rejeté",         className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
+  { value: "deliveryFailed",label: "Échec d'envoi",  className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
 ];
 
-const GROUP_STATUS_BADGE: Record<BusinessStatusGroup, { label: string; variant: "warning" | "success" | "info" | "destructive" }> = {
-  toProcess: { label: "À traiter", variant: "warning" },
-  processed: { label: "Traité", variant: "success" },
-  partial: { label: "Partiel", variant: "info" },
-  rejected: { label: "Rejeté", variant: "destructive" },
-  deliveryFailed: { label: "Échec d'envoi", variant: "destructive" },
+const GROUP_STATUS_BADGE: Record<BusinessStatusGroup, { label: string; variant: "warning" | "success" | "info" | "destructive" | "orange" }> = {
+  toProcess:     { label: "À traiter",   variant: "warning" },
+  onHold:        { label: "En attente",  variant: "orange" },
+  processed:     { label: "Traité",       variant: "success" },
+  sentSap:       { label: "Envoyé SAP",  variant: "success" },
+  transferred:   { label: "Transféré",    variant: "info" },
+  partial:       { label: "Partiel",      variant: "info" },
+  rejected:      { label: "Rejeté",       variant: "destructive" },
+  deliveryFailed:{ label: "Échec d'envoi",variant: "destructive" },
 };
 
 function statusToFilterGroup(status: OrderStatus): BusinessStatusGroup {
-  if (status === "Revue requise" || status === "À revoir" || status === "À vérifier" || status === "Bloqué") {
+  if (status === "Revue requise" || status === "À revoir" || status === "À vérifier" || status === "Bloqué" || status === "À traiter") {
     return "toProcess";
   }
-  if (status === "Généré" || status === "Validé") {
-    return "processed";
-  }
-  if (status === "Partiel") {
-    return "partial";
-  }
-  if (status === "Rejeté" || status === "Doublon") {
-    return "rejected";
-  }
-  if (status === "SFTP échoué") {
-    return "deliveryFailed";
-  }
+  if (status === "En attente") return "onHold";
+  if (status === "Généré" || status === "Validé") return "processed";
+  if (status === "Envoyé SAP") return "sentSap";
+  if (status === "Transféré") return "transferred";
+  if (status === "Partiel") return "partial";
+  if (status === "Rejeté" || status === "Doublon") return "rejected";
+  if (status === "SFTP échoué" || status === "Échec SAP") return "deliveryFailed";
   return "toProcess";
 }
 
@@ -97,8 +98,11 @@ export function RevueListPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>("all");
   const [managerFilter, setManagerFilter] = useState<ReviewManagerFilter>("all");
+  const [myOrdersOnly, setMyOrdersOnly] = useState(false);   // ← filtre "Mes dossiers"
   const [sortKey, setSortKey] = useState<ReviewSortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
+
+  const currentUsername = (me as unknown as { username?: string; actor?: string })?.username ?? me?.actor ?? null;
 
   const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
@@ -155,7 +159,11 @@ export function RevueListPage() {
       const processedBy = (row.processedBy || "").trim().toLowerCase();
       const normalizedManager = processedBy === "operator" || processedBy === "system" ? "system" : "human";
       const matchesManager = managerFilter === "all" || normalizedManager === managerFilter;
-      return matchesSearch && matchesStatus && matchesManager;
+      // "Mes dossiers" filter: match assignedTo or processedBy
+      const rowAssignee = (row as unknown as { assignedTo?: string }).assignedTo || row.processedBy || "";
+      const matchesMyOrders = !myOrdersOnly || !currentUsername ||
+        rowAssignee.toLowerCase() === currentUsername.toLowerCase();
+      return matchesSearch && matchesStatus && matchesManager && matchesMyOrders;
     });
 
     return filtered.sort((left, right) => {
@@ -176,7 +184,7 @@ export function RevueListPage() {
 
       return sortDirection === "asc" ? comparison : -comparison;
     });
-  }, [items, managerFilter, search, sortDirection, sortKey, statusFilter]);
+  }, [items, managerFilter, myOrdersOnly, currentUsername, search, sortDirection, sortKey, statusFilter]);
 
   return (
     <>
@@ -207,9 +215,26 @@ export function RevueListPage() {
         </CardHeader>
 
         <CardContent className="border-b bg-muted/30 p-4">
-          <div className="mb-4 flex items-center gap-2 text-sm font-medium text-foreground">
-            <SlidersHorizontal className="h-4 w-4 text-primary" />
-            Filtres
+          <div className="mb-4 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+              <SlidersHorizontal className="h-4 w-4 text-primary" />
+              Filtres
+            </div>
+            {/* Bouton "Mes dossiers" */}
+            <Button
+              variant={myOrdersOnly ? "default" : "outline"}
+              size="sm"
+              className="gap-1.5"
+              onClick={() => setMyOrdersOnly(!myOrdersOnly)}
+              title={myOrdersOnly ? "Afficher tous les dossiers" : "Afficher uniquement mes dossiers"}
+            >
+              {myOrdersOnly ? (
+                <X className="h-3.5 w-3.5" />
+              ) : (
+                <Search className="h-3.5 w-3.5" />
+              )}
+              {myOrdersOnly ? "Tous les dossiers" : "Mes dossiers"}
+            </Button>
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto] lg:items-center">
             <div className="relative">

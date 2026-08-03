@@ -1092,6 +1092,33 @@ class _PostgresConnection:
         self._conn.close()
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Password hashing helpers (bcrypt via hashlib fallback)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _hash_password(plain: str) -> str:
+    try:
+        import bcrypt  # type: ignore
+        return bcrypt.hashpw(plain.encode(), bcrypt.gensalt()).decode()
+    except ImportError:
+        import hashlib, os
+        salt = os.urandom(16).hex()
+        h = hashlib.sha256(f"{salt}:{plain}".encode()).hexdigest()
+        return f"sha256:{salt}:{h}"
+
+
+def _check_password(plain: str, hashed: str) -> bool:
+    try:
+        import bcrypt  # type: ignore
+        return bcrypt.checkpw(plain.encode(), hashed.encode())
+    except ImportError:
+        if hashed.startswith("sha256:"):
+            _, salt, h = hashed.split(":", 2)
+            import hashlib
+            return hashlib.sha256(f"{salt}:{plain}".encode()).hexdigest() == h
+        return False
+
+
 class PostgresFile2EdiStore(File2EdiStore):
     """PostgreSQL-backed implementation of the File2EDI store contract."""
 
@@ -1235,6 +1262,23 @@ class PostgresFile2EdiStore(File2EdiStore):
           setting_value TEXT NOT NULL,
           updated_at    TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS file2edi_users (
+          user_id       TEXT PRIMARY KEY,
+          username      TEXT NOT NULL UNIQUE,
+          display_name  TEXT NOT NULL,
+          password_hash TEXT NOT NULL,
+          created_at    TEXT NOT NULL,
+          is_active     INTEGER NOT NULL DEFAULT 1
+        );
+
+        CREATE TABLE IF NOT EXISTS file2edi_sessions (
+          session_id  TEXT PRIMARY KEY,
+          user_id     TEXT NOT NULL REFERENCES file2edi_users(user_id) ON DELETE CASCADE,
+          created_at  TEXT NOT NULL,
+          expires_at  TEXT NOT NULL,
+          ip_address  TEXT
+        );
         """
         conn = self._conn()
         try:
@@ -1272,6 +1316,15 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS warnings TEXT",
                 "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS edited_fields_json TEXT",
                 "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS previous_value TEXT",
+                # User management & workflow columns
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS assigned_to TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS hold_reason TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS hold_by TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS hold_at TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transferred_from TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transferred_to TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_note TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_at TEXT",
             ):
                 conn.execute(statement)
             conn.commit()
@@ -1331,6 +1384,162 @@ def _normalize_postgres_url(database_url: str) -> str:
 
 
 _store: File2EdiStore | None = None
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# User management methods (mixed into PostgresFile2EdiStore via mixin pattern)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _users_mixin(cls):
+    """Dynamically add user/auth/workflow methods to the store class."""
+
+    def create_user(self, username: str, display_name: str, password: str) -> dict:
+        user_id = f"usr-{uuid.uuid4().hex[:12]}"
+        pw_hash = _hash_password(password)
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO file2edi_users (user_id,username,display_name,password_hash,created_at,is_active) "
+            "VALUES (?,?,?,?,?,1)",
+            [user_id, username.strip().lower(), display_name.strip(), pw_hash, _now()],
+        )
+        conn.commit()
+        conn.close()
+        return {"userId": user_id, "username": username.strip().lower(), "displayName": display_name.strip()}
+
+    def verify_credentials(self, username: str, password: str) -> dict | None:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT user_id,username,display_name,password_hash FROM file2edi_users "
+            "WHERE username=? AND is_active=1",
+            [username.strip().lower()],
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        if not _check_password(password, row["password_hash"]):
+            return None
+        return {"userId": row["user_id"], "username": row["username"], "displayName": row["display_name"]}
+
+    def create_session(self, user_id: str, ip: str | None = None) -> str:
+        import secrets
+        from datetime import timedelta
+        session_id = secrets.token_urlsafe(32)
+        expires = (datetime.now(timezone.utc) + timedelta(hours=12)).isoformat()
+        conn = self._conn()
+        conn.execute(
+            "INSERT INTO file2edi_sessions (session_id,user_id,created_at,expires_at,ip_address) "
+            "VALUES (?,?,?,?,?)",
+            [session_id, user_id, _now(), expires, ip],
+        )
+        conn.commit()
+        conn.close()
+        return session_id
+
+    def get_session_user(self, session_id: str) -> dict | None:
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT s.user_id, u.username, u.display_name, s.expires_at "
+            "FROM file2edi_sessions s JOIN file2edi_users u ON s.user_id=u.user_id "
+            "WHERE s.session_id=? AND u.is_active=1",
+            [session_id],
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        if row["expires_at"] < _now():
+            return None  # expired
+        return {"userId": row["user_id"], "username": row["username"], "displayName": row["display_name"]}
+
+    def invalidate_session(self, session_id: str) -> None:
+        conn = self._conn()
+        conn.execute("DELETE FROM file2edi_sessions WHERE session_id=?", [session_id])
+        conn.commit()
+        conn.close()
+
+    def list_users(self) -> list[dict]:
+        conn = self._conn()
+        rows = conn.execute(
+            "SELECT user_id,username,display_name,created_at FROM file2edi_users WHERE is_active=1 ORDER BY display_name"
+        ).fetchall()
+        conn.close()
+        return [{"userId": r["user_id"], "username": r["username"], "displayName": r["display_name"], "createdAt": r["created_at"]} for r in rows]
+
+    def delete_user(self, user_id: str) -> bool:
+        conn = self._conn()
+        conn.execute("UPDATE file2edi_users SET is_active=0 WHERE user_id=?", [user_id])
+        conn.commit()
+        conn.close()
+        return True
+
+    def change_password(self, user_id: str, new_password: str) -> bool:
+        pw_hash = _hash_password(new_password)
+        conn = self._conn()
+        conn.execute(
+            "UPDATE file2edi_users SET password_hash=? WHERE user_id=?", [pw_hash, user_id]
+        )
+        conn.commit()
+        conn.close()
+        return True
+
+    def hold_order(self, order_id: str, reason: str, actor: str) -> dict | None:
+        conn = self._conn()
+        conn.execute(
+            "UPDATE file2edi_orders SET status='En attente', hold_reason=?, hold_by=?, hold_at=?, updated_at=? WHERE order_id=?",
+            [reason, actor, _now(), _now(), order_id],
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM file2edi_orders WHERE order_id=?", [order_id]).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def transfer_order(self, order_id: str, to_username: str, note: str, from_actor: str) -> dict | None:
+        conn = self._conn()
+        conn.execute(
+            "UPDATE file2edi_orders SET status='Transféré', assigned_to=?, "
+            "transferred_from=?, transferred_to=?, transfer_note=?, transfer_at=?, updated_at=? "
+            "WHERE order_id=?",
+            [to_username, from_actor, to_username, note, _now(), _now(), order_id],
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM file2edi_orders WHERE order_id=?", [order_id]).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
+    def list_orders_filtered(self, assignee: str | None = None, status: str | None = None, limit: int = 200) -> list[dict]:
+        """List orders with optional assignee/status filter."""
+        conn = self._conn()
+        clauses, params = [], []
+        if assignee:
+            # Show orders assigned to this user OR unassigned but uploaded by them
+            clauses.append("(assigned_to=? OR (assigned_to IS NULL AND uploaded_by=?))")
+            params.extend([assignee, assignee])
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = conn.execute(
+            f"SELECT * FROM file2edi_orders {where} ORDER BY created_at DESC LIMIT ?",
+            params + [limit],
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    cls.create_user = create_user
+    cls.verify_credentials = verify_credentials
+    cls.create_session = create_session
+    cls.get_session_user = get_session_user
+    cls.invalidate_session = invalidate_session
+    cls.list_users = list_users
+    cls.delete_user = delete_user
+    cls.change_password = change_password
+    cls.hold_order = hold_order
+    cls.transfer_order = transfer_order
+    cls.list_orders_filtered = list_orders_filtered
+    return cls
+
+
+# Apply user management methods to PostgresFile2EdiStore
+_users_mixin(PostgresFile2EdiStore)
 
 
 def get_store() -> File2EdiStore:

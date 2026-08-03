@@ -11,6 +11,11 @@ export const orderStatusSchema = z.enum([
   "À vérifier",
   "Bloqué",
   "Validé",
+  "À traiter",
+  "En attente",
+  "Envoyé SAP",
+  "Transféré",
+  "Échec SAP",
 ]);
 
 export const updateOrderHeaderSchema = z.object({

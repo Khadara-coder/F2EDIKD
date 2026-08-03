@@ -65,7 +65,146 @@ def _parse_custom_headers(raw: str) -> dict[str, str]:
 def create_router() -> APIRouter:
     router = APIRouter(tags=["file2edi"])
 
-    def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
+    # ── Auth: session cookie helpers ────────────────────────────────────────
+    SESSION_COOKIE = "f2edi_session"
+
+    def _get_current_user(req: Request) -> dict | None:
+        """Extract authenticated user from session cookie."""
+        session_id = req.cookies.get(SESSION_COOKIE)
+        if not session_id:
+            return None
+        try:
+            return get_store().get_session_user(session_id)
+        except Exception:
+            return None
+
+    @router.get("/auth/modes")
+    def auth_modes():
+        return {"profile_login_enabled": True, "workspace_sso_available": False, "allowed_roles": ["user"]}
+
+    @router.post("/auth/login")
+    async def auth_login(req: Request):
+        from fastapi.responses import JSONResponse
+        body = await req.json()
+        username = str(body.get("actor") or body.get("username") or "").strip()
+        password = str(body.get("password") or "").strip()
+        if not username or not password:
+            raise HTTPException(400, "Identifiant et mot de passe requis")
+        user = get_store().verify_credentials(username, password)
+        if not user:
+            raise HTTPException(401, "Identifiant ou mot de passe incorrect")
+        session_id = get_store().create_session(user["userId"], ip=req.client.host if req.client else None)
+        resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"], "role": "admin"})
+        resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=43200)
+        return resp
+
+    @router.post("/auth/logout")
+    async def auth_logout(req: Request):
+        from fastapi.responses import JSONResponse
+        session_id = req.cookies.get(SESSION_COOKIE)
+        if session_id:
+            try:
+                get_store().invalidate_session(session_id)
+            except Exception:
+                pass
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(SESSION_COOKIE)
+        return resp
+
+    @router.get("/me")
+    def get_me(req: Request):
+        """Return current user info — prefers session cookie, falls back to server actor."""
+        user = _get_current_user(req)
+        if user:
+            return {"actor": user["username"], "displayName": user["displayName"], "role": "admin", "authenticated": True}
+        # Fallback to server-level actor (dev mode)
+        try:
+            import server as srv
+            actor = srv._resolve_actor(req)
+            role = srv._resolve_role(actor)
+            return {"actor": actor, "displayName": actor, "role": role or "admin", "authenticated": True}
+        except Exception:
+            return {"actor": "operator", "displayName": "Opérateur", "role": "admin", "authenticated": True}
+
+    # ── User management ───────────────────────────────────────────────────────
+    @router.get("/users")
+    def list_users():
+        try:
+            return get_store().list_users()
+        except Exception:
+            return []
+
+    @router.post("/users")
+    async def create_user(req: Request):
+        body = await req.json()
+        username = str(body.get("username") or "").strip()
+        display_name = str(body.get("displayName") or body.get("display_name") or username).strip()
+        password = str(body.get("password") or "").strip()
+        if not username or not password:
+            raise HTTPException(400, "Identifiant et mot de passe requis")
+        try:
+            return get_store().create_user(username, display_name, password)
+        except Exception as exc:
+            raise HTTPException(400, f"Impossible de créer l'utilisateur: {exc}")
+
+    @router.delete("/users/{user_id}")
+    def delete_user(user_id: str):
+        get_store().delete_user(user_id)
+        return {"ok": True}
+
+    @router.post("/users/{user_id}/change-password")
+    async def user_change_password(user_id: str, req: Request):
+        body = await req.json()
+        password = str(body.get("password") or "").strip()
+        if not password:
+            raise HTTPException(400, "Mot de passe requis")
+        get_store().change_password(user_id, password)
+        return {"ok": True}
+
+    # ── Order workflow actions ─────────────────────────────────────────────────
+    @router.post("/orders/{order_id}/hold")
+    async def hold_order(order_id: str, req: Request):
+        body = await req.json()
+        reason = str(body.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "Motif de mise en attente requis")
+        user = _get_current_user(req)
+        actor = user["username"] if user else "operator"
+        result = get_store().hold_order(order_id, reason, actor)
+        if not result:
+            raise HTTPException(404)
+        return {"ok": True, "status": "En attente", "reason": reason}
+
+    @router.post("/orders/{order_id}/transfer")
+    async def transfer_order(order_id: str, req: Request):
+        body = await req.json()
+        to_username = str(body.get("to") or "").strip()
+        note = str(body.get("note") or "").strip()
+        if not to_username:
+            raise HTTPException(400, "Destinataire requis")
+        user = _get_current_user(req)
+        from_actor = user["username"] if user else "operator"
+        result = get_store().transfer_order(order_id, to_username, note, from_actor)
+        if not result:
+            raise HTTPException(404)
+        return {"ok": True, "status": "Transféré", "to": to_username}
+
+    @router.get("/orders")
+    def list_orders(req: Request, my: bool = False):
+        """List orders. ?my=true filters to current user's orders."""
+        user = _get_current_user(req)
+        assignee = user["username"] if (user and my) else None
+        try:
+            rows = get_store().list_orders_filtered(assignee=assignee)
+            return [{"orderId": r["order_id"], "fileName": r.get("file_name"), "clientName": r.get("client_name"),
+                     "status": r.get("status"), "confidence": r.get("global_confidence", 0),
+                     "createdAt": r.get("created_at"), "assignedTo": r.get("assigned_to"),
+                     "holdReason": r.get("hold_reason"), "transferredFrom": r.get("transferred_from"),
+                     "source": r.get("source")} for r in rows]
+        except Exception:
+            return []
+
+
         if not isinstance(settings_payload, dict):
             return
         sftp = settings_payload.get("sftpConfig")

@@ -1,51 +1,29 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-
-function startWorkspaceLogin() {
-  window.location.assign(`${window.location.origin}/`);
-}
 
 export function LoginPage() {
-  const [actor, setActor] = useState("dik1dy@bosch.com");
-  const [role, setRole] = useState<"admin" | "adv">("adv");
+  const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [profileLoginEnabled, setProfileLoginEnabled] = useState(false);
   const logoSrc = `${import.meta.env.BASE_URL}genie-commande.png`;
   const logoFallback = `${import.meta.env.BASE_URL}file.png`;
 
-  useEffect(() => {
-    let active = true;
-    api
-      .getAuthModes()
-      .then((modes) => {
-        if (!active) return;
-        setProfileLoginEnabled(Boolean(modes.profile_login_enabled));
-      })
-      .catch(() => {
-        if (!active) return;
-        setProfileLoginEnabled(false);
-      });
-    return () => { active = false; };
-  }, []);
-
-  async function handleProfileLogin() {
+  async function handleLogin() {
     setError("");
-    if (!actor.trim()) { setError("Identifiant requis"); return; }
+    if (!username.trim()) { setError("Identifiant requis"); return; }
     if (!password.trim()) { setError("Mot de passe requis"); return; }
     try {
       setLoading(true);
-      await api.loginWithProfile({ actor: actor.trim(), role, password });
+      await api.loginWithProfile({ actor: username.trim(), role: "admin", password });
       window.location.assign("/");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Échec de connexion");
+      setError(e instanceof Error ? e.message : "Identifiant ou mot de passe incorrect");
     } finally {
       setLoading(false);
     }
@@ -61,62 +39,40 @@ export function LoginPage() {
             className="h-28 w-auto max-w-[220px] object-contain"
             onError={(e) => {
               const img = e.currentTarget;
-              if (!img.src.endsWith("file.png")) {
-                img.src = logoFallback;
-              }
+              if (!img.src.endsWith("file.png")) img.src = logoFallback;
             }}
           />
           <CardTitle className="text-xl">File2EDI</CardTitle>
+          <p className="text-xs text-muted-foreground text-center">Connectez-vous avec votre identifiant</p>
         </CardHeader>
 
         <CardContent className="space-y-3 pt-2">
-          {profileLoginEnabled && (
-            <>
-              <div className="space-y-1.5">
-                <Label>Identifiant</Label>
-                <Input
-                  value={actor}
-                  placeholder="prenom.nom@bosch.com"
-                  onChange={(e) => setActor(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleProfileLogin()}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Profil</Label>
-                <Select value={role} onValueChange={(v: "admin" | "adv") => setRole(v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="adv">ADV</SelectItem>
-                    <SelectItem value="admin">Admin</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1.5">
-                <Label>Mot de passe</Label>
-                <Input
-                  type="password"
-                  value={password}
-                  placeholder="Mot de passe"
-                  onChange={(e) => setPassword(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleProfileLogin()}
-                />
-              </div>
-              {error && <p className="text-xs text-destructive">{error}</p>}
-              <Button className="w-full" onClick={handleProfileLogin} disabled={loading}>
-                {loading ? "Connexion..." : "Se connecter"}
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </>
-          )}
-
-          {!profileLoginEnabled && (
-            <Button className="w-full" onClick={startWorkspaceLogin}>
-              Connexion Databricks
-              <ArrowRight className="h-4 w-4" />
-            </Button>
-          )}
+          <div className="space-y-1.5">
+            <Label>Identifiant</Label>
+            <Input
+              value={username}
+              placeholder="Votre identifiant"
+              autoComplete="username"
+              onChange={(e) => setUsername(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Mot de passe</Label>
+            <Input
+              type="password"
+              value={password}
+              placeholder="Mot de passe"
+              autoComplete="current-password"
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+            />
+          </div>
+          {error && <p className="text-xs text-destructive">{error}</p>}
+          <Button className="w-full gap-2" onClick={handleLogin} disabled={loading}>
+            {loading ? "Connexion..." : "Se connecter"}
+            <ArrowRight className="h-4 w-4" />
+          </Button>
         </CardContent>
       </Card>
     </div>

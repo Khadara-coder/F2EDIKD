@@ -1,7 +1,7 @@
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { Download, CheckCircle, Send } from "lucide-react";
+import { Download, CheckCircle, Send, PauseCircle, UserCheck } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOrderReview } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -16,8 +16,13 @@ import { ProgressStepper } from "@/components/file2edi/ProgressStepper";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { formatCurrency, formatDate, downloadTextFile } from "@/lib/utils";
 import { collectReviewBlockers, countPendingAnomalies, isAnomalyPending } from "@/lib/reviewValidation";
+import type { GestionnaireUser } from "@/types";
 
 export function RevuePage() {
   const { orderId } = useParams();
@@ -30,6 +35,13 @@ export function RevuePage() {
   const [infoDialog, setInfoDialog] = useState<{ title: string; message: string } | null>(null);
   const [confirmSendOpen, setConfirmSendOpen] = useState(false);
   const [confirmResendOpen, setConfirmResendOpen] = useState(false);
+  // Hold modal
+  const [holdOpen, setHoldOpen] = useState(false);
+  const [holdReason, setHoldReason] = useState("");
+  // Transfer modal
+  const [transferOpen, setTransferOpen] = useState(false);
+  const [transferTo, setTransferTo] = useState("");
+  const [transferNote, setTransferNote] = useState("");
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
@@ -100,6 +112,41 @@ export function RevuePage() {
 
   const sendToSap = useMutation({
     mutationFn: (payload?: { force?: boolean }) => api.sendToSap(orderId, payload),
+  });
+
+  // Users list for transfer
+  const usersQuery = useQuery<GestionnaireUser[]>({
+    queryKey: ["users"],
+    queryFn: () => fetch("/api/users").then(r => r.json()),
+    staleTime: 60_000,
+  });
+
+  const holdMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/orders/${orderId}/hold`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: holdReason }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Échec mise en attente");
+      return res.json();
+    },
+    onSuccess: () => { setHoldOpen(false); setHoldReason(""); invalidate(); },
+    onError: (e) => setInfoDialog({ title: "Erreur", message: e instanceof Error ? e.message : "Erreur" }),
+  });
+
+  const transferMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/orders/${orderId}/transfer`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: transferTo, note: transferNote }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Échec transfert");
+      return res.json();
+    },
+    onSuccess: () => { setTransferOpen(false); setTransferTo(""); setTransferNote(""); invalidate(); },
+    onError: (e) => setInfoDialog({ title: "Erreur", message: e instanceof Error ? e.message : "Erreur" }),
   });
 
   if (isLoading) {
@@ -233,6 +280,25 @@ export function RevuePage() {
                 <Download className="h-4 w-4" /> EDIFACT
               </Button>
             )}
+            {/* Mettre en attente */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+              onClick={() => setHoldOpen(true)}
+              disabled={order.status === "En attente"}
+            >
+              <PauseCircle className="h-4 w-4" /> En attente
+            </Button>
+            {/* Transférer */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
+              onClick={() => setTransferOpen(true)}
+            >
+              <UserCheck className="h-4 w-4" /> Transférer
+            </Button>
             <Button size="sm" className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate}>
               <CheckCircle className="h-4 w-4" /> Valider
             </Button>
@@ -473,6 +539,96 @@ export function RevuePage() {
           </Card>
         </div>
       )}
+
+      {/* ── Modal : Mise en attente ───────────────────────────────────── */}
+      <Dialog open={holdOpen} onOpenChange={setHoldOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <PauseCircle className="h-5 w-5 text-orange-500" />
+              Mettre en attente
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Précisez le motif. Le dossier sera suspendu jusqu'à nouvel ordre.
+            </p>
+            <div className="space-y-1.5">
+              <Label>Motif *</Label>
+              <Textarea
+                value={holdReason}
+                onChange={(e) => setHoldReason(e.target.value)}
+                placeholder="Ex: En attente de validation client, information manquante…"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setHoldOpen(false)}>Annuler</Button>
+            <Button
+              className="gap-2 bg-orange-500 hover:bg-orange-600"
+              onClick={() => holdMutation.mutate()}
+              disabled={!holdReason.trim() || holdMutation.isPending}
+            >
+              <PauseCircle className="h-4 w-4" />
+              {holdMutation.isPending ? "En cours…" : "Mettre en attente"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal : Transfert ─────────────────────────────────────────── */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserCheck className="h-5 w-5 text-sky-500" />
+              Transférer le dossier
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Le dossier sera assigné au gestionnaire sélectionné. Il apparaîtra dans sa liste "À traiter".
+            </p>
+            <div className="space-y-1.5">
+              <Label>Gestionnaire destinataire *</Label>
+              <Select value={transferTo} onValueChange={setTransferTo}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Choisir un gestionnaire…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {(usersQuery.data || []).map((u: GestionnaireUser) => (
+                    <SelectItem key={u.userId} value={u.username}>
+                      {u.displayName} ({u.username})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Note (optionnel)</Label>
+              <Textarea
+                value={transferNote}
+                onChange={(e) => setTransferNote(e.target.value)}
+                placeholder="Instructions ou contexte pour le destinataire…"
+                rows={2}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTransferOpen(false)}>Annuler</Button>
+            <Button
+              className="gap-2 bg-sky-500 hover:bg-sky-600"
+              onClick={() => transferMutation.mutate()}
+              disabled={!transferTo.trim() || transferMutation.isPending}
+            >
+              <UserCheck className="h-4 w-4" />
+              {transferMutation.isPending ? "En cours…" : "Transférer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </>
   );
 }

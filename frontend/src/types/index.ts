@@ -8,7 +8,20 @@ export type OrderStatus =
   | "À revoir"
   | "À vérifier"
   | "Bloqué"
-  | "Validé";
+  | "Validé"
+  // Nouveaux statuts workflow
+  | "À traiter"
+  | "En attente"
+  | "Envoyé SAP"
+  | "Transféré"
+  | "Échec SAP";
+
+export type GestionnaireUser = {
+  userId: string;
+  username: string;
+  displayName: string;
+  createdAt?: string;
+};
 
 export type LineStatus = "OK" | "À vérifier" | "Corrigé manuellement" | "Bloqué";
 
