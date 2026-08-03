@@ -35,10 +35,8 @@ export function RevuePage() {
   const [infoDialog, setInfoDialog] = useState<{ title: string; message: string } | null>(null);
   const [confirmSendOpen, setConfirmSendOpen] = useState(false);
   const [confirmResendOpen, setConfirmResendOpen] = useState(false);
-  // Hold modal
   const [holdOpen, setHoldOpen] = useState(false);
   const [holdReason, setHoldReason] = useState("");
-  // Transfer modal
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState("");
   const [transferNote, setTransferNote] = useState("");
@@ -446,28 +444,49 @@ export function RevuePage() {
         </Card>
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-end gap-3 border-t pt-6">
-        {!isAdv && (
+      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-6">
+        {/* Actions secondaires (gauche) */}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+            onClick={() => setHoldOpen(true)}
+            disabled={order.status === "En attente"}
+          >
+            <PauseCircle className="h-4 w-4" /> En attente
+          </Button>
+          <Button
+            variant="outline"
+            className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
+            onClick={() => setTransferOpen(true)}
+          >
+            <UserCheck className="h-4 w-4" /> Transférer
+          </Button>
+        </div>
+        {/* Actions principales (droite) */}
+        <div className="flex flex-wrap gap-2">
+          {!isAdv && (
+            <Button
+              variant="outline"
+              className="gap-2"
+              onClick={handleDownloadEdifact}
+              disabled={edifactBusy}
+            >
+              <Download className="h-4 w-4" /> Télécharger EDIFACT
+            </Button>
+          )}
+          <Button className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate}>
+            <CheckCircle className="h-4 w-4" /> Valider
+          </Button>
           <Button
             variant="outline"
             className="gap-2"
-            onClick={handleDownloadEdifact}
-            disabled={edifactBusy}
+            onClick={() => setConfirmSendOpen(true)}
+            disabled={edifactBusy || !isValidated}
           >
-            <Download className="h-4 w-4" /> Télécharger EDIFACT
+            <Send className="h-4 w-4" /> Envoyer vers SAP
           </Button>
-        )}
-        <Button className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate}>
-          <CheckCircle className="h-4 w-4" /> Valider
-        </Button>
-        <Button
-          variant="outline"
-          className="gap-2"
-          onClick={() => setConfirmSendOpen(true)}
-          disabled={edifactBusy || !isValidated}
-        >
-          <Send className="h-4 w-4" /> Envoyer vers SAP
-        </Button>
+        </div>
       </div>
 
       {confirmSendOpen && (

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, CheckCircle2, Database, FileSpreadsheet, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, Database, FileSpreadsheet, Key, Lock, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/hooks/useFile2Edi";
 import { appSettingsSchema, type AppSettingsForm } from "@/schemas";
@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { mergeSettings, DEFAULT_APP_SETTINGS } from "@/lib/defaultSettings";
 import { Input } from "@/components/ui/input";
+import type { GestionnaireUser } from "@/types";
 
 const TIMEZONE_OPTIONS = (() => {
   const supported = typeof Intl.supportedValuesOf === "function" ? Intl.supportedValuesOf("timeZone") : [];
@@ -62,9 +63,6 @@ export function ParametresPage() {
   const { data: settingsRaw, isLoading } = useSettings();
   const settings = mergeSettings(settingsRaw);
   const [activeSection, setActiveSection] = useState<SettingsSection>("profil");
-  const [newActor, setNewActor] = useState("");
-  const [newRole, setNewRole] = useState<"admin" | "adv">("adv");
-  const [roleError, setRoleError] = useState("");
   const [sftpPassword, setSftpPassword] = useState("");
   const [sftpPasswordMsg, setSftpPasswordMsg] = useState("");
   const [testingConnector, setTestingConnector] = useState<string | null>(null);
@@ -73,11 +71,63 @@ export function ParametresPage() {
   const [databricksTokenMsg, setDatabricksTokenMsg] = useState("");
   const [aiTestResult, setAiTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 
+  // ── User management state ───────────────────────────────────────────────────
+  const [newUsername, setNewUsername] = useState("");
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [newUserError, setNewUserError] = useState("");
+  const [newUserSuccess, setNewUserSuccess] = useState("");
+  const [resetUserId, setResetUserId] = useState<string | null>(null);
+  const [resetPassword, setResetPassword] = useState("");
+  const [resetMsg, setResetMsg] = useState("");
+
   const rolesQuery = useQuery({
     queryKey: ["admin", "roles"],
     queryFn: api.getAccessRoles,
     retry: 1,
   });
+
+  // ── User management queries/mutations ──────────────────────────────────────
+  const usersQuery = useQuery<GestionnaireUser[]>({
+    queryKey: ["users"],
+    queryFn: () => fetch("/api/users").then(r => r.json()),
+    staleTime: 30_000,
+  });
+
+  const createUserMutation = useMutation({
+    mutationFn: () => fetch("/api/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: newUsername.trim(), displayName: newDisplayName.trim() || newUsername.trim(), password: newPassword }),
+    }).then(async r => { if (!r.ok) throw new Error((await r.json()).detail || "Erreur"); return r.json(); }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setNewUsername(""); setNewDisplayName(""); setNewPassword("");
+      setNewUserError(""); setNewUserSuccess("Utilisateur créé avec succès");
+      setTimeout(() => setNewUserSuccess(""), 3000);
+    },
+    onError: (e) => setNewUserError(e instanceof Error ? e.message : "Erreur"),
+  });
+
+  const deleteUserMutation = useMutation({
+    mutationFn: (userId: string) => fetch(`/api/users/${userId}`, { method: "DELETE" }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+  });
+
+  const resetPasswordMutation = useMutation({
+    mutationFn: ({ userId, password }: { userId: string; password: string }) =>
+      fetch(`/api/users/${userId}/change-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password }),
+      }).then(async r => { if (!r.ok) throw new Error((await r.json()).detail || "Erreur"); return r.json(); }),
+    onSuccess: () => {
+      setResetUserId(null); setResetPassword(""); setResetMsg("Mot de passe mis à jour");
+      setTimeout(() => setResetMsg(""), 3000);
+    },
+    onError: (e) => setResetMsg(e instanceof Error ? e.message : "Erreur"),
+  });
+
   const form = useForm<AppSettingsForm>({
     resolver: zodResolver(appSettingsSchema),
     defaultValues: {
@@ -132,29 +182,6 @@ export function ParametresPage() {
     mutationFn: (payload: AppSettingsForm) => api.updateSettings(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
-    },
-  });
-
-  const roleUpsertMutation = useMutation({
-    mutationFn: (payload: { actor: string; role: "admin" | "adv" }) => api.upsertAccessRole(payload),
-    onSuccess: async () => {
-      setNewActor("");
-      setRoleError("");
-      await queryClient.invalidateQueries({ queryKey: ["admin", "roles"] });
-    },
-    onError: (err) => {
-      setRoleError(err instanceof Error ? err.message : "Échec de l'attribution du rôle");
-    },
-  });
-
-  const roleDeleteMutation = useMutation({
-    mutationFn: (actor: string) => api.deleteAccessRole(actor),
-    onSuccess: async () => {
-      setRoleError("");
-      await queryClient.invalidateQueries({ queryKey: ["admin", "roles"] });
-    },
-    onError: (err) => {
-      setRoleError(err instanceof Error ? err.message : "Échec de la révocation du rôle");
     },
   });
 
@@ -261,7 +288,8 @@ export function ParametresPage() {
     },
   });
 
-  const roleItems = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data]);
+  // roleItems still needed for securite section display
+  const _roleItems = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data]); void _roleItems;
   const apiKeyItems = useMemo(() => apiKeysQuery.data?.items ?? [], [apiKeysQuery.data]);
   const aiProvider = form.watch("aiProvider");
   const showDatabricksSql = aiProvider === "databricks" && form.watch("databricksConfig.sqlWarehouseEnabled");
@@ -965,153 +993,165 @@ export function ParametresPage() {
 
           {activeSection === "utilisateurs" && (
             <>
+              {/* ── Créer un utilisateur ─────────────────────────────────── */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <UserPlus className="h-5 w-5" />
-                    Gestion des utilisateurs
+                    Créer un gestionnaire
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  <div className="rounded-lg border bg-muted/30 p-4">
-                    <p className="text-sm text-muted-foreground">
-                      Gérez l&apos;ensemble des utilisateurs de la plateforme File2EDI. Contrôlez les accès, les rôles et les autorisations.
-                    </p>
-                  </div>
-
-                  <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-[1fr_1fr_120px_auto]">
+                <CardContent className="space-y-4">
+                  <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-[1fr_1fr_1fr_auto]">
                     <div className="space-y-1.5">
-                      <Label>Email utilisateur</Label>
+                      <Label>Identifiant *</Label>
                       <Input
-                        placeholder="prenom.nom@bosch.com"
-                        value={newActor}
-                        onChange={(e) => setNewActor(e.target.value)}
+                        placeholder="prenom.nom"
+                        value={newUsername}
+                        onChange={(e) => { setNewUsername(e.target.value); setNewUserError(""); }}
                       />
                     </div>
                     <div className="space-y-1.5">
                       <Label>Nom complet</Label>
-                      <Input placeholder="Prénom Nom" />
+                      <Input
+                        placeholder="Prénom Nom"
+                        value={newDisplayName}
+                        onChange={(e) => setNewDisplayName(e.target.value)}
+                      />
                     </div>
                     <div className="space-y-1.5">
-                      <Label>Rôle</Label>
-                      <Select value={newRole} onValueChange={(v: "admin" | "adv") => setNewRole(v)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="adv">ADV</SelectItem>
-                          <SelectItem value="admin">Admin</SelectItem>
-                        </SelectContent>
-                      </Select>
+                      <Label>Mot de passe *</Label>
+                      <Input
+                        type="password"
+                        placeholder="Mot de passe initial"
+                        value={newPassword}
+                        onChange={(e) => { setNewPassword(e.target.value); setNewUserError(""); }}
+                      />
                     </div>
                     <div className="flex items-end">
                       <Button
-                        className="gap-2"
+                        className="w-full gap-2"
                         onClick={() => {
-                          const actor = newActor.trim();
-                          if (!actor) {
-                            setRoleError("Email utilisateur requis");
-                            return;
-                          }
-                          roleUpsertMutation.mutate({ actor, role: newRole });
+                          if (!newUsername.trim()) { setNewUserError("Identifiant requis"); return; }
+                          if (!newPassword || newPassword.length < 6) { setNewUserError("Mot de passe: 6 caractères minimum"); return; }
+                          createUserMutation.mutate();
                         }}
-                        disabled={roleUpsertMutation.isPending}
+                        disabled={createUserMutation.isPending}
                       >
                         <UserPlus className="h-4 w-4" />
-                        Créer
+                        {createUserMutation.isPending ? "En cours…" : "Créer"}
                       </Button>
                     </div>
                   </div>
+                  {newUserError && <p className="text-sm text-destructive">{newUserError}</p>}
+                  {newUserSuccess && <p className="text-sm text-emerald-600">{newUserSuccess}</p>}
+                  <p className="text-xs text-muted-foreground">
+                    Tous les gestionnaires ont accès à l'ensemble des fonctionnalités. La connexion filtre automatiquement sur leurs dossiers.
+                  </p>
+                </CardContent>
+              </Card>
 
-                  {roleError && <p className="text-sm text-destructive">{roleError}</p>}
-
-                  <div className="flex flex-wrap gap-2">
-                    <Badge variant="outline" className="gap-1">
-                      <Shield className="h-3 w-3" />
-                      Admins: {rolesQuery.data?.env_admin_count ?? 0}
-                    </Badge>
-                    <Badge variant="outline" className="gap-1">
-                      Total utilisateurs: {roleItems.length}
-                    </Badge>
-                    <Badge variant="outline" className="gap-1">
-                      Affectations DB: {rolesQuery.data?.db_assignment_count ?? 0}
-                    </Badge>
-                  </div>
-
+              {/* ── Liste des gestionnaires ───────────────────────────────── */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Shield className="h-5 w-5" />
+                    Gestionnaires ({usersQuery.data?.length ?? 0})
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {resetMsg && (
+                    <p className={`text-sm ${resetMsg.includes("Erreur") || resetMsg.includes("impossible") ? "text-destructive" : "text-emerald-600"}`}>
+                      {resetMsg}
+                    </p>
+                  )}
                   <div className="overflow-x-auto rounded-lg border">
                     <table className="w-full text-sm">
                       <thead className="bg-muted/50">
                         <tr>
                           <th className="px-4 py-3 text-left font-medium">Identifiant</th>
                           <th className="px-4 py-3 text-left font-medium">Nom complet</th>
-                          <th className="px-4 py-3 text-left font-medium">Rôle</th>
-                          <th className="px-4 py-3 text-left font-medium">Source</th>
-                          <th className="px-4 py-3 text-left font-medium">Créé par</th>
-                          <th className="px-4 py-3 text-left font-medium">Maj</th>
-                          <th className="px-4 py-3 text-right font-medium">Action</th>
+                          <th className="px-4 py-3 text-left font-medium">Créé le</th>
+                          <th className="px-4 py-3 text-left font-medium">Mot de passe</th>
+                          <th className="px-4 py-3 text-right font-medium">Actions</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {rolesQuery.isLoading && (
-                          <tr>
-                            <td className="px-4 py-4 text-center text-muted-foreground" colSpan={7}>
-                              Chargement des utilisateurs...
-                            </td>
-                          </tr>
+                        {usersQuery.isLoading && (
+                          <tr><td className="px-4 py-4 text-center text-muted-foreground" colSpan={5}>Chargement…</td></tr>
                         )}
-                        {!rolesQuery.isLoading && roleItems.length === 0 && (
-                          <tr>
-                            <td className="px-4 py-4 text-center text-muted-foreground" colSpan={7}>
-                              Aucun utilisateur configuré.
-                            </td>
-                          </tr>
+                        {!usersQuery.isLoading && (usersQuery.data?.length ?? 0) === 0 && (
+                          <tr><td className="px-4 py-4 text-center text-muted-foreground" colSpan={5}>Aucun gestionnaire créé.</td></tr>
                         )}
-                        {!rolesQuery.isLoading && roleItems.map((item) => (
-                          <tr key={`${item.actor}-${item.source}`} className="border-t hover:bg-muted/30">
-                            <td className="px-4 py-3 font-mono text-xs">{item.actor}</td>
-                            <td className="px-4 py-3 font-medium">{item.display_name || "—"}</td>
+                        {(usersQuery.data ?? []).map((user) => (
+                          <tr key={user.userId} className="border-t hover:bg-muted/30">
+                            <td className="px-4 py-3 font-mono text-xs font-semibold">{user.username}</td>
+                            <td className="px-4 py-3">{user.displayName}</td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground">
+                              {user.createdAt ? user.createdAt.slice(0, 10) : "—"}
+                            </td>
                             <td className="px-4 py-3">
-                              <Badge
-                                variant={item.effective_role === "admin" ? "default" : "secondary"}
-                                className="gap-1"
-                              >
-                                <Shield className="h-3 w-3" />
-                                {item.effective_role.toUpperCase()}
-                              </Badge>
-                            </td>
-                            <td className="px-4 py-3 text-xs">
-                              <Badge variant="outline">{item.source === "env" ? "ENV" : "DB"}</Badge>
-                            </td>
-                            <td className="px-4 py-3 text-xs text-muted-foreground">{item.updated_by || "system"}</td>
-                            <td className="px-4 py-3 text-xs text-muted-foreground">{item.source === "db" ? "Modifiable" : "Lecture seule"}</td>
-                            <td className="px-4 py-3 text-right">
-                              {item.source === "db" ? (
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="gap-1 text-destructive hover:text-destructive"
-                                  onClick={() => roleDeleteMutation.mutate(item.actor)}
-                                  disabled={roleDeleteMutation.isPending}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                  Supprimer
-                                </Button>
+                              {resetUserId === user.userId ? (
+                                <div className="flex items-center gap-2">
+                                  <Input
+                                    type="password"
+                                    placeholder="Nouveau mot de passe"
+                                    className="h-7 w-40 text-xs"
+                                    value={resetPassword}
+                                    onChange={(e) => setResetPassword(e.target.value)}
+                                    onKeyDown={(e) => {
+                                      if (e.key === "Enter" && resetPassword.length >= 6)
+                                        resetPasswordMutation.mutate({ userId: user.userId, password: resetPassword });
+                                    }}
+                                  />
+                                  <Button
+                                    size="sm"
+                                    className="h-7 gap-1 text-xs"
+                                    onClick={() => {
+                                      if (resetPassword.length < 6) { setResetMsg("6 caractères minimum"); return; }
+                                      resetPasswordMutation.mutate({ userId: user.userId, password: resetPassword });
+                                    }}
+                                    disabled={resetPasswordMutation.isPending}
+                                  >
+                                    <Key className="h-3 w-3" /> OK
+                                  </Button>
+                                  <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => { setResetUserId(null); setResetPassword(""); }}>
+                                    Annuler
+                                  </Button>
+                                </div>
                               ) : (
-                                <span className="text-xs text-muted-foreground">app.yaml</span>
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-7 gap-1 text-xs"
+                                  onClick={() => { setResetUserId(user.userId); setResetPassword(""); setResetMsg(""); }}
+                                >
+                                  <Lock className="h-3 w-3" /> Réinitialiser
+                                </Button>
                               )}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="gap-1 text-destructive hover:text-destructive"
+                                onClick={() => {
+                                  if (confirm(`Supprimer le compte "${user.username}" ?`))
+                                    deleteUserMutation.mutate(user.userId);
+                                }}
+                                disabled={deleteUserMutation.isPending}
+                              >
+                                <Trash2 className="h-4 w-4" /> Supprimer
+                              </Button>
                             </td>
                           </tr>
                         ))}
                       </tbody>
                     </table>
                   </div>
-
-                  <div className="rounded-lg bg-blue-50 p-4 dark:bg-blue-950">
-                    <p className="text-sm text-blue-900 dark:text-blue-100">
-                      <strong>Astuce:</strong> Les utilisateurs avec source "ENV" sont gérés via app.yaml et ne peuvent pas être supprimés ici.
-                      Les utilisateurs "DB" sont gérés par la base de données et peuvent être modifiés.
-                    </p>
-                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    La suppression désactive le compte sans effacer l'historique des dossiers traités.
+                  </p>
                 </CardContent>
               </Card>
             </>
@@ -1294,117 +1334,6 @@ export function ParametresPage() {
                     value={form.watch("security.ipAllowlist")}
                     onChange={(v) => form.setValue("security.ipAllowlist", v)}
                   />
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Gestion des profils et droits d&apos;accès</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-              <div className="grid gap-3 rounded-lg border p-4 md:grid-cols-[1fr_180px_auto]">
-                <div className="space-y-1.5">
-                  <Label>Identifiant utilisateur</Label>
-                  <Input
-                    placeholder="prenom.nom@bosch.com"
-                    value={newActor}
-                    onChange={(e) => setNewActor(e.target.value)}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label>Rôle</Label>
-                  <Select value={newRole} onValueChange={(v: "admin" | "adv") => setNewRole(v)}>
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="adv">ADV</SelectItem>
-                      <SelectItem value="admin">Admin</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="flex items-end">
-                  <Button
-                    className="w-full gap-2"
-                    onClick={() => {
-                      const actor = newActor.trim();
-                      if (!actor) {
-                        setRoleError("Identifiant utilisateur requis");
-                        return;
-                      }
-                      roleUpsertMutation.mutate({ actor, role: newRole });
-                    }}
-                    disabled={roleUpsertMutation.isPending}
-                  >
-                    <UserPlus className="h-4 w-4" />
-                    Attribuer
-                  </Button>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                <Badge variant="outline">Admins env: {rolesQuery.data?.env_admin_count ?? 0}</Badge>
-                <Badge variant="outline">Affectations DB: {rolesQuery.data?.db_assignment_count ?? 0}</Badge>
-              </div>
-
-              {roleError && <p className="text-sm text-destructive">{roleError}</p>}
-
-              <div className="overflow-x-auto rounded-lg border">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      <th className="px-3 py-2 text-left font-medium">Nom / prénom</th>
-                      <th className="px-3 py-2 text-left font-medium">Email</th>
-                      <th className="px-3 py-2 text-left font-medium">Rôle</th>
-                      <th className="px-3 py-2 text-left font-medium">Source</th>
-                      <th className="px-3 py-2 text-left font-medium">Maj par</th>
-                      <th className="px-3 py-2 text-right font-medium">Action</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {rolesQuery.isLoading && (
-                      <tr>
-                        <td className="px-3 py-4 text-muted-foreground" colSpan={5}>Chargement des profils...</td>
-                      </tr>
-                    )}
-                    {!rolesQuery.isLoading && roleItems.length === 0 && (
-                      <tr>
-                        <td className="px-3 py-4 text-muted-foreground" colSpan={6}>Aucun profil configuré.</td>
-                      </tr>
-                    )}
-                    {!rolesQuery.isLoading && roleItems.map((item) => (
-                      <tr key={`${item.actor}-${item.source}`} className="border-t">
-                        <td className="px-3 py-2 font-medium">{item.display_name || item.actor}</td>
-                        <td className="px-3 py-2 text-muted-foreground">{item.actor}</td>
-                        <td className="px-3 py-2">
-                          <Badge variant={item.effective_role === "admin" ? "default" : "secondary"} className="gap-1">
-                            <Shield className="h-3 w-3" />
-                            {item.effective_role.toUpperCase()}
-                          </Badge>
-                        </td>
-                        <td className="px-3 py-2">{item.source === "env" ? "ENV" : "DB"}</td>
-                        <td className="px-3 py-2">{item.updated_by || "system"}</td>
-                        <td className="px-3 py-2 text-right">
-                          {item.source === "db" ? (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="gap-1 text-destructive"
-                              onClick={() => roleDeleteMutation.mutate(item.actor)}
-                              disabled={roleDeleteMutation.isPending}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                              Révoquer
-                            </Button>
-                          ) : (
-                            <span className="text-xs text-muted-foreground">Géré par app.yaml</span>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
                 </CardContent>
               </Card>
             </>
