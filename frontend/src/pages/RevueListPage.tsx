@@ -37,7 +37,7 @@ function SourceBadge({ source }: { source?: string }) {
 }
 
 type ReviewManagerFilter = "all" | "human" | "system";
-type ReviewStatusFilter = "all" | "toProcess" | "onHold" | "processed" | "sentSap" | "transferred" | "partial" | "rejected" | "deliveryFailed";
+type ReviewStatusFilter = "all" | "toProcess" | "onHold" | "processed" | "sentSap" | "transferred" | "rejected" | "deliveryFailed";
 type BusinessStatusGroup = Exclude<ReviewStatusFilter, "all">;
 type ReviewSortKey =
   | "fileName"
@@ -57,7 +57,6 @@ const STATUS_FILTERS: Array<{ value: ReviewStatusFilter; label: string; classNam
   { value: "processed",     label: "Traité",         className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
   { value: "sentSap",       label: "Envoyé SAP",    className: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" },
   { value: "transferred",   label: "Transféré",      className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
-  { value: "partial",       label: "Partiel",        className: "border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100" },
   { value: "rejected",      label: "Rejeté",         className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
   { value: "deliveryFailed",label: "Échec d'envoi",  className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
 ];
@@ -68,7 +67,6 @@ const GROUP_STATUS_BADGE: Record<BusinessStatusGroup, { label: string; variant: 
   processed:     { label: "Traité",       variant: "success" },
   sentSap:       { label: "Envoyé SAP",  variant: "success" },
   transferred:   { label: "Transféré",    variant: "info" },
-  partial:       { label: "Partiel",      variant: "info" },
   rejected:      { label: "Rejeté",       variant: "destructive" },
   deliveryFailed:{ label: "Échec d'envoi",variant: "destructive" },
 };
@@ -81,7 +79,6 @@ function statusToFilterGroup(status: OrderStatus): BusinessStatusGroup {
   if (status === "Généré" || status === "Validé") return "processed";
   if (status === "Envoyé SAP") return "sentSap";
   if (status === "Transféré") return "transferred";
-  if (status === "Partiel") return "partial";
   if (status === "Rejeté" || status === "Doublon") return "rejected";
   if (status === "SFTP échoué" || status === "Échec SAP") return "deliveryFailed";
   return "toProcess";

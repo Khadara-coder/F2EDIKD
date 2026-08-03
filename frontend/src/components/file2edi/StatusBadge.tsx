@@ -8,7 +8,6 @@ const statusConfig: Record<
 > = {
   Généré:          { variant: "success",     label: "Généré" },
   "Revue requise": { variant: "purple",      label: "Revue requise" },
-  Partiel:         { variant: "info",        label: "Partiel" },
   Rejeté:          { variant: "destructive", label: "Rejeté" },
   Doublon:         { variant: "secondary",   label: "Doublon" },
   "SFTP échoué":   { variant: "destructive", label: "SFTP échoué" },

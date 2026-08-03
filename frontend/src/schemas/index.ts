@@ -3,7 +3,6 @@ import { z } from "zod";
 export const orderStatusSchema = z.enum([
   "Généré",
   "Revue requise",
-  "Partiel",
   "Rejeté",
   "Doublon",
   "SFTP échoué",

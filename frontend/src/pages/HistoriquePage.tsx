@@ -38,7 +38,6 @@ const STATUS_OPTIONS: (OrderStatus | "all")[] = [
   "all",
   "Généré",
   "Revue requise",
-  "Partiel",
   "Rejeté",
 ];
 

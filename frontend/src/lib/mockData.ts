@@ -93,7 +93,7 @@ export const mockRecentConversions: ConversionHistoryItem[] = [
     orderId: "ord-sonepar-002",
     fileName: "Sonepar_CDE_445821.PDF",
     clientName: "Sonepar",
-    status: "Partiel",
+    status: "Rejeté",
     date: "2025-06-30T09:30:00Z",
     hasEdifact: true,
     hasPdf: true,
@@ -376,7 +376,7 @@ export const mockHistoryResponse: HistoryResponse = {
       customerOrderNumber: "445821",
       documentReference: "SN-445821",
       processedAt: "2025-06-30T08:15:00Z",
-      status: "Partiel",
+      status: "Rejeté",
       confidence: 85,
     },
     {

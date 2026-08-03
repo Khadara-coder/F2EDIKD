@@ -48,6 +48,61 @@ def _inject_resubmission_anomaly(store, order_id: str, review: dict) -> None:
         pass  # non-bloquant
 
 
+# Cache du mapping SOLDTO → SAP ID gestionnaire (chargé depuis Partners CSV)
+_SOLDTO_TO_ADV_SAPID: dict[str, str] = {}
+_SOLDTO_CACHE_LOADED = False
+
+
+def _load_soldto_adv_cache() -> None:
+    """Charge le mapping SOLDTO → Fonction Partenaire (SAP ID ADV) depuis Partners CSV."""
+    global _SOLDTO_TO_ADV_SAPID, _SOLDTO_CACHE_LOADED
+    if _SOLDTO_CACHE_LOADED:
+        return
+    _SOLDTO_CACHE_LOADED = True  # évite double chargement même en cas d'erreur
+    try:
+        import os
+        import pandas as pd
+        # Cherche le fichier Partners dans les emplacements connus
+        for path in (
+            "/app/data/masterdata/10564_Partners.csv",
+            os.path.join(os.path.dirname(__file__), "../..", "data/masterdata/10564_Partners.csv"),
+        ):
+            if os.path.exists(path):
+                df = pd.read_csv(path, sep=";", dtype=str)
+                col_fp = next((c for c in df.columns if "fonction" in c.lower() and "part" in c.lower()), None)
+                col_soldto = next((c for c in df.columns if c.upper() == "SOLDTO"), None)
+                if col_fp and col_soldto:
+                    mapping = df.dropna(subset=[col_soldto, col_fp])
+                    _SOLDTO_TO_ADV_SAPID = dict(
+                        zip(mapping[col_soldto].astype(str).str.strip(),
+                            mapping[col_fp].astype(str).str.strip())
+                    )
+                break
+    except Exception as _e:
+        import logging
+        logging.getLogger("edifact.file2edi.router").debug("ADV cache load failed: %s", _e)
+
+
+def _resolve_adv_username_from_soldto(soldto: str, store) -> str | None:
+    """Retourne le username du gestionnaire ADV responsable d'un SOLDTO.
+    
+    Logique: SOLDTO → Partners CSV (Fonction Partenaire = SAP ID ADV)
+             → file2edi_users.sap_id → username
+    """
+    _load_soldto_adv_cache()
+    adv_sap_id = _SOLDTO_TO_ADV_SAPID.get(str(soldto).strip())
+    if not adv_sap_id:
+        return None
+    try:
+        users = store.list_users()
+        for user in users:
+            if str(user.get("sapId") or "").strip() == str(adv_sap_id).strip():
+                return user["username"]
+    except Exception:
+        pass
+    return None
+
+
 def _parse_custom_headers(raw: str) -> dict[str, str]:
     headers: dict[str, str] = {}
     for part in re.split(r"[\n,]", raw or ""):
@@ -412,6 +467,13 @@ def create_router() -> APIRouter:
         review["order"]["source"] = "ui"
         # Détecter re-soumission
         _inject_resubmission_anomaly(store, order_id, review)
+        # Auto-assigner au gestionnaire ADV selon Fonction Partenaire dans Partners
+        soldto = next((p.get("partnerCode") for p in review.get("partners", [])
+                       if p.get("partnerFunction") == "soldto"), None)
+        if soldto:
+            adv_username = _resolve_adv_username_from_soldto(soldto, store)
+            if adv_username:
+                review["order"]["assignedTo"] = adv_username
         store.save_order_review(review)
         try:
             srv._init_db()
@@ -458,6 +520,13 @@ def create_router() -> APIRouter:
         review["order"]["source"] = "api"
         # Détecter re-soumission
         _inject_resubmission_anomaly(store, order_id, review)
+        # Auto-assigner au gestionnaire ADV selon Fonction Partenaire dans Partners
+        soldto = next((p.get("partnerCode") for p in review.get("partners", [])
+                       if p.get("partnerFunction") == "soldto"), None)
+        if soldto:
+            adv_username = _resolve_adv_username_from_soldto(soldto, store)
+            if adv_username:
+                review["order"]["assignedTo"] = adv_username
         store.save_order_review(review)
 
         try:
@@ -1339,8 +1408,6 @@ def _issue_label(o: dict) -> str:
         return "Commande rejetée par le moteur"
     if status == "Généré":
         return "EDIFACT généré"
-    if status == "Partiel":
-        return "Extraction partielle"
     if o.get("global_confidence", 100) < 90:
         return "Confiance insuffisante"
     return "Revue requise"

@@ -468,8 +468,8 @@ class File2EdiStore:
                       order_id,upload_id,file_name,client_name,customer_order_number,document_reference,
                       order_date,requested_delivery_date,currency,incoterm,delivery_mode,message_type,vendor,
                       total_amount,global_confidence,status,review_required,line_count,pdf_hash,pdf_path,source,
-                      extraction_json,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                      extraction_json,assigned_to,created_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(order_id) DO UPDATE SET
                       upload_id=excluded.upload_id,
                       file_name=excluded.file_name,
@@ -489,6 +489,7 @@ class File2EdiStore:
                       pdf_path=excluded.pdf_path,
                       source=excluded.source,
                       extraction_json=excluded.extraction_json,
+                      assigned_to=COALESCE(excluded.assigned_to, file2edi_orders.assigned_to),
                       updated_at=excluded.updated_at
                     """,
                     [
@@ -504,6 +505,7 @@ class File2EdiStore:
                         pdf_path,
                         str(o.get("source") or "unknown"),
                         json.dumps(engine) if engine else None,
+                        o.get("assignedTo") or o.get("assigned_to"),
                         o.get("createdAt", _now()), _now(),
                     ],
                 )
@@ -707,6 +709,7 @@ class File2EdiStore:
             "reviewRequired": bool(row["review_required"]),
             "lineCount": row["line_count"],
             "source": row.get("source") or "unknown",
+            "assignedTo": row.get("assigned_to"),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }

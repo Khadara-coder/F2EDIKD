@@ -1,7 +1,6 @@
 export type OrderStatus =
   | "Généré"
   | "Revue requise"
-  | "Partiel"
   | "Rejeté"
   | "Doublon"
   | "SFTP échoué"
