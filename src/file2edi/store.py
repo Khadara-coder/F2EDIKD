@@ -1454,7 +1454,7 @@ def _users_mixin(cls):
     def get_session_user(self, session_id: str) -> dict | None:
         conn = self._conn()
         row = conn.execute(
-            "SELECT s.user_id, u.username, u.display_name, s.expires_at "
+            "SELECT s.user_id, u.username, u.display_name, u.role, s.expires_at "
             "FROM file2edi_sessions s JOIN file2edi_users u ON s.user_id=u.user_id "
             "WHERE s.session_id=? AND u.is_active=1",
             [session_id],
