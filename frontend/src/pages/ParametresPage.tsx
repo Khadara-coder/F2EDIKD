@@ -83,6 +83,14 @@ export function ParametresPage() {
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [resetMsg, setResetMsg] = useState("");
+  // Edit modal state
+  const [editUser, setEditUser] = useState<GestionnaireUser | null>(null);
+  const [editDisplayName, setEditDisplayName] = useState("");
+  const [editEmail, setEditEmail] = useState("");
+  const [editSapId, setEditSapId] = useState("");
+  const [editRole, setEditRole] = useState<"adv" | "admin">("adv");
+  const [editError, setEditError] = useState("");
+  const [editSuccess, setEditSuccess] = useState("");
 
   const rolesQuery = useQuery({
     queryKey: ["admin", "roles"],
@@ -123,6 +131,21 @@ export function ParametresPage() {
   const deleteUserMutation = useMutation({
     mutationFn: (userId: string) => fetch(`/api/users/${userId}`, { method: "DELETE" }),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["users"] }),
+  });
+
+  const updateUserMutation = useMutation({
+    mutationFn: ({ userId, data }: { userId: string; data: Partial<GestionnaireUser> }) =>
+      fetch(`/api/users/${userId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      }).then(async r => { if (!r.ok) throw new Error((await r.json()).detail || "Erreur"); return r.json(); }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+      setEditSuccess("Modifications enregistrées");
+      setTimeout(() => { setEditUser(null); setEditSuccess(""); }, 1500);
+    },
+    onError: (e) => setEditError(e instanceof Error ? e.message : "Erreur"),
   });
 
   const resetPasswordMutation = useMutation({
@@ -1042,12 +1065,19 @@ export function ParametresPage() {
                       />
                     </div>
                     <div className="space-y-1.5">
-                      <Label>Identifiant SAP</Label>
+                      <Label>
+                        Identifiant SAP
+                        {newUserRole === "adv" && <span className="text-destructive ml-0.5">*</span>}
+                      </Label>
                       <Input
-                        placeholder="ex: DIK1DY"
+                        placeholder="8 chiffres — ex: 15016007"
                         value={newSapId}
-                        onChange={(e) => setNewSapId(e.target.value)}
+                        maxLength={8}
+                        onChange={(e) => setNewSapId(e.target.value.replace(/\D/g, "").slice(0, 8))}
                       />
+                      {newUserRole === "adv" && (
+                        <p className="text-xs text-muted-foreground">Requis pour les Gestionnaires (ADV)</p>
+                      )}
                     </div>
                     {/* Ligne 3 : type + mot de passe */}
                     <div className="space-y-1.5">
@@ -1092,6 +1122,10 @@ export function ParametresPage() {
                       onClick={() => {
                         if (!newUsername.trim()) { setNewUserError("Identifiant requis"); return; }
                         if (!newEmail.trim()) { setNewUserError("Adresse e-mail requise"); return; }
+                        if (newUserRole === "adv") {
+                          if (!newSapId.trim()) { setNewUserError("L'identifiant SAP est requis pour un Gestionnaire (ADV)"); return; }
+                          if (!/^\d{8}$/.test(newSapId.trim())) { setNewUserError("L'identifiant SAP doit être composé de 8 chiffres (ex: 15016007)"); return; }
+                        }
                         if (!newPassword || newPassword.length < 6) { setNewUserError("Mot de passe: 6 caractères minimum"); return; }
                         createUserMutation.mutate();
                       }}
@@ -1201,18 +1235,35 @@ export function ParametresPage() {
                               )}
                             </td>
                             <td className="px-4 py-3 text-right">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="gap-1 text-destructive hover:text-destructive"
-                                onClick={() => {
-                                  if (confirm(`Supprimer le compte "${user.username}" ?`))
-                                    deleteUserMutation.mutate(user.userId);
-                                }}
-                                disabled={deleteUserMutation.isPending}
-                              >
-                                <Trash2 className="h-4 w-4" /> Supprimer
-                              </Button>
+                              <div className="flex items-center justify-end gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1"
+                                  onClick={() => {
+                                    setEditUser(user as GestionnaireUser);
+                                    setEditDisplayName((user as GestionnaireUser).displayName || "");
+                                    setEditEmail((user as GestionnaireUser).email || "");
+                                    setEditSapId((user as GestionnaireUser).sapId || "");
+                                    setEditRole(((user as GestionnaireUser).role || "adv") as "adv" | "admin");
+                                    setEditError(""); setEditSuccess("");
+                                  }}
+                                >
+                                  Modifier
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="gap-1 text-destructive hover:text-destructive"
+                                  onClick={() => {
+                                    if (confirm(`Supprimer le compte "${user.username}" ?`))
+                                      deleteUserMutation.mutate(user.userId);
+                                  }}
+                                  disabled={deleteUserMutation.isPending}
+                                >
+                                  <Trash2 className="h-4 w-4" /> Supprimer
+                                </Button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1224,6 +1275,97 @@ export function ParametresPage() {
                   </p>
                 </CardContent>
               </Card>
+
+              {/* ── Modal : Modifier un utilisateur ──────────────────────── */}
+              {editUser && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+                  <div className="bg-background rounded-lg border shadow-xl w-full max-w-lg p-6 space-y-4">
+                    <h2 className="text-lg font-semibold flex items-center gap-2">
+                      <Shield className="h-5 w-5 text-primary" />
+                      Modifier — {editUser.username}
+                    </h2>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label>Nom complet</Label>
+                        <Input
+                          value={editDisplayName}
+                          onChange={(e) => setEditDisplayName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Adresse e-mail *</Label>
+                        <Input
+                          type="email"
+                          value={editEmail}
+                          onChange={(e) => { setEditEmail(e.target.value); setEditError(""); }}
+                        />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>
+                          Identifiant SAP
+                          {editRole === "adv" && <span className="text-destructive ml-0.5">*</span>}
+                        </Label>
+                        <Input
+                          placeholder="8 chiffres — ex: 15016007"
+                          value={editSapId}
+                          maxLength={8}
+                          onChange={(e) => { setEditSapId(e.target.value.replace(/\D/g, "").slice(0, 8)); setEditError(""); }}
+                        />
+                        {editRole === "adv" && (
+                          <p className="text-xs text-muted-foreground">Requis pour les Gestionnaires (ADV)</p>
+                        )}
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Type d'utilisateur</Label>
+                        <Select value={editRole} onValueChange={(v) => setEditRole(v as "adv" | "admin")}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="adv">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                                Gestionnaire (ADV)
+                              </div>
+                            </SelectItem>
+                            <SelectItem value="admin">
+                              <div className="flex items-center gap-2">
+                                <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
+                                Administrateur
+                              </div>
+                            </SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    {editError && <p className="text-sm text-destructive">{editError}</p>}
+                    {editSuccess && <p className="text-sm text-emerald-600">{editSuccess}</p>}
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button variant="outline" onClick={() => setEditUser(null)}>Annuler</Button>
+                      <Button
+                        className="gap-2"
+                        onClick={() => {
+                          if (!editEmail.trim()) { setEditError("Adresse e-mail requise"); return; }
+                          if (editRole === "adv") {
+                            if (!editSapId.trim()) { setEditError("L'identifiant SAP est requis pour un Gestionnaire (ADV)"); return; }
+                            if (!/^\d{8}$/.test(editSapId.trim())) { setEditError("L'identifiant SAP doit être composé de 8 chiffres (ex: 15016007)"); return; }
+                          }
+                          updateUserMutation.mutate({
+                            userId: editUser.userId,
+                            data: {
+                              displayName: editDisplayName,
+                              email: editEmail,
+                              sapId: editSapId,
+                              role: editRole,
+                            },
+                          });
+                        }}
+                        disabled={updateUserMutation.isPending}
+                      >
+                        {updateUserMutation.isPending ? "En cours…" : "Enregistrer"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </>
           )}
 

@@ -158,6 +158,24 @@ def create_router() -> APIRouter:
         get_store().delete_user(user_id)
         return {"ok": True}
 
+    @router.put("/users/{user_id}")
+    async def update_user(user_id: str, req: Request):
+        body = await req.json()
+        display_name = body.get("displayName") or body.get("display_name")
+        email = body.get("email")
+        sap_id = body.get("sapId") or body.get("sap_id")
+        role = body.get("role")
+        result = get_store().update_user(
+            user_id,
+            display_name=display_name,
+            email=email,
+            sap_id=sap_id,
+            role=role,
+        )
+        if not result:
+            raise HTTPException(404, "Utilisateur introuvable")
+        return result
+
     @router.post("/users/{user_id}/change-password")
     async def user_change_password(user_id: str, req: Request):
         body = await req.json()

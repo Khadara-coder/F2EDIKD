@@ -1504,6 +1504,40 @@ def _users_mixin(cls):
         conn.close()
         return True
 
+    def update_user(self, user_id: str, display_name: str | None = None,
+                    email: str | None = None, sap_id: str | None = None,
+                    role: str | None = None) -> dict | None:
+        """Update user profile fields (excluding username and password)."""
+        conn = self._conn()
+        sets, params = [], []
+        if display_name is not None:
+            sets.append("display_name=?"); params.append(display_name.strip())
+        if email is not None:
+            sets.append("email=?"); params.append(email.strip())
+        if sap_id is not None:
+            sets.append("sap_id=?"); params.append(sap_id.strip())
+        if role is not None and role in ("adv", "admin"):
+            sets.append("role=?"); params.append(role)
+        if not sets:
+            conn.close()
+            return None
+        params.append(user_id)
+        conn.execute(f"UPDATE file2edi_users SET {', '.join(sets)} WHERE user_id=?", params)
+        conn.commit()
+        row = conn.execute(
+            "SELECT user_id,username,display_name,email,sap_id,role,created_at FROM file2edi_users WHERE user_id=?",
+            [user_id]
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {"userId": row["user_id"], "username": row["username"],
+                "displayName": row["display_name"],
+                "email": row.get("email") or "",
+                "sapId": row.get("sap_id") or "",
+                "role": row.get("role") or "adv",
+                "createdAt": row["created_at"]}
+
     def hold_order(self, order_id: str, reason: str, actor: str) -> dict | None:
         conn = self._conn()
         conn.execute(
