@@ -113,11 +113,32 @@ def create_router() -> APIRouter:
 
     @router.get("/me")
     def get_me(req: Request):
-        """Return current user info — prefers session cookie, falls back to server actor."""
-        user = _get_current_user(req)
-        if user:
-            return {"actor": user["username"], "displayName": user["displayName"], "role": "admin", "authenticated": True}
-        # Fallback to server-level actor (dev mode)
+        """Return current user info — prefers session cookie, falls back to server actor.
+        
+        If a f2edi_session cookie is present but invalid/expired, return authenticated=False
+        so the frontend shows the login page (prevents bypassing logout via DEV_ACTOR fallback).
+        """
+        session_id = req.cookies.get(SESSION_COOKIE)
+
+        # Cookie present → must validate it; don't fall back to DEV_ACTOR
+        if session_id:
+            user = _get_current_user(req)
+            if user:
+                return {"actor": user["username"], "displayName": user["displayName"],
+                        "role": user.get("role", "adv"), "authenticated": True}
+            # Cookie present but invalid/expired → force re-login
+            return {"actor": None, "authenticated": False, "role": "adv"}
+
+        # No cookie → try session-based auth from session store (might have users)
+        try:
+            users = get_store().list_users()
+            if users:
+                # Users exist in DB → require login
+                return {"actor": None, "authenticated": False, "role": "adv"}
+        except Exception:
+            pass
+
+        # No users in DB → dev/demo mode: fall back to server actor
         try:
             import server as srv
             actor = srv._resolve_actor(req)
