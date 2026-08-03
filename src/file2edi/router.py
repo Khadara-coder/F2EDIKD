@@ -289,22 +289,6 @@ def create_router() -> APIRouter:
             raise HTTPException(404)
         return {"ok": True, "status": "Transféré", "to": to_username}
 
-    @router.get("/orders")
-    def list_orders(req: Request, my: bool = False):
-        """List orders. ?my=true filters to current user's orders."""
-        user = _get_current_user(req)
-        assignee = user["username"] if (user and my) else None
-        try:
-            rows = get_store().list_orders_filtered(assignee=assignee)
-            return [{"orderId": r["order_id"], "fileName": r.get("file_name"), "clientName": r.get("client_name"),
-                     "status": r.get("status"), "confidence": r.get("global_confidence", 0),
-                     "createdAt": r.get("created_at"), "assignedTo": r.get("assigned_to"),
-                     "holdReason": r.get("hold_reason"), "transferredFrom": r.get("transferred_from"),
-                     "source": r.get("source")} for r in rows]
-        except Exception:
-            return []
-
-
         if not isinstance(settings_payload, dict):
             return
         sftp = settings_payload.get("sftpConfig")
@@ -1395,7 +1379,8 @@ def _order_list_item(o: dict) -> dict:
         "updatedAt": updated_at,
         "status": o.get("status", "À revoir"),
         "processedAt": processed_at,
-        "processedBy": o.get("processed_by"),
+        "processedBy": o.get("processed_by") or o.get("uploaded_by"),
+        "assignedTo": o.get("assigned_to"),
         "source": o.get("source") or "unknown",
     }
 

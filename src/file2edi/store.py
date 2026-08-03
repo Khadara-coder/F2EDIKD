@@ -768,7 +768,7 @@ class File2EdiStore:
             """SELECT o.order_id,
                       COALESCE(u.file_name, o.file_name) AS file_name,
                       o.client_name, o.global_confidence, o.status,
-                      o.source,
+                      o.source, o.assigned_to, o.uploaded_by,
                       o.created_at, o.updated_at,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o
