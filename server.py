@@ -1036,44 +1036,46 @@ def api_auth_modes():
 
 
 @app.post("/api/auth/login")
-def api_auth_login(payload: ProfileLoginPayload):
-    """Create a profile session cookie (local/dev oriented)."""
+async def api_auth_login(req: Request):
+    """Login via utilisateur en base PostgreSQL ou fallback profil legacy."""
+    body = {}
+    try:
+        body = await req.json()
+    except Exception:
+        pass
+
+    username = str(body.get("actor") or body.get("username") or "").strip()
+    password = str(body.get("password") or "").strip()
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Identifiant et mot de passe requis")
+
+    # Try PostgreSQL user store first
+    try:
+        from src.file2edi.store import get_store as _gs
+        user = _gs().verify_credentials(username, password)
+        if user:
+            session_id = _gs().create_session(user["userId"], ip=req.client.host if req.client else None)
+            resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"], "role": "admin"})
+            resp.set_cookie("f2edi_session", session_id, httponly=True, samesite="lax", max_age=43200, path="/")
+            return resp
+    except Exception as _e:
+        log.debug("api_auth_login: PG auth failed: %s", _e)
+
+    # Fallback: legacy profile login (single shared password)
     if not ENABLE_PROFILE_LOGIN:
-        raise HTTPException(status_code=403, detail="Connexion par profil désactivée")
-
-    actor = _normalize_actor_identity(payload.actor)
-    role = (payload.role or "").strip().lower()
-    provided_password = (payload.password or "").strip()
-    if not actor:
-        raise HTTPException(status_code=400, detail="Identifiant utilisateur requis")
-    if role not in {"admin", "adv"}:
-        raise HTTPException(status_code=400, detail="Rôle invalide (admin|adv)")
+        raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect")
     expected_password = _profile_login_password()
-    if not expected_password:
-        raise HTTPException(status_code=500, detail="Mot de passe de connexion non configuré")
-    if not provided_password or not hmac.compare_digest(provided_password, expected_password):
-        raise HTTPException(status_code=401, detail="Mot de passe invalide")
+    if expected_password and hmac.compare_digest(password, expected_password):
+        token = uuid.uuid4().hex
+        now_ts = int(datetime.now(timezone.utc).timestamp())
+        role = (body.get("role") or "admin").strip().lower()
+        _PROFILE_SESSIONS[token] = {"actor": username, "role": role, "exp": now_ts + SESSION_TTL_SECONDS}
+        resp = JSONResponse({"ok": True, "actor": username, "displayName": username, "role": role})
+        resp.set_cookie(key=SESSION_COOKIE_NAME, value=token, max_age=SESSION_TTL_SECONDS,
+                       httponly=True, samesite="lax", secure=False, path="/")
+        return resp
 
-    token = uuid.uuid4().hex
-    now_ts = int(datetime.now(timezone.utc).timestamp())
-    _PROFILE_SESSIONS[token] = {
-        "actor": actor,
-        "role": role,
-        "exp": now_ts + SESSION_TTL_SECONDS,
-    }
-
-    resp = JSONResponse({"ok": True, "actor": actor, "role": role})
-    resp.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        max_age=SESSION_TTL_SECONDS,
-        httponly=True,
-        samesite="lax",
-        secure=False,
-        path="/",
-    )
-    resp.delete_cookie(LOCAL_LOGOUT_COOKIE_NAME, path="/")
-    return resp
+    raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect")
 
 
 @app.post("/api/auth/logout")
