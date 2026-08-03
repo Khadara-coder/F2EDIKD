@@ -39,6 +39,8 @@ export type AppRole = "admin" | "adv";
 
 export interface CurrentUser {
   actor: string;
+  username?: string;     // identifiant DB (login)
+  displayName?: string;  // Prénom Nom
   role: AppRole;
   authenticated: boolean;
 }
@@ -95,6 +97,7 @@ export interface ReviewQueueItem {
   status: OrderStatus;
   processedAt?: string;
   processedBy?: string;
+  assignedTo?: string;   // username du gestionnaire assigné
   source?: "ui" | "n8n" | "api" | "unknown";
 }
 

@@ -101,7 +101,7 @@ export function RevueListPage() {
   const [sortKey, setSortKey] = useState<ReviewSortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
-  const currentUsername = (me as unknown as { username?: string; actor?: string })?.username ?? me?.actor ?? null;
+  const currentUsername = me?.username ?? me?.actor?.split("@")[0] ?? null;
 
   // Auto-activer le filtre "Mes dossiers" pour les ADV à l'ouverture
   useEffect(() => {
@@ -171,12 +171,12 @@ export function RevueListPage() {
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToFilterGroup(row.status) === statusFilter;
       // "Mes dossiers" filter
-      const rowAssignee = (row as unknown as { assignedTo?: string }).assignedTo || row.processedBy || "";
+      const rowAssignee = row.assignedTo || row.processedBy || "";
       const matchesMyOrders = !myOrdersOnly || !currentUsername ||
         rowAssignee.toLowerCase() === currentUsername.toLowerCase();
       // Filtre par gestionnaire spécifique
       const matchesManager = managerFilter === "all" ||
-        (row as unknown as { assignedTo?: string }).assignedTo?.toLowerCase() === managerFilter.toLowerCase() ||
+        row.assignedTo?.toLowerCase() === managerFilter.toLowerCase() ||
         (row.processedBy || "").toLowerCase() === managerFilter.toLowerCase();
       // Filtre par date d'import
       const rowDate = row.createdAt || row.date || "";
@@ -435,10 +435,7 @@ export function RevueListPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {getDisplayName(
-                        (row as unknown as { assignedTo?: string }).assignedTo
-                        || row.processedBy
-                      ) || <span className="text-muted-foreground">—</span>}
+                      {getDisplayName(row.assignedTo || row.processedBy) || <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />

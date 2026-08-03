@@ -179,7 +179,8 @@ def create_router() -> APIRouter:
         if session_id:
             user = _get_current_user(req)
             if user:
-                return {"actor": user["username"], "displayName": user["displayName"],
+                return {"actor": user["username"], "username": user["username"],
+                        "displayName": user["displayName"],
                         "role": user.get("role", "adv"), "authenticated": True}
             # Cookie present but invalid/expired → force re-login
             return {"actor": None, "authenticated": False, "role": "adv"}
