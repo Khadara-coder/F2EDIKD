@@ -391,7 +391,7 @@ export function RevueListPage() {
                   </TableHead>
                   <TableHead>
                     <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedAt")}>
-                      Traité le
+                      Envoyé SAP le
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </TableHead>
