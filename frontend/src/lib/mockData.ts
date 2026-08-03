@@ -1,4 +1,4 @@
-import type {
+﻿import type {
   AppSettings,
   ConversionHistoryItem,
   DashboardMetrics,
@@ -36,7 +36,7 @@ export const mockDashboardMetrics: DashboardMetrics = {
   statusDistribution: [
     { label: "Générés", count: 9, percent: 64, color: "bg-emerald-500" },
     { label: "Revue requise", count: 3, percent: 21, color: "bg-amber-500" },
-    { label: "Rejetés", count: 1, percent: 7, color: "bg-red-500" },
+    { label: "Rejet\u00e9", count: 1, percent: 7, color: "bg-red-500" },
     { label: "SFTP échoué", count: 0, percent: 0, color: "bg-rose-500" },
   ],
   processingFlow: {
@@ -93,7 +93,7 @@ export const mockRecentConversions: ConversionHistoryItem[] = [
     orderId: "ord-sonepar-002",
     fileName: "Sonepar_CDE_445821.PDF",
     clientName: "Sonepar",
-    status: "Rejet�",
+    status: "Rejet\u00e9",
     date: "2025-06-30T09:30:00Z",
     hasEdifact: true,
     hasPdf: true,
@@ -274,7 +274,7 @@ export const mockAnomalies: OrderAnomaly[] = [
     lineId: "ln-3",
     severity: "warning",
     fieldName: "boschArticle",
-    message: "Ligne 3 : article Bosch à confirmer (BGL 25-550 ?)",
+    message: "Ligne 3 : article Bosch Ã  confirmer (BGL 25-550 ?)",
     status: "Ouverte",
     createdAt: "2025-06-30T10:42:06Z",
   },
@@ -290,10 +290,10 @@ export const mockAnomalies: OrderAnomaly[] = [
 ];
 
 export const mockTraceability: TraceabilityStep[] = [
-  { id: "1", label: "PDF reçu", status: "completed", timestamp: "2025-06-30T10:42:00Z" },
+  { id: "1", label: "PDF reÃ§u", status: "completed", timestamp: "2025-06-30T10:42:00Z" },
   { id: "2", label: "Extraction OCR", status: "completed", timestamp: "2025-06-30T10:42:02Z" },
   { id: "3", label: "Mapping client", status: "completed", timestamp: "2025-06-30T10:42:04Z" },
-  { id: "4", label: "Contrôles métier", status: "completed", timestamp: "2025-06-30T10:42:05Z" },
+  { id: "4", label: "ContrÃ´les métier", status: "completed", timestamp: "2025-06-30T10:42:05Z" },
   { id: "5", label: "Revue manuelle", status: "current" },
   { id: "6", label: "Génération EDIFACT", status: "pending" },
   { id: "7", label: "Export SFTP", status: "pending" },
@@ -330,7 +330,7 @@ export const mockExtractionPreview: ExtractionPreview = {
     { id: "2", label: "Détection des informations clés", status: "completed" },
     { id: "3", label: "Structuration des données", status: "completed" },
     { id: "4", label: "Validation automatique", status: "completed" },
-    { id: "5", label: "Aperçu du résultat", status: "current" },
+    { id: "5", label: "AperÃ§u du résultat", status: "current" },
     { id: "6", label: "Revue manuelle", status: "pending" },
     { id: "7", label: "Génération EDIFACT", status: "pending" },
   ],
@@ -376,7 +376,7 @@ export const mockHistoryResponse: HistoryResponse = {
       customerOrderNumber: "445821",
       documentReference: "SN-445821",
       processedAt: "2025-06-30T08:15:00Z",
-      status: "Rejet�",
+      status: "Rejet\u00e9",
       confidence: 85,
     },
     {
@@ -387,7 +387,7 @@ export const mockHistoryResponse: HistoryResponse = {
       customerOrderNumber: "77234",
       documentReference: "CD-77234",
       processedAt: "2025-06-29T16:20:00Z",
-      status: "Rejeté",
+      status: "Rejet\u00e9",
       confidence: 45,
     },
   ],
@@ -423,7 +423,7 @@ export const mockMasterDataClients: MasterDataClient[] = [
       unb: "0004 (Party)",
       nadBy: "NAD+BY (Buyer)",
       nadDp: "NAD+DP (Ship-to par défaut)",
-      duns: "—",
+      duns: "â€”",
       gln: "3015981600108",
     },
   },
@@ -455,7 +455,7 @@ export const mockSettings: AppSettings = {
   version: "D.96A",
   defaultIncoterm: "DAP - Delivered At Place",
   currency: "EUR - Euro",
-  documentLanguage: "Français (FR)",
+  documentLanguage: "FranÃ§ais (FR)",
   timezone: "Europe/Paris",
   connectors: {
     apiExtraction: "disconnected",
@@ -536,3 +536,4 @@ export const mockSettings: AppSettings = {
     notifyOnDuplicate: false,
   },
 };
+

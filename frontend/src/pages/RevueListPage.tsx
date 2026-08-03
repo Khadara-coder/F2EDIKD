@@ -1,6 +1,7 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowUpDown, FileIcon, Search, SlidersHorizontal, Upload, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
 import { useDashboard, useDisplayTimeZone, useOrdersList } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Header } from "@/components/layout/Header";
@@ -36,7 +37,6 @@ function SourceBadge({ source }: { source?: string }) {
   );
 }
 
-type ReviewManagerFilter = "all" | "human" | "system";
 type ReviewStatusFilter = "all" | "toProcess" | "onHold" | "processed" | "sentSap" | "transferred" | "rejected" | "deliveryFailed";
 type BusinessStatusGroup = Exclude<ReviewStatusFilter, "all">;
 type ReviewSortKey =
@@ -94,12 +94,25 @@ export function RevueListPage() {
 
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>("all");
-  const [managerFilter, setManagerFilter] = useState<ReviewManagerFilter>("all");
-  const [myOrdersOnly, setMyOrdersOnly] = useState(false);   // ← filtre "Mes dossiers"
+  const [managerFilter, setManagerFilter] = useState<string>("all");  // "all" | username
+  const [myOrdersOnly, setMyOrdersOnly] = useState(false);
   const [sortKey, setSortKey] = useState<ReviewSortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const currentUsername = (me as unknown as { username?: string; actor?: string })?.username ?? me?.actor ?? null;
+
+  // Auto-activer le filtre "Mes dossiers" pour les ADV à l'ouverture
+  useEffect(() => {
+    if (!isAdmin && currentUsername) {
+      setMyOrdersOnly(true);
+    }
+  }, [isAdmin, currentUsername]);
+
+  // Liste des gestionnaires pour le filtre (admin uniquement)
+  const usersQuery = useQuery<Array<{ userId: string; username: string; displayName: string }>>(
+    { queryKey: ["users"], queryFn: () => fetch("/api/users").then(r => r.json()), staleTime: 60_000 }
+  );
+  const gestionnaires = usersQuery.data ?? [];
 
   const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
@@ -153,14 +166,15 @@ export function RevueListPage() {
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToFilterGroup(row.status) === statusFilter;
-      const processedBy = (row.processedBy || "").trim().toLowerCase();
-      const normalizedManager = processedBy === "operator" || processedBy === "system" ? "system" : "human";
-      const matchesManager = managerFilter === "all" || normalizedManager === managerFilter;
-      // "Mes dossiers" filter: match assignedTo or processedBy
+      // "Mes dossiers" filter: match assignedTo ou processedBy
       const rowAssignee = (row as unknown as { assignedTo?: string }).assignedTo || row.processedBy || "";
       const matchesMyOrders = !myOrdersOnly || !currentUsername ||
         rowAssignee.toLowerCase() === currentUsername.toLowerCase();
-      return matchesSearch && matchesStatus && matchesManager && matchesMyOrders;
+      // Filtre par gestionnaire spécifique (admin)
+      const matchesManager = managerFilter === "all" ||
+        (row as unknown as { assignedTo?: string }).assignedTo?.toLowerCase() === managerFilter.toLowerCase() ||
+        (row.processedBy || "").toLowerCase() === managerFilter.toLowerCase();
+      return matchesSearch && matchesStatus && matchesMyOrders && matchesManager;
     });
 
     return filtered.sort((left, right) => {
@@ -217,20 +231,18 @@ export function RevueListPage() {
               <SlidersHorizontal className="h-4 w-4 text-primary" />
               Filtres
             </div>
-            {/* Bouton "Mes dossiers" */}
+            {/* Toggle Mes dossiers / Tous les dossiers */}
             <Button
               variant={myOrdersOnly ? "default" : "outline"}
               size="sm"
               className="gap-1.5"
               onClick={() => setMyOrdersOnly(!myOrdersOnly)}
-              title={myOrdersOnly ? "Afficher tous les dossiers" : "Afficher uniquement mes dossiers"}
+              title={myOrdersOnly ? "Afficher tous les dossiers" : "Filtrer sur mes dossiers"}
             >
-              {myOrdersOnly ? (
-                <X className="h-3.5 w-3.5" />
-              ) : (
-                <Search className="h-3.5 w-3.5" />
-              )}
-              {myOrdersOnly ? "Tous les dossiers" : "Mes dossiers"}
+              {myOrdersOnly ? <X className="h-3.5 w-3.5" /> : <Search className="h-3.5 w-3.5" />}
+              {myOrdersOnly
+                ? currentUsername ? `Mes dossiers (${currentUsername})` : "Mes dossiers"
+                : "Tous les dossiers"}
             </Button>
           </div>
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto] lg:items-center">
@@ -257,15 +269,19 @@ export function RevueListPage() {
               </SelectContent>
             </Select>
 
+            {/* Filtre par gestionnaire: admin = liste des users, ADV = désactivé (utilise toggle ci-dessus) */}
             {isAdmin ? (
-              <Select value={managerFilter} onValueChange={(v) => setManagerFilter(v as ReviewManagerFilter)}>
+              <Select value={managerFilter} onValueChange={setManagerFilter}>
                 <SelectTrigger>
                   <SelectValue placeholder="Gestionnaire" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Tous les gestionnaires</SelectItem>
-                  <SelectItem value="human">Gestionnaire humain</SelectItem>
-                  <SelectItem value="system">Système / historique</SelectItem>
+                  {gestionnaires.map((u) => (
+                    <SelectItem key={u.userId} value={u.username}>
+                      {u.displayName} ({u.username})
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             ) : (
@@ -282,6 +298,8 @@ export function RevueListPage() {
                   setManagerFilter("all");
                   setSortKey("createdAt");
                   setSortDirection("desc");
+                  // ADV reprend son filtre par défaut
+                  if (!isAdmin && currentUsername) setMyOrdersOnly(true);
                 }}
               >
                 <X className="h-4 w-4" />
