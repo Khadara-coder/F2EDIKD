@@ -1055,7 +1055,9 @@ async def api_auth_login(req: Request):
         user = _gs().verify_credentials(username, password)
         if user:
             session_id = _gs().create_session(user["userId"], ip=req.client.host if req.client else None)
-            resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"], "role": "admin"})
+            resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"],
+                                 "role": user.get("role", "adv"), "email": user.get("email", ""),
+                                 "sapId": user.get("sapId", "")})
             resp.set_cookie("f2edi_session", session_id, httponly=True, samesite="lax", max_age=43200, path="/")
             return resp
     except Exception as _e:

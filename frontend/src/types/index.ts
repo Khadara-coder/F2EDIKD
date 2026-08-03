@@ -20,6 +20,9 @@ export type GestionnaireUser = {
   userId: string;
   username: string;
   displayName: string;
+  email?: string;
+  sapId?: string;
+  role?: "adv" | "admin";
   createdAt?: string;
 };
 

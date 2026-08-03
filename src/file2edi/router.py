@@ -140,10 +140,16 @@ def create_router() -> APIRouter:
         username = str(body.get("username") or "").strip()
         display_name = str(body.get("displayName") or body.get("display_name") or username).strip()
         password = str(body.get("password") or "").strip()
+        email = str(body.get("email") or "").strip()
+        sap_id = str(body.get("sapId") or body.get("sap_id") or "").strip()
+        role = str(body.get("role") or "adv").strip().lower()
+        if role not in ("adv", "admin"):
+            role = "adv"
         if not username or not password:
             raise HTTPException(400, "Identifiant et mot de passe requis")
         try:
-            return get_store().create_user(username, display_name, password)
+            return get_store().create_user(username, display_name, password,
+                                           email=email, sap_id=sap_id, role=role)
         except Exception as exc:
             raise HTTPException(400, f"Impossible de créer l'utilisateur: {exc}")
 

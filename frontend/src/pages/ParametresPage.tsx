@@ -74,6 +74,9 @@ export function ParametresPage() {
   // ── User management state ───────────────────────────────────────────────────
   const [newUsername, setNewUsername] = useState("");
   const [newDisplayName, setNewDisplayName] = useState("");
+  const [newEmail, setNewEmail] = useState("");
+  const [newSapId, setNewSapId] = useState("");
+  const [newUserRole, setNewUserRole] = useState<"adv" | "admin">("adv");
   const [newPassword, setNewPassword] = useState("");
   const [newUserError, setNewUserError] = useState("");
   const [newUserSuccess, setNewUserSuccess] = useState("");
@@ -98,11 +101,19 @@ export function ParametresPage() {
     mutationFn: () => fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ username: newUsername.trim(), displayName: newDisplayName.trim() || newUsername.trim(), password: newPassword }),
+      body: JSON.stringify({
+        username: newUsername.trim(),
+        displayName: newDisplayName.trim() || newUsername.trim(),
+        email: newEmail.trim(),
+        sapId: newSapId.trim(),
+        role: newUserRole,
+        password: newPassword,
+      }),
     }).then(async r => { if (!r.ok) throw new Error((await r.json()).detail || "Erreur"); return r.json(); }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["users"] });
-      setNewUsername(""); setNewDisplayName(""); setNewPassword("");
+      setNewUsername(""); setNewDisplayName(""); setNewEmail(""); setNewSapId("");
+      setNewUserRole("adv"); setNewPassword("");
       setNewUserError(""); setNewUserSuccess("Utilisateur créé avec succès");
       setTimeout(() => setNewUserSuccess(""), 3000);
     },
@@ -998,11 +1009,12 @@ export function ParametresPage() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <UserPlus className="h-5 w-5" />
-                    Créer un gestionnaire
+                    Créer un utilisateur
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-[1fr_1fr_1fr_auto]">
+                  <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2">
+                    {/* Ligne 1 : identifiant + nom complet */}
                     <div className="space-y-1.5">
                       <Label>Identifiant *</Label>
                       <Input
@@ -1019,34 +1031,78 @@ export function ParametresPage() {
                         onChange={(e) => setNewDisplayName(e.target.value)}
                       />
                     </div>
+                    {/* Ligne 2 : email + SAP ID */}
                     <div className="space-y-1.5">
-                      <Label>Mot de passe *</Label>
+                      <Label>Adresse e-mail *</Label>
+                      <Input
+                        type="email"
+                        placeholder="prenom.nom@bosch.com"
+                        value={newEmail}
+                        onChange={(e) => { setNewEmail(e.target.value); setNewUserError(""); }}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Identifiant SAP</Label>
+                      <Input
+                        placeholder="ex: DIK1DY"
+                        value={newSapId}
+                        onChange={(e) => setNewSapId(e.target.value)}
+                      />
+                    </div>
+                    {/* Ligne 3 : type + mot de passe */}
+                    <div className="space-y-1.5">
+                      <Label>Type d'utilisateur *</Label>
+                      <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as "adv" | "admin")}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="adv">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                              Gestionnaire (ADV)
+                            </div>
+                          </SelectItem>
+                          <SelectItem value="admin">
+                            <div className="flex items-center gap-2">
+                              <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
+                              Administrateur
+                            </div>
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Mot de passe initial *</Label>
                       <Input
                         type="password"
-                        placeholder="Mot de passe initial"
+                        placeholder="6 caractères minimum"
                         value={newPassword}
                         onChange={(e) => { setNewPassword(e.target.value); setNewUserError(""); }}
                       />
                     </div>
-                    <div className="flex items-end">
-                      <Button
-                        className="w-full gap-2"
-                        onClick={() => {
-                          if (!newUsername.trim()) { setNewUserError("Identifiant requis"); return; }
-                          if (!newPassword || newPassword.length < 6) { setNewUserError("Mot de passe: 6 caractères minimum"); return; }
-                          createUserMutation.mutate();
-                        }}
-                        disabled={createUserMutation.isPending}
-                      >
-                        <UserPlus className="h-4 w-4" />
-                        {createUserMutation.isPending ? "En cours…" : "Créer"}
-                      </Button>
-                    </div>
                   </div>
-                  {newUserError && <p className="text-sm text-destructive">{newUserError}</p>}
-                  {newUserSuccess && <p className="text-sm text-emerald-600">{newUserSuccess}</p>}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      {newUserError && <p className="text-sm text-destructive">{newUserError}</p>}
+                      {newUserSuccess && <p className="text-sm text-emerald-600">{newUserSuccess}</p>}
+                    </div>
+                    <Button
+                      className="gap-2"
+                      onClick={() => {
+                        if (!newUsername.trim()) { setNewUserError("Identifiant requis"); return; }
+                        if (!newEmail.trim()) { setNewUserError("Adresse e-mail requise"); return; }
+                        if (!newPassword || newPassword.length < 6) { setNewUserError("Mot de passe: 6 caractères minimum"); return; }
+                        createUserMutation.mutate();
+                      }}
+                      disabled={createUserMutation.isPending}
+                    >
+                      <UserPlus className="h-4 w-4" />
+                      {createUserMutation.isPending ? "En cours…" : "Créer l'utilisateur"}
+                    </Button>
+                  </div>
                   <p className="text-xs text-muted-foreground">
-                    Tous les gestionnaires ont accès à l'ensemble des fonctionnalités. La connexion filtre automatiquement sur leurs dossiers.
+                    Les Gestionnaires (ADV) traitent les commandes. Les Administrateurs ont accès aux paramètres.
                   </p>
                 </CardContent>
               </Card>
@@ -1071,6 +1127,9 @@ export function ParametresPage() {
                         <tr>
                           <th className="px-4 py-3 text-left font-medium">Identifiant</th>
                           <th className="px-4 py-3 text-left font-medium">Nom complet</th>
+                          <th className="px-4 py-3 text-left font-medium">E-mail</th>
+                          <th className="px-4 py-3 text-left font-medium">SAP ID</th>
+                          <th className="px-4 py-3 text-left font-medium">Type</th>
                           <th className="px-4 py-3 text-left font-medium">Créé le</th>
                           <th className="px-4 py-3 text-left font-medium">Mot de passe</th>
                           <th className="px-4 py-3 text-right font-medium">Actions</th>
@@ -1078,15 +1137,26 @@ export function ParametresPage() {
                       </thead>
                       <tbody>
                         {usersQuery.isLoading && (
-                          <tr><td className="px-4 py-4 text-center text-muted-foreground" colSpan={5}>Chargement…</td></tr>
+                          <tr><td className="px-4 py-4 text-center text-muted-foreground" colSpan={8}>Chargement…</td></tr>
                         )}
                         {!usersQuery.isLoading && (usersQuery.data?.length ?? 0) === 0 && (
-                          <tr><td className="px-4 py-4 text-center text-muted-foreground" colSpan={5}>Aucun gestionnaire créé.</td></tr>
+                          <tr><td className="px-4 py-4 text-center text-muted-foreground" colSpan={8}>Aucun utilisateur créé.</td></tr>
                         )}
                         {(usersQuery.data ?? []).map((user) => (
                           <tr key={user.userId} className="border-t hover:bg-muted/30">
                             <td className="px-4 py-3 font-mono text-xs font-semibold">{user.username}</td>
                             <td className="px-4 py-3">{user.displayName}</td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground">{(user as GestionnaireUser).email || "—"}</td>
+                            <td className="px-4 py-3 text-xs font-mono">{(user as GestionnaireUser).sapId || "—"}</td>
+                            <td className="px-4 py-3">
+                              <Badge
+                                variant={(user as GestionnaireUser).role === "admin" ? "default" : "secondary"}
+                                className="gap-1 text-xs"
+                              >
+                                <Shield className="h-3 w-3" />
+                                {(user as GestionnaireUser).role === "admin" ? "Admin" : "Gestionnaire"}
+                              </Badge>
+                            </td>
                             <td className="px-4 py-3 text-xs text-muted-foreground">
                               {user.createdAt ? user.createdAt.slice(0, 10) : "—"}
                             </td>

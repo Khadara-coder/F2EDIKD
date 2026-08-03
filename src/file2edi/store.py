@@ -1267,6 +1267,9 @@ class PostgresFile2EdiStore(File2EdiStore):
           user_id       TEXT PRIMARY KEY,
           username      TEXT NOT NULL UNIQUE,
           display_name  TEXT NOT NULL,
+          email         TEXT,
+          sap_id        TEXT,
+          role          TEXT NOT NULL DEFAULT 'adv',
           password_hash TEXT NOT NULL,
           created_at    TEXT NOT NULL,
           is_active     INTEGER NOT NULL DEFAULT 1
@@ -1325,6 +1328,10 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transferred_to TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_note TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_at TEXT",
+                # User profile columns
+                "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS email TEXT",
+                "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS sap_id TEXT",
+                "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'adv'",
             ):
                 conn.execute(statement)
             conn.commit()
@@ -1393,18 +1400,23 @@ _store: File2EdiStore | None = None
 def _users_mixin(cls):
     """Dynamically add user/auth/workflow methods to the store class."""
 
-    def create_user(self, username: str, display_name: str, password: str) -> dict:
+    def create_user(self, username: str, display_name: str, password: str,
+                    email: str = "", sap_id: str = "", role: str = "adv") -> dict:
         user_id = f"usr-{uuid.uuid4().hex[:12]}"
         pw_hash = _hash_password(password)
+        role = role.strip().lower() if role in ("adv", "admin") else "adv"
         conn = self._conn()
         conn.execute(
-            "INSERT INTO file2edi_users (user_id,username,display_name,password_hash,created_at,is_active) "
-            "VALUES (?,?,?,?,?,1)",
-            [user_id, username.strip().lower(), display_name.strip(), pw_hash, _now()],
+            "INSERT INTO file2edi_users (user_id,username,display_name,email,sap_id,role,password_hash,created_at,is_active) "
+            "VALUES (?,?,?,?,?,?,?,?,1)",
+            [user_id, username.strip().lower(), display_name.strip(),
+             email.strip(), sap_id.strip(), role, pw_hash, _now()],
         )
         conn.commit()
         conn.close()
-        return {"userId": user_id, "username": username.strip().lower(), "displayName": display_name.strip()}
+        return {"userId": user_id, "username": username.strip().lower(),
+                "displayName": display_name.strip(), "email": email.strip(),
+                "sapId": sap_id.strip(), "role": role}
 
     def verify_credentials(self, username: str, password: str) -> dict | None:
         conn = self._conn()
@@ -1418,7 +1430,11 @@ def _users_mixin(cls):
             return None
         if not _check_password(password, row["password_hash"]):
             return None
-        return {"userId": row["user_id"], "username": row["username"], "displayName": row["display_name"]}
+        return {"userId": row["user_id"], "username": row["username"],
+                "displayName": row["display_name"],
+                "email": row.get("email") or "",
+                "sapId": row.get("sap_id") or "",
+                "role": row.get("role") or "adv"}
 
     def create_session(self, user_id: str, ip: str | None = None) -> str:
         import secrets
@@ -1448,7 +1464,9 @@ def _users_mixin(cls):
             return None
         if row["expires_at"] < _now():
             return None  # expired
-        return {"userId": row["user_id"], "username": row["username"], "displayName": row["display_name"]}
+        return {"userId": row["user_id"], "username": row["username"],
+                "displayName": row["display_name"],
+                "role": row.get("role") or "adv"}
 
     def invalidate_session(self, session_id: str) -> None:
         conn = self._conn()
@@ -1459,10 +1477,15 @@ def _users_mixin(cls):
     def list_users(self) -> list[dict]:
         conn = self._conn()
         rows = conn.execute(
-            "SELECT user_id,username,display_name,created_at FROM file2edi_users WHERE is_active=1 ORDER BY display_name"
+            "SELECT user_id,username,display_name,email,sap_id,role,created_at FROM file2edi_users WHERE is_active=1 ORDER BY display_name"
         ).fetchall()
         conn.close()
-        return [{"userId": r["user_id"], "username": r["username"], "displayName": r["display_name"], "createdAt": r["created_at"]} for r in rows]
+        return [{"userId": r["user_id"], "username": r["username"],
+                 "displayName": r["display_name"],
+                 "email": r.get("email") or "",
+                 "sapId": r.get("sap_id") or "",
+                 "role": r.get("role") or "adv",
+                 "createdAt": r["created_at"]} for r in rows]
 
     def delete_user(self, user_id: str) -> bool:
         conn = self._conn()
