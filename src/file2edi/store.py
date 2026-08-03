@@ -626,7 +626,8 @@ class File2EdiStore:
             if not hasattr(srv, "load_order_graphs_from_delta"):
                 return 0
             conn = self._conn()
-            existing = conn.execute("SELECT COUNT(*) FROM file2edi_orders").fetchone()[0]
+            existing_row = conn.execute("SELECT COUNT(*) AS cnt FROM file2edi_orders").fetchone()
+            existing = existing_row["cnt"] if existing_row else 0
             conn.close()
             if existing > 0:
                 return 0
@@ -923,9 +924,10 @@ class File2EdiStore:
 
     def add_line(self, order_id: str, payload: dict) -> dict | None:
         conn = self._conn()
-        n = conn.execute(
-            "SELECT COALESCE(MAX(line_number),0)+1 FROM file2edi_order_lines WHERE order_id=?", [order_id]
-        ).fetchone()[0]
+        row = conn.execute(
+            "SELECT COALESCE(MAX(line_number),0)+1 AS next_num FROM file2edi_order_lines WHERE order_id=?", [order_id]
+        ).fetchone()
+        n = row["next_num"] if row else 1
         line_id = f"ln-{uuid.uuid4().hex[:8]}"
         qty = float(payload.get("quantity", 1))
         price = float(payload.get("unitPrice", 0))
