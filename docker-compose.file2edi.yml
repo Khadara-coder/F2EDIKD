@@ -42,7 +42,6 @@ services:
       MASTER_DATA_DIR: /app/data/masterdata
       OUTBOX_DIR: /app/data/outbox
       LOG_DIR: /app/data/logs
-      DB_PATH: /app/data/edifact_standalone.db
       INTAKE_DIR: /app/data/intake
       PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
       # Databricks (production — set in .env)

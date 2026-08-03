@@ -37,7 +37,6 @@ services:
       APP_REQUIRE_AUTH: "false"
       TESSERACT_LANG: "fra+eng"
       PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
-      DB_PATH: /app/data/edifact_standalone.db
       MASTERDATA_SOURCE_DIR: /app/data/masterdata
       MASTERDATA_RUNTIME_DIR: /app/data/masterdata
       MASTER_DATA_DIR: /app/data/masterdata

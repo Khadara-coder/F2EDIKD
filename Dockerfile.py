@@ -16,7 +16,6 @@ ENV APP_HOST=0.0.0.0 \
     APP_PORT=8088 \
     LOG_LEVEL=INFO \
     DATA_DIR=/data \
-    DB_PATH=/data/edifact_standalone.db \
     INTAKE_DIR=/data/intake \
     PROCESSED_DIR=/data/processed \
     REJECT_DIR=/data/reject \

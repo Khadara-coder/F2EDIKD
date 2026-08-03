@@ -35,7 +35,6 @@ services:
       UNB_SENDER_GLN: "4399901876613"
       UNB_RECEIVER_GLN: "3015981600108"
       PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
-      DB_PATH: /app/data/edifact_standalone.db
       INTAKE_DIR: /app/data/intake
       OUTBOX_DIR: /app/data/outbox
       LOG_DIR: /app/data/logs

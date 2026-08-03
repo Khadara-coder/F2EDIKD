@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import os
 import shutil
-import sqlite3
 import sys
 import tempfile
 import threading
@@ -31,7 +30,6 @@ except ImportError as _err:
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 MASTER_DATA_DIR   = "/Workspace/Users/rsr1dy@bosch.com/masterdata"
-DB_PATH           = os.path.join(EDIFACT_ROOT, "data", "edifact_standalone.db")
 CONFIG_INI        = os.path.join(EDIFACT_ROOT, "config.ini")
 DATABRICKS_HOST   = os.environ.get("DATABRICKS_HOST",
                         "https://adb-5555213114570927.7.azuredatabricks.net")

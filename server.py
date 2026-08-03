@@ -15,7 +15,6 @@ import logging
 import os
 import re
 import shutil
-import sqlite3
 from datetime import datetime as _datetime
 import sys
 import tempfile
@@ -91,15 +90,8 @@ PDF_STORAGE_DIR = _ensure_dir(
     os.environ.get("PDF_STORAGE_DIR", os.environ.get("INTAKE_DIR", str(APP_ROOT / "data" / "intake"))),
     "intake",
 )
-# DB_PATH must be FUSE-safe: prefer ENGINE_DIR/data, fallback to APP_ROOT/data
-# (matches the same pattern used by OUTBOX_DIR/LOG_DIR)
-_db_path_env = (os.environ.get("DB_PATH") or "").strip()
-if _db_path_env:
-    _db_parent = _ensure_dir(str(Path(_db_path_env).parent), "db")
-    DB_PATH = str(Path(_db_parent) / Path(_db_path_env).name)
-else:
-    _db_dir = _ensure_dir(os.path.join(ENGINE_DIR, "data"), "db")
-    DB_PATH = os.path.join(_db_dir, "edifact_standalone.db")
+# Database backend: PostgreSQL only (SQLite removed)
+# Configuration via PG_DATABASE_URL environment variable
 CONFIG_INI       = os.path.join(ENGINE_DIR, "config.ini")
 UNB_SENDER_GLN   = os.environ.get("UNB_SENDER_GLN",   "4399901876613")
 UNB_RECEIVER_GLN = os.environ.get("UNB_RECEIVER_GLN", "3015981600108")
@@ -3067,34 +3059,20 @@ def load_order_graphs_from_delta() -> list[dict]:
 def get_storage_mode() -> dict:
     """Return storage backend descriptor for diagnostics and /api/proxy/health.
 
-    For workspace_jsonl: adds live `file_exists` via a lightweight get-status call.
-    For sqlite: adds `db_exists` and `db_size_kb` from the local filesystem.
-    All fields required by Req 2: backend, persistent, location, file_exists/db_exists, note.
+    Since v2: PostgreSQL only (SQLite removed).
     """
     b = _PERSIST_BACKEND.copy()
     b.pop("_delta_exec", None)   # not JSON-serialisable
     if not b:
-        db_here = Path(DB_PATH).exists()
         return {
-            "backend": "sqlite", "persistent": False,
-            "location": str(DB_PATH),
-            "db_exists": db_here,
-            "db_size_kb": round(Path(DB_PATH).stat().st_size / 1024, 1) if db_here else 0,
+            "backend": "postgres", "persistent": True,
+            "location": "PostgreSQL (PG_DATABASE_URL)",
+            "db_exists": True,
+            "db_size_kb": 0,
             "conversions_available": True, "audit_events_available": True,
-            "note": "Backend not yet initialised (startup pending).",
+            "note": "Backend PostgreSQL (SQLite removed).",
         }
-    bk = b.get("backend", "sqlite")
-    if bk == "sqlite":
-        db_here = Path(DB_PATH).exists()
-        b["db_exists"]   = db_here
-        b["db_size_kb"]  = round(Path(DB_PATH).stat().st_size / 1024, 1) if db_here else 0
-    elif bk == "workspace_jsonl":
-        conv_path = b.get("path_conv", "")
-        try:
-            r = _ws_api("GET", "/api/2.0/workspace/get-status", params={"path": conv_path})
-            b["file_exists"] = r.status_code == 200
-        except Exception:
-            b["file_exists"] = False
+    bk = b.get("backend", "postgres")
     return b
 
 
