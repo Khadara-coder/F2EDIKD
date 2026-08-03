@@ -3975,24 +3975,33 @@ async def api_generate(cid: str, req: Request):
     actor, _ = _ensure_can_mutate(req, request)
 
     try:
-        # Load from PostgreSQL store (React API) or fallback lookup
+        # Load from PostgreSQL store
         row = None
         try:
             from src.file2edi.store import get_store as _gs
-            review = _gs().get_order_review(cid)
+            review = _gs().load_order_review(cid)
             if review:
                 o = review.get("order", {})
-                engine = review.get("_engine_result") or {}
+                # Try to get original extraction_json from DB
+                eng_json = None
+                try:
+                    _conn = _gs()._conn()
+                    _r = _conn.execute("SELECT extraction_json FROM file2edi_orders WHERE order_id=?", [cid]).fetchone()
+                    _conn.close()
+                    if _r and _r.get("extraction_json"):
+                        eng_json = _r["extraction_json"]
+                except Exception:
+                    pass
                 row = (
-                    _json.dumps(engine) if engine else "{}",
+                    eng_json or "{}",
                     "{}",
                     o.get("fileName", ""),
                     o.get("customerOrderNumber", ""),
                     next((p["partnerCode"] for p in review.get("partners", []) if p["partnerFunction"] == "soldto"), ""),
                     next((p["partnerCode"] for p in review.get("partners", []) if p["partnerFunction"] == "shipto"), ""),
                 )
-        except Exception:
-            pass
+        except Exception as _e:
+            log.debug("api_generate: store lookup failed: %s", _e)
         if not row:
             return JSONResponse(status_code=404, content={"error": "Conversion introuvable — utilisez /api/orders/{id}/generate"})
     except Exception as e:
@@ -4462,3 +4471,4 @@ def spa_fallback(full_path: str):
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("DATABRICKS_APP_PORT", 8000)))
+
