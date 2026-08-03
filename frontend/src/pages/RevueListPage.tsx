@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { confidenceColor, formatDateTime, cn } from "@/lib/utils";
+import { confidenceColor, formatDateTime } from "@/lib/utils";
 import type { OrderStatus } from "@/types";
 
 function SourceBadge({ source }: { source?: string }) {
@@ -96,6 +96,8 @@ export function RevueListPage() {
   const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>("all");
   const [managerFilter, setManagerFilter] = useState<string>("all");  // "all" | username
   const [myOrdersOnly, setMyOrdersOnly] = useState(false);
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [sortKey, setSortKey] = useState<ReviewSortKey>("createdAt");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
@@ -108,7 +110,7 @@ export function RevueListPage() {
     }
   }, [isAdmin, currentUsername]);
 
-  // Liste des gestionnaires pour le filtre (admin uniquement)
+  // Liste des gestionnaires pour le filtre
   const usersQuery = useQuery<Array<{ userId: string; username: string; displayName: string }>>(
     { queryKey: ["users"], queryFn: () => fetch("/api/users").then(r => r.json()), staleTime: 60_000 }
   );
@@ -166,15 +168,19 @@ export function RevueListPage() {
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToFilterGroup(row.status) === statusFilter;
-      // "Mes dossiers" filter: match assignedTo ou processedBy
+      // "Mes dossiers" filter
       const rowAssignee = (row as unknown as { assignedTo?: string }).assignedTo || row.processedBy || "";
       const matchesMyOrders = !myOrdersOnly || !currentUsername ||
         rowAssignee.toLowerCase() === currentUsername.toLowerCase();
-      // Filtre par gestionnaire spécifique (admin)
+      // Filtre par gestionnaire spécifique
       const matchesManager = managerFilter === "all" ||
         (row as unknown as { assignedTo?: string }).assignedTo?.toLowerCase() === managerFilter.toLowerCase() ||
         (row.processedBy || "").toLowerCase() === managerFilter.toLowerCase();
-      return matchesSearch && matchesStatus && matchesMyOrders && matchesManager;
+      // Filtre par date d'import
+      const rowDate = row.createdAt || row.date || "";
+      const matchesDateFrom = !dateFrom || rowDate >= dateFrom;
+      const matchesDateTo = !dateTo || rowDate <= (dateTo + "T23:59:59");
+      return matchesSearch && matchesStatus && matchesMyOrders && matchesManager && matchesDateFrom && matchesDateTo;
     });
 
     return filtered.sort((left, right) => {
@@ -195,7 +201,7 @@ export function RevueListPage() {
 
       return sortDirection === "asc" ? comparison : -comparison;
     });
-  }, [items, managerFilter, myOrdersOnly, currentUsername, search, sortDirection, sortKey, statusFilter]);
+  }, [items, managerFilter, myOrdersOnly, currentUsername, dateFrom, dateTo, search, sortDirection, sortKey, statusFilter]);
 
   return (
     <>
@@ -245,7 +251,7 @@ export function RevueListPage() {
                 : "Tous les dossiers"}
             </Button>
           </div>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px_220px_auto] lg:items-center">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_180px_auto] lg:items-center">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -269,24 +275,39 @@ export function RevueListPage() {
               </SelectContent>
             </Select>
 
-            {/* Filtre par gestionnaire: admin = liste des users, ADV = désactivé (utilise toggle ci-dessus) */}
-            {isAdmin ? (
-              <Select value={managerFilter} onValueChange={setManagerFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Gestionnaire" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Tous les gestionnaires</SelectItem>
-                  {gestionnaires.map((u) => (
-                    <SelectItem key={u.userId} value={u.username}>
-                      {u.displayName} ({u.username})
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <div />
-            )}
+            {/* Filtre par gestionnaire: liste réelle des utilisateurs */}
+            <Select value={managerFilter} onValueChange={setManagerFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Gestionnaire" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les gestionnaires</SelectItem>
+                {gestionnaires.map((u) => (
+                  <SelectItem key={u.userId} value={u.username}>
+                    {u.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            {/* Filtre par dates d'import */}
+            <div className="flex items-center gap-1">
+              <Input
+                type="date"
+                value={dateFrom}
+                onChange={(e) => setDateFrom(e.target.value)}
+                className="h-10 text-xs"
+                title="Date d'import — début"
+              />
+              <span className="text-muted-foreground text-xs">→</span>
+              <Input
+                type="date"
+                value={dateTo}
+                onChange={(e) => setDateTo(e.target.value)}
+                className="h-10 text-xs"
+                title="Date d'import — fin"
+              />
+            </div>
 
             <div className="flex flex-wrap items-center gap-2 lg:justify-end">
               <Button
@@ -296,6 +317,8 @@ export function RevueListPage() {
                   setSearch("");
                   setStatusFilter("all");
                   setManagerFilter("all");
+                  setDateFrom("");
+                  setDateTo("");
                   setSortKey("createdAt");
                   setSortDirection("desc");
                   // ADV reprend son filtre par défaut
@@ -306,26 +329,6 @@ export function RevueListPage() {
                 Réinitialiser
               </Button>
             </div>
-          </div>
-
-          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border bg-background/80 p-3">
-            <span className="text-sm font-medium text-foreground">Palette de statuts</span>
-            {STATUS_FILTERS.map((option) => (
-              <Button
-                key={option.value}
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => setStatusFilter(option.value)}
-                className={cn(
-                  "rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors",
-                  option.className,
-                  statusFilter === option.value && "ring-2 ring-primary ring-offset-2",
-                )}
-              >
-                {option.label}
-              </Button>
-            ))}
           </div>
         </CardContent>
 
@@ -383,15 +386,13 @@ export function RevueListPage() {
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </TableHead>
-                  {isAdmin && (
-                    <TableHead>
-                      <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
-                        Gestionnaire
-                        <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-                      </button>
-                    </TableHead>
-                  )}
                   <TableHead>Statut</TableHead>
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
+                      Gestionnaire
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
                   <TableHead>Source</TableHead>
                 </TableRow>
               </TableHeader>
@@ -419,15 +420,15 @@ export function RevueListPage() {
                     <TableCell className="text-sm">
                       {row.processedAt ? formatDateTime(row.processedAt, displayTimeZone) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    {isAdmin && (
-                      <TableCell className="text-sm">
-                        {managerLabel(row.processedBy) || <span className="text-muted-foreground">—</span>}
-                      </TableCell>
-                    )}
                     <TableCell>
                       <Badge variant={GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].variant}>
                         {GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].label}
                       </Badge>
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {(row as unknown as { assignedTo?: string }).assignedTo
+                        || managerLabel(row.processedBy)
+                        || <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />
