@@ -486,14 +486,115 @@ def extract_line_items_from_layout(layout: dict | None) -> list[dict]:
 
 
 def extract_line_items(text: str, layout: dict | None, materials_by_id: dict[str, str]) -> list[dict]:
+    # Priority 0: CCL columnar format (text-based, takes precedence over layout
+    # when pdfplumber produces column-split text without valid quantities in the layout).
+    ccl_rows = _extract_ccl_columnar_format(text.splitlines() if text else [])
+    if ccl_rows:
+        return enrich_line_items_with_materials(ccl_rows, materials_by_id)
+
     rows = extract_line_items_from_layout(layout)
     if rows:
-        return enrich_line_items_with_materials(rows, materials_by_id)
+        # Only trust layout rows if at least one has a non-empty quantity.
+        # When pdfplumber splits columns into separate lines, the layout has
+        # articles but no quantities — in that case fall through to text parsers.
+        has_qty = any(r.get("quantity") for r in rows)
+        if has_qty:
+            return enrich_line_items_with_materials(rows, materials_by_id)
+
     return extract_line_items_from_text(text, materials_by_id)
+
+
+def _extract_ccl_columnar_format(lines: list[str]) -> list[dict]:
+    """Parse PDFs where pdfplumber splits multi-column tables into separate lines per column.
+
+    CCL / CCL-style format detected when header columns are on consecutive lines:
+      'Reférence - Désignation'  (or 'Reference')
+      'Quantite'
+      'Unite'
+      'Prix Unitaire'
+
+    Each article then follows as:
+      ARTICLE_CODE - Description
+      QTY            (integer or decimal, e.g. "1" or "2,5")
+      UNIT           (PI, PCE, PCS, UN, EA, P, ...)
+      PRICE          (decimal, e.g. "2665.8400")
+    """
+    # Detect whether this document uses the CCL columnar layout.
+    # Look for 3+ consecutive lines that are each a single column header word.
+    col_header_re = re.compile(
+        r"^(Quantite|Quantité|Unite|Unité|Prix\s+Unitaire|Désignation|Reference|Reférence)$",
+        flags=re.IGNORECASE,
+    )
+    header_hits = sum(1 for l in lines if col_header_re.match(l.strip()))
+    if header_hits < 2:
+        return []  # Not a CCL columnar document
+
+    article_dash_re = re.compile(r"^(\d{7,13})\s*[-–]\s*(.+)$")
+    unit_re = re.compile(r"^(PCE|PIECE|PCS|PC|UN|EA|PI|P|QTE|QTY|U)$", flags=re.IGNORECASE)
+    qty_re = re.compile(r"^(\d{1,5}(?:[,.]\d{1,3})?)$")
+
+    rows: list[dict] = []
+    i = 0
+    stripped = [l.strip() for l in lines]
+
+    while i < len(stripped) - 2:
+        m = article_dash_re.match(stripped[i])
+        if not m:
+            i += 1
+            continue
+
+        art = m.group(1)
+        desc = m.group(2).strip()
+
+        # Scan forward up to 6 lines to find qty / unit / price (in any order)
+        window = stripped[i + 1: i + 7]
+        qty_val = unit_val = price_val = ""
+        consumed = 1  # at minimum skip 1 line
+
+        for j, wl in enumerate(window):
+            if not wl:
+                continue
+            if not qty_val and qty_re.fullmatch(wl):
+                qty_val = wl
+                consumed = max(consumed, j + 1)
+            elif not unit_val and unit_re.fullmatch(wl):
+                unit_val = wl.upper()
+                consumed = max(consumed, j + 1)
+            elif not price_val and re.fullmatch(r"\d{1,7}[.,]\d{2,4}", wl):
+                price_val = wl.replace(",", ".")
+                consumed = max(consumed, j + 1)
+            # Stop once all three are found
+            if qty_val and unit_val and price_val:
+                break
+
+        if price_val:
+            rows.append({
+                "designation": desc,
+                "article": art,
+                "delivery_date": "",
+                "quantity": qty_val,
+                "unit": unit_val,
+                "unit_price": price_val,
+                "amount": price_val,  # Per-line total not in CCL format; inferred from qty×price
+                "customer_reference": "",
+                "payment_terms": "",
+                "parser": "ccl_columnar",
+            })
+            i += consumed + 1
+        else:
+            i += 1
+
+    return rows
 
 
 def extract_line_items_from_text(text: str, materials_by_id: dict[str, str] | None = None) -> list[dict]:
     materials_by_id = materials_by_id or {}
+
+    # ── Priority 0: CCL columnar format (4 lines per article: ref-desc / qty / unit / price) ──
+    ccl_rows = _extract_ccl_columnar_format(text.splitlines())
+    if ccl_rows:
+        return enrich_line_items_with_materials(ccl_rows, materials_by_id)
+
     line_rows = extract_line_items_from_lines(text.splitlines())
     if line_rows:
         return enrich_line_items_with_materials(line_rows, materials_by_id)

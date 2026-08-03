@@ -2962,12 +2962,18 @@ def save_conversion(row: dict) -> None:
                 _ws_write_jsonl(ws_path, existing)
         except Exception as _wje:
             log.warning(
-                "save_conversion(%s): workspace_jsonl write failed (%s) — SQLite fallback",
+                "save_conversion(%s): workspace_jsonl write failed (%s)",
                 row.get("id"), _wje,
             )
-            _sqlite_save_conversion(row)
 
-    else:  # sqlite fallback
+    elif bk == "postgres":
+        pass  # PostgreSQL: conversions saved directly via File2EDI store (store.save_order_review)
+
+    else:  # sqlite fallback (no longer supported)
+        log.debug("save_conversion: sqlite backend not supported, skipping")
+        return
+
+    if False:  # dead code kept for reference — was: sqlite3.connect(DB_PATH, timeout=5)
         conn = sqlite3.connect(DB_PATH, timeout=5)
         try:
             sets = ", ".join(f"{c}=excluded.{c}" for c in _CONV_COLS if c not in ("id","created_at"))
@@ -3272,7 +3278,12 @@ def _ws_write_migration_sentinel(
 
 
 def _upsert_conversion(data: dict, callback_url: str | None = None) -> None:
-    """Insert or replace a conversion row from a proxy-convert result dict."""
+    """Insert or replace a conversion row from a proxy-convert result dict.
+    PostgreSQL backend: conversions saved via File2EDI store; this is a no-op.
+    """
+    bk = _PERSIST_BACKEND.get("backend", "sqlite")
+    if bk == "postgres":
+        return  # PostgreSQL: handled by store.save_order_review() in router.py
     try:
         r   = data.get("rejection", {})
         cus = data.get("customer", {})
@@ -3287,56 +3298,9 @@ def _upsert_conversion(data: dict, callback_url: str | None = None) -> None:
         status = status_map.get(dec, "FAILED" if data.get("status") == "ERROR" else "PROCESSING")
         missing = sum(1 for it in (lines.get("items") or [])
                       if (it.get("code_article","")).startswith("ARTICLE_MANQUANT"))
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute("""
-          INSERT INTO conversions
-                        (id, correlation_id, callback_url, source_filename, pdf_hash, status,
-             po_number, order_date, delivery_date, soldto, shipto,
-             customer_name, confidence, line_count, missing_material_count,
-             rejection_code, rejection_message,
-             tst_filename, edifact_content, extraction_json,
-             created_at, updated_at)
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
-          ON CONFLICT(id) DO UPDATE SET
-                        callback_url=COALESCE(excluded.callback_url, conversions.callback_url),
-            status=excluded.status, po_number=excluded.po_number,
-                        order_date=excluded.order_date,
-                        delivery_date=excluded.delivery_date,
-            soldto=excluded.soldto, shipto=excluded.shipto,
-                        customer_name=excluded.customer_name,
-                        confidence=excluded.confidence,
-                        line_count=excluded.line_count,
-                        missing_material_count=excluded.missing_material_count,
-            rejection_code=excluded.rejection_code,
-            rejection_message=excluded.rejection_message,
-            tst_filename=excluded.tst_filename,
-            edifact_content=excluded.edifact_content,
-                        extraction_json=excluded.extraction_json,
-            updated_at=datetime('now')
-        """, [
-            data.get("pdf_hash") or str(uuid.uuid4()),
-            data.get("correlation_id"),
-            _sanitize_callback_url(callback_url),
-            data.get("filename", ""),
-            data.get("pdf_hash"),
-            status,
-            ord.get("po_number"),
-            ord.get("order_date"),
-            ord.get("delivery_date"),
-            cus.get("soldto"),
-            cus.get("shipto"),
-            cus.get("name"),
-            cus.get("confidence", 0),
-            lines.get("count", 0),
-            missing,
-            r.get("reason"),
-            r.get("reason") and (REJECT_LABELS.get(r["reason"]) or r["reason"]),
-            (data.get("filename","").replace(".pdf",".tst") if edi.get("generated") else None),
-            edi.get("message"),
-            _json.dumps(data),
-        ])
-        conn.commit()
-        conn.close()
+        # SQLite no longer supported — this branch is only reached for non-postgres backends
+        # (delta/workspace_jsonl) which don't reach this point anyway
+        log.debug("_upsert_conversion: non-postgres backend not supported, skipping")
     except Exception as e:
         log.warning("_upsert_conversion: %s", e)
 
