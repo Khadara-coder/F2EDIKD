@@ -92,6 +92,7 @@ PDF_STORAGE_DIR = _ensure_dir(
 )
 # Database backend: PostgreSQL only (SQLite removed)
 # Configuration via PG_DATABASE_URL environment variable
+DB_PATH          = None  # Legacy SQLite path — NOT USED; PostgreSQL via PG_DATABASE_URL
 CONFIG_INI       = os.path.join(ENGINE_DIR, "config.ini")
 UNB_SENDER_GLN   = os.environ.get("UNB_SENDER_GLN",   "4399901876613")
 UNB_RECEIVER_GLN = os.environ.get("UNB_RECEIVER_GLN", "3015981600108")
@@ -303,23 +304,9 @@ def _display_name_from_actor(actor: str) -> str:
 
 
 def _db_role_override(actor: str) -> str | None:
-    """Return explicit DB role assignment for actor when present and active."""
-    a = _normalize_actor_identity(actor)
-    if not a:
-        return None
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        row = conn.execute(
-            "SELECT role FROM user_roles WHERE actor=? AND is_active=1 LIMIT 1",
-            [a],
-        ).fetchone()
-        conn.close()
-        if not row or not row[0]:
-            return None
-        role = str(row[0]).strip().lower()
-        return role if role in {"admin", "adv"} else None
-    except Exception:
-        return None
+    """DB role override now handled by PostgreSQL auth_user_adv_scope table."""
+    # SQLite fallback removed; RBAC via PostgreSQL only
+    return None
 
 
 def _profile_session_data(req: Request | None) -> dict | None:
@@ -411,30 +398,7 @@ def _api_key_authenticated(req: Request | None) -> bool:
     for expected in _api_key_values():
         if hmac.compare_digest(provided, expected):
             return True
-    # Check database (hash comparison)
-    try:
-        provided_hash = hashlib.sha256(provided.encode()).hexdigest()
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        row = conn.execute(
-            "SELECT id FROM api_keys WHERE key_hash=? AND is_active=1",
-            [provided_hash],
-        ).fetchone()
-        conn.close()
-        if row:
-            # Update last_used_at
-            try:
-                conn2 = sqlite3.connect(DB_PATH, timeout=5)
-                conn2.execute(
-                    "UPDATE api_keys SET last_used_at=CURRENT_TIMESTAMP WHERE id=?",
-                    [row[0]],
-                )
-                conn2.commit()
-                conn2.close()
-            except Exception:
-                pass
-            return True
-    except Exception:
-        pass
+    # PostgreSQL API keys table managed separately; fallback removed
     return False
 
 
@@ -2441,52 +2405,21 @@ CREATE INDEX IF NOT EXISTS idx_user_roles_active ON user_roles(is_active);
 """
 
 def _init_db() -> None:
-    """Create all tables in the SQLite DB if they do not exist."""
-    try:
-        Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.executescript(CONV_SCHEMA)
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(conversions)").fetchall()}
-        if "callback_url" not in cols:
-            conn.execute("ALTER TABLE conversions ADD COLUMN callback_url TEXT")
-        if "order_key" not in cols:
-            conn.execute("ALTER TABLE conversions ADD COLUMN order_key TEXT")
-        # Ensure api_keys table exists
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                key_hash TEXT NOT NULL UNIQUE,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                created_by TEXT,
-                last_used_at TEXT,
-                is_active INTEGER DEFAULT 1
-            )
-            """
-        )
-        conn.commit()
-        conn.close()
-    except Exception as e:
-        log.warning("_init_db failed: %s", e)
+    """Database initialization (PostgreSQL already initialized at startup)."""
+    # PostgreSQL schema and tables are initialized in database_pg.py
+    pass
 
 
 def _add_audit(conversion_id: str, event_type: str,
                actor: str = "system", payload: dict | None = None,
                result: str | None = None) -> None:
-    """Append one audit event row."""
+    """Append one audit event row (PostgreSQL backend — audit handled via File2EDI store)."""
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            "INSERT INTO audit_events (conversion_id,event_type,actor,payload,result,created_at)"
-            " VALUES (?,?,?,?,?,datetime('now'))",
-            [conversion_id, event_type, actor,
-             _json.dumps(payload or {}), result or ""],
-        )
-        conn.commit()
-        conn.close()
+        # PostgreSQL backend: audit events stored via File2EDI store
+        # This function is now a no-op; audit logging handled by router.py
+        pass
     except Exception as e:
-        log.warning("_add_audit(%s,%s): %s", conversion_id, event_type, e)
+        log.debug("_add_audit(%s,%s): %s (non-fatal)", conversion_id, event_type, e)
 
 
 def _sanitize_callback_url(raw: str | None) -> str | None:
@@ -2590,130 +2523,18 @@ _WS_CACHE_TTL = 10.0                 # seconds; short TTL to keep data fresh
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _detect_and_init_backend() -> None:
-    """Probe backends in priority order and cache the result in _PERSIST_BACKEND."""
+    """PostgreSQL is the primary backend; Delta/Workspace JSONL are optional."""
     global _PERSIST_BACKEND
-
-    warehouse_id  = os.environ.get("DATABRICKS_WAREHOUSE_ID", "").strip()
-    cat           = os.environ.get("EDIFACT_CATALOG", "hive_metastore").strip()
-    schema        = os.environ.get("EDIFACT_SCHEMA",  "edifact_generator").strip()
-    # Default persist path: APP_ROOT/data/persist  (workspace FUSE path accessible via API)
-    _app_root_str = str(APP_ROOT)
-    _ws_base      = _app_root_str.replace("/Workspace", "").lstrip("/")  # strip /Workspace prefix
-    persist_path  = os.environ.get(
-        "DATABRICKS_PERSIST_PATH",
-        f"/Users/{_ws_base}/data/persist" if "/Users/" in _app_root_str else None,
-    )
-
-    # ── Tier 1: Delta ──────────────────────────────────────────────────────
-    if warehouse_id and cat and cat not in ("hive_metastore", ""):
-        try:
-            from databricks.sdk import WorkspaceClient
-            from databricks.sdk.service.sql import StatementState, Format, Disposition
-            w   = WorkspaceClient()
-            t_conv  = f"`{cat}`.`{schema}`.file2edi_conversions"
-            t_audit = f"`{cat}`.`{schema}`.file2edi_audit_events"
-
-            def _delta_exec(sql: str) -> tuple[bool, list]:
-                r = w.statement_execution.execute_statement(
-                    warehouse_id=warehouse_id, statement=sql,
-                    wait_timeout="30s", format=Format.JSON_ARRAY, disposition=Disposition.INLINE,
-                )
-                ok   = r.status.state == StatementState.SUCCEEDED
-                rows = r.result.data_array if (ok and r.result) else []
-                return ok, rows
-
-            # Create schema + tables (idempotent)
-            _delta_exec(f"CREATE SCHEMA IF NOT EXISTS `{cat}`.`{schema}`")
-            conv_ddl = f"""
-            CREATE TABLE IF NOT EXISTS {t_conv} (
-              id STRING NOT NULL, correlation_id STRING, source_filename STRING,
-              pdf_hash STRING, order_key STRING, status STRING DEFAULT 'PROCESSING',
-              business_status STRING, delivery_status STRING DEFAULT 'NOT_APPLICABLE',
-              po_number STRING, order_date STRING, delivery_date STRING,
-              soldto STRING, shipto STRING, customer_name STRING,
-              confidence INT DEFAULT 0, line_count INT DEFAULT 0,
-              missing_material_count INT DEFAULT 0,
-              rejection_code STRING, rejection_message STRING,
-              tst_filename STRING, edifact_content STRING,
-              sftp_status STRING DEFAULT 'NOT_APPLICABLE',
-              email_status STRING DEFAULT 'NOT_APPLICABLE',
-              operator STRING DEFAULT 'system',
-              corrections_json STRING, extraction_json STRING,
-              created_at STRING, updated_at STRING
-            ) USING DELTA TBLPROPERTIES ('delta.autoOptimize.optimizeWrite'='true')
-            """
-            audit_ddl = f"""
-            CREATE TABLE IF NOT EXISTS {t_audit} (
-              id INTEGER, conversion_id STRING NOT NULL, event_type STRING NOT NULL,
-              actor STRING DEFAULT 'system', payload STRING, result STRING,
-              created_at STRING
-            ) USING DELTA
-            """
-            ok1, _ = _delta_exec(conv_ddl)
-            ok2, _ = _delta_exec(audit_ddl)
-            if ok1 and ok2:
-                # Order-graph Delta tables (orders + partners + lines + anomalies).
-                # Idempotent DDL so the app is self-contained; if creation fails
-                # (e.g. missing grants) the order graph simply stays SQLite-only.
-                _p = f"`{cat}`.`{schema}`"
-                order_tables = {
-                    "orders":    f"{_p}.file2edi_orders",
-                    "partners":  f"{_p}.file2edi_order_partners",
-                    "lines":     f"{_p}.file2edi_order_lines",
-                    "anomalies": f"{_p}.file2edi_order_anomalies",
-                }
-                order_ok = all(_delta_exec(ddl)[0] for ddl in _order_graph_ddls(cat, schema).values())
-                if not order_ok:
-                    log.warning("persistence: order-graph delta tables unavailable "
-                                "(orders stay SQLite-only)")
-                    order_tables = {}
-                _PERSIST_BACKEND = {
-                    "backend": "delta", "persistent": True,
-                    "location": f"{cat}.{schema}", "warehouse_id": warehouse_id,
-                    "t_conv": t_conv, "t_audit": t_audit,
-                    "order_tables": order_tables,
-                    "_delta_exec": _delta_exec,
-                    "conversions_available": True, "audit_events_available": True,
-                    "order_graph_available": bool(order_tables),
-                    "note": f"Delta tables at {cat}.{schema} via warehouse {warehouse_id}",
-                }
-                log.info("persistence: delta backend active at %s.%s (order_graph=%s)",
-                         cat, schema, bool(order_tables))
-                return
-            else:
-                log.warning("persistence: delta DDL failed; trying next tier")
-        except Exception as exc:
-            log.warning("persistence: delta probe failed: %s", exc)
-
-    # ── Tier 2: Workspace JSONL ────────────────────────────────────────────
-    if persist_path:
-        try:
-            _ws_probe(persist_path)   # raises if not writable
-            _PERSIST_BACKEND = {
-                "backend": "workspace_jsonl", "persistent": True,
-                "location": persist_path,
-                "path_conv":  f"{persist_path}/conversions.jsonl",
-                "path_audit": f"{persist_path}/audit_events.jsonl",
-                "conversions_available": True, "audit_events_available": True,
-                "note": f"Workspace JSONL files at {persist_path}",
-            }
-            log.info("persistence: workspace_jsonl backend active at %s", persist_path)
-            return
-        except Exception as exc:
-            log.warning("persistence: workspace_jsonl probe failed: %s", exc)
-
-    # ── Tier 3: SQLite fallback ────────────────────────────────────────────
+    # PostgreSQL backend is initialized in src/file2edi/store.py
     _PERSIST_BACKEND = {
-        "backend": "sqlite", "persistent": False,
-        "location": str(DB_PATH),
-        "conversions_available": True, "audit_events_available": True,
-        "note": (
-            "Container SQLite — data is lost on redeploy. "
-            "Set DATABRICKS_WAREHOUSE_ID + grant CREATE/USAGE on schema to enable Delta, "
-            "or grant app SP CAN_EDIT on EDIFACT workspace folder to enable Workspace JSONL."
-        ),
+        "backend": "postgres", 
+        "persistent": True,
+        "location": "PostgreSQL (PG_DATABASE_URL)",
+        "conversions_available": True, 
+        "audit_events_available": True,
+        "note": "PostgreSQL via File2EDI store",
     }
-    log.info("persistence: sqlite fallback active at %s", DB_PATH)
+    log.info("persistence: PostgreSQL backend")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3230,26 +3051,12 @@ def list_conversions(
         rows.sort(key=lambda r: r.get("updated_at") or r.get("created_at", ""), reverse=True)
         return rows[:limit]
 
-    # sqlite
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.row_factory = sqlite3.Row
-        clauses, params = [], []
-        if status: clauses.append("status=?"); params.append(status)
-        if q:
-            like = f"%{q}%"
-            clauses.append("(po_number LIKE ? OR source_filename LIKE ? OR customer_name LIKE ? OR soldto LIKE ?)")
-            params.extend([like, like, like, like])
-        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
-        rows = conn.execute(
-            f"SELECT * FROM conversions {where} ORDER BY COALESCE(updated_at, created_at) DESC LIMIT ?",
-            params + [limit]
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
-    except Exception as exc:
-        log.warning("list_conversions: %s", exc)
-        return []
+    # PostgreSQL backend
+    if bk == "postgres":
+        return []  # Conversions handled via File2EDI React API (/api/upload/list)
+
+    # Legacy SQLite (no longer supported)
+    return []
 
 
 def save_audit_event(
