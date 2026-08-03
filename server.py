@@ -1229,11 +1229,31 @@ def _local_process_and_respond(payload: bytes, filename: str, actor: str | None 
         from app.pdf_reader import pdf_pages_to_text
         from app.ocr import ocr_image_with_layout
         from app.extraction import extract_candidate_fields
-        pages = pdf_pages_to_text(payload, "1", ocr_with_layout=ocr_image_with_layout)
-        if not pages:
+        import fitz as _fitz
+        # Détecter le nombre de pages du PDF
+        _doc = _fitz.open(stream=payload, filetype="pdf")
+        _n_pages = _doc.page_count
+        _doc.close()
+
+        # Page 1 avec OCR si nécessaire (scannés), pages suivantes en texte natif
+        pages_p1 = pdf_pages_to_text(payload, "1", ocr_with_layout=ocr_image_with_layout)
+        if not pages_p1:
             raise ValueError("Impossible d'extraire le texte du PDF")
-        text   = pages[0]["text"]
-        layout = pages[0].get("layout")
+
+        if _n_pages > 1:
+            # Pages 2+ : texte natif uniquement (pas d'OCR)
+            _rest_sel = ",".join(str(i) for i in range(2, min(_n_pages + 1, 21)))
+            try:
+                pages_rest = pdf_pages_to_text(payload, _rest_sel, ocr_with_layout=None)
+            except Exception:
+                pages_rest = []
+            all_pages = pages_p1 + pages_rest
+        else:
+            all_pages = pages_p1
+
+        # Concaténer tout le texte pour l'extraction des lignes
+        text   = "\n".join(p["text"] for p in all_pages if p.get("text"))
+        layout = pages_p1[0].get("layout")  # layout de la page 1 pour l'entête
         fields = extract_candidate_fields(text, "", filename, layout, {})
         structured = fields.get("structured", {})
         response = _f2edi_build_response(structured, filename, pdf_hash, _t.time() - t0)
