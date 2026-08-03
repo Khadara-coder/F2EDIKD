@@ -37,6 +37,42 @@ def _provider() -> str:
     return "databricks"
 
 
+def _chat_databricks_http(prompt: str, max_tokens: int, endpoint: str) -> Optional[str]:
+    """Fallback: direct HTTP call to Databricks serving endpoint (same path as the connection test)."""
+    host = os.getenv("DATABRICKS_HOST", "").strip().rstrip("/")
+    if not host:
+        return None
+    url = f"{host}/serving-endpoints/{endpoint}/invocations"
+    token = os.getenv("DATABRICKS_TOKEN", "").strip()
+    headers = {"Content-Type": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    else:
+        try:
+            from databricks.sdk import WorkspaceClient
+            profile = os.getenv("DATABRICKS_CONFIG_PROFILE", "").strip()
+            w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
+            headers.update(w.config.authenticate())
+        except Exception as exc:
+            logger.debug("Databricks SDK auth unavailable: %s", exc)
+            return None
+    body = {
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": max_tokens,
+        "temperature": 0,
+    }
+    try:
+        resp = requests.post(url, headers=headers, json=body, timeout=30)
+        if resp.status_code != 200:
+            logger.warning("Databricks HTTP LLM call failed (%s): %s", resp.status_code, resp.text[:200])
+            return None
+        data = resp.json()
+        return str(data["choices"][0]["message"]["content"]).strip() or None
+    except Exception as exc:
+        logger.warning("Databricks HTTP LLM call error: %s", exc)
+        return None
+
+
 def _chat_databricks(prompt: str, max_tokens: int, endpoint: str, fallback_endpoint: str | None = None) -> Optional[str]:
     global _DBX_CLIENT, _DBX_CLIENT_INITIALIZED
     if not _DBX_CLIENT_INITIALIZED:
@@ -48,8 +84,12 @@ def _chat_databricks(prompt: str, max_tokens: int, endpoint: str, fallback_endpo
         except Exception:
             _DBX_CLIENT = None
     if _DBX_CLIENT is None:
-        logger.warning("mlflow.deployments client not available")
-        return None
+        # mlflow not available — fall back to direct HTTP (same path as the connection test)
+        logger.debug("mlflow.deployments not available, using HTTP fallback for Databricks LLM")
+        result = _chat_databricks_http(prompt, max_tokens, endpoint)
+        if result is None and fallback_endpoint and fallback_endpoint != endpoint:
+            result = _chat_databricks_http(prompt, max_tokens, fallback_endpoint)
+        return result
 
     def _predict(target_endpoint: str) -> Optional[str]:
         resp = _DBX_CLIENT.predict(
