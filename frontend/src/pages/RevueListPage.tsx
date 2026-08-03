@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { confidenceColor, formatDateTime } from "@/lib/utils";
+import { confidenceColor, formatDateTime, cn } from "@/lib/utils";
 import type { OrderStatus } from "@/types";
 
 function SourceBadge({ source }: { source?: string }) {
@@ -110,23 +110,25 @@ export function RevueListPage() {
     }
   }, [isAdmin, currentUsername]);
 
-  // Liste des gestionnaires pour le filtre
+  // Liste des gestionnaires pour le filtre (username → displayName)
   const usersQuery = useQuery<Array<{ userId: string; username: string; displayName: string }>>(
     { queryKey: ["users"], queryFn: () => fetch("/api/users").then(r => r.json()), staleTime: 60_000 }
   );
   const gestionnaires = usersQuery.data ?? [];
+  // Map username → displayName pour la colonne
+  const displayNameMap = useMemo(
+    () => Object.fromEntries(gestionnaires.map(u => [u.username.toLowerCase(), u.displayName])),
+    [gestionnaires]
+  );
+  const getDisplayName = (username: string | undefined) => {
+    if (!username) return null;
+    const lc = username.toLowerCase();
+    if (lc === "operator" || lc === "system") return "Système";
+    return displayNameMap[lc] || username;
+  };
 
   const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
-
-  const managerLabel = (raw: string | undefined) => {
-    const value = (raw || "").trim();
-    if (!value) return null;
-    if (value.toLowerCase() === "operator" || value.toLowerCase() === "system") {
-      return "Système (historique)";
-    }
-    return value;
-  };
 
   const handleSort = (key: ReviewSortKey) => {
     if (sortKey === key) {
@@ -251,7 +253,7 @@ export function RevueListPage() {
                 : "Tous les dossiers"}
             </Button>
           </div>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_180px_180px_180px_auto] lg:items-center">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_200px_180px_auto] lg:items-center">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -261,19 +263,6 @@ export function RevueListPage() {
                 className="pl-9"
               />
             </div>
-
-            <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Statut" />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_FILTERS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
 
             {/* Filtre par gestionnaire: liste réelle des utilisateurs */}
             <Select value={managerFilter} onValueChange={setManagerFilter}>
@@ -319,16 +308,36 @@ export function RevueListPage() {
                   setManagerFilter("all");
                   setDateFrom("");
                   setDateTo("");
+                  setMyOrdersOnly(false);   // tout effacer, y compris le filtre "Mes dossiers"
                   setSortKey("createdAt");
                   setSortDirection("desc");
-                  // ADV reprend son filtre par défaut
-                  if (!isAdmin && currentUsername) setMyOrdersOnly(true);
                 }}
               >
                 <X className="h-4 w-4" />
                 Réinitialiser
               </Button>
             </div>
+          </div>
+
+          {/* Palette de statuts */}
+          <div className="mt-4 flex flex-wrap items-center gap-2 rounded-lg border bg-background/80 p-3">
+            <span className="text-sm font-medium text-foreground">Statut</span>
+            {STATUS_FILTERS.map((option) => (
+              <Button
+                key={option.value}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setStatusFilter(option.value)}
+                className={cn(
+                  "rounded-full border px-3 text-xs font-semibold shadow-sm transition-colors",
+                  option.className,
+                  statusFilter === option.value && "ring-2 ring-primary ring-offset-2",
+                )}
+              >
+                {option.label}
+              </Button>
+            ))}
           </div>
         </CardContent>
 
@@ -426,9 +435,10 @@ export function RevueListPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {(row as unknown as { assignedTo?: string }).assignedTo
-                        || managerLabel(row.processedBy)
-                        || <span className="text-muted-foreground">—</span>}
+                      {getDisplayName(
+                        (row as unknown as { assignedTo?: string }).assignedTo
+                        || row.processedBy
+                      ) || <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />
