@@ -1589,6 +1589,7 @@ def _users_mixin(cls):
     cls.list_users = list_users
     cls.delete_user = delete_user
     cls.change_password = change_password
+    cls.update_user = update_user
     cls.hold_order = hold_order
     cls.transfer_order = transfer_order
     cls.list_orders_filtered = list_orders_filtered
