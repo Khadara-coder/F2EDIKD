@@ -631,7 +631,7 @@ def _extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
 # ── History ────────────────────────────────────────────────────────────────────
 def _load_history() -> list[list]:
     try:
-        if not os.path.exists(DB_PATH):
+        if DB_PATH is None or not os.path.exists(str(DB_PATH)):
             return []
         conn = sqlite3.connect(DB_PATH, timeout=5)
         try:
@@ -1292,8 +1292,8 @@ def _persist_uploaded_pdf(
 
 
 def _store_conversion_history(result: dict) -> None:
-    """Persist conversion result in local SQLite history."""
-    if not os.path.exists(DB_PATH):
+    """Persist conversion result — no-op for PostgreSQL backend."""
+    if DB_PATH is None or not os.path.exists(str(DB_PATH)):
         return
     try:
         decision  = result.get("rejection", {}).get("decision") or "UNKNOWN"
@@ -2056,31 +2056,19 @@ def api_admin_roles(req: Request):
     }
 
     db_rows: list[dict] = []
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            """
-            SELECT actor, role, is_active, updated_at, updated_by
-            FROM user_roles
-            WHERE is_active=1
-            ORDER BY actor ASC
-            """
-        ).fetchall()
-        conn.close()
-        for r in rows:
-            db_rows.append(
-                {
-                    "actor": str(r["actor"]),
-                    "role": str(r["role"]),
-                    "source": "db",
-                    "is_active": bool(r["is_active"]),
-                    "updated_at": r["updated_at"],
-                    "updated_by": r["updated_by"] or "system",
-                }
-            )
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Lecture des rôles impossible: {exc}")
+    # PostgreSQL backend: role overrides stored in file2edi_settings; env admins are source of truth
+    if _PERSIST_BACKEND.get("backend") == "postgres":
+        try:
+            from src.file2edi.store import get_store as _gs
+            raw = _gs().load_app_settings().get("rbac_role_overrides") or {}
+            for actor_key, role_val in raw.items():
+                db_rows.append({
+                    "actor": actor_key, "role": role_val,
+                    "source": "db", "is_active": True,
+                    "updated_at": None, "updated_by": "settings",
+                })
+        except Exception as exc:
+            log.debug("api_admin_roles: could not load pg role overrides: %s", exc)
 
     # DB overrides take precedence in effective role display.
     merged: dict[str, dict] = dict(env_rows)
@@ -2119,21 +2107,14 @@ def api_admin_upsert_role(req: Request, payload: RoleUpsertPayload):
         raise HTTPException(status_code=400, detail="Rôle invalide (admin|adv)")
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            """
-            INSERT INTO user_roles (actor, role, is_active, updated_by, created_at, updated_at)
-            VALUES (?, ?, 1, ?, datetime('now'), datetime('now'))
-            ON CONFLICT(actor) DO UPDATE SET
-              role=excluded.role,
-              is_active=1,
-              updated_by=excluded.updated_by,
-              updated_at=datetime('now')
-            """,
-            [actor, role, admin_actor],
-        )
-        conn.commit()
-        conn.close()
+        if _PERSIST_BACKEND.get("backend") == "postgres":
+            from src.file2edi.store import get_store as _gs
+            store = _gs()
+            settings = store.load_app_settings()
+            overrides = settings.get("rbac_role_overrides") or {}
+            overrides[actor] = role
+            store.save_app_settings({**settings, "rbac_role_overrides": overrides})
+        # (other backends: no-op — manage roles via env vars APP_ADMIN_USERS)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Mise à jour du rôle impossible: {exc}")
 
@@ -2156,18 +2137,16 @@ def api_admin_delete_role(actor: str, req: Request):
     if not target:
         raise HTTPException(status_code=400, detail="Actor requis")
 
+    removed = False
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        cur = conn.execute(
-            """
-            UPDATE user_roles
-            SET is_active=0, updated_by=?, updated_at=datetime('now')
-            WHERE actor=?
-            """,
-            [admin_actor, target],
-        )
-        conn.commit()
-        conn.close()
+        if _PERSIST_BACKEND.get("backend") == "postgres":
+            from src.file2edi.store import get_store as _gs
+            store = _gs()
+            settings = store.load_app_settings()
+            overrides = settings.get("rbac_role_overrides") or {}
+            removed = target in overrides
+            overrides.pop(target, None)
+            store.save_app_settings({**settings, "rbac_role_overrides": overrides})
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Suppression du rôle impossible: {exc}")
 
@@ -2175,7 +2154,7 @@ def api_admin_delete_role(actor: str, req: Request):
     return {
         "ok": True,
         "actor": target,
-        "removed": cur.rowcount > 0,
+        "removed": removed,
         "effective_role": _resolve_role(target),
     }
 
@@ -2188,31 +2167,17 @@ def api_admin_list_keys(req: Request):
     _init_db()
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        rows = conn.execute(
-            """
-            SELECT id, name, created_at, created_by, last_used_at, is_active
-            FROM api_keys
-            WHERE is_active=1
-            ORDER BY created_at DESC
-            """
-        ).fetchall()
-        conn.close()
-
-        return {
-            "ok": True,
-            "items": [
-                {
-                    "id": r[0],
-                    "name": r[1],
-                    "created_at": r[2],
-                    "created_by": r[3],
-                    "last_used_at": r[4],
-                    "is_active": bool(r[5]),
-                }
-                for r in rows
-            ],
-        }
+        items = []
+        if _PERSIST_BACKEND.get("backend") == "postgres":
+            from src.file2edi.store import get_store as _gs
+            settings = _gs().load_app_settings()
+            for k in (settings.get("api_keys") or []):
+                items.append({
+                    "id": k.get("id"), "name": k.get("name"),
+                    "created_at": k.get("created_at"), "created_by": k.get("created_by"),
+                    "last_used_at": k.get("last_used_at"), "is_active": True,
+                })
+        return {"ok": True, "items": items}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erreur: {exc}")
 
@@ -2242,26 +2207,21 @@ async def api_admin_create_key(req: Request):
     key_hash = hashlib.sha256(api_key.encode()).hexdigest()
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            """
-            INSERT INTO api_keys (id, name, key_hash, created_by, is_active)
-            VALUES (?, ?, ?, ?, 1)
-            """,
-            [key_id, name, key_hash, admin_actor],
-        )
-        conn.commit()
-        conn.close()
-
-        save_audit_event(
-            "__api_keys__", "key_create", admin_actor, {"name": name, "key_id": key_id}, "ok"
-        )
-
+        if _PERSIST_BACKEND.get("backend") == "postgres":
+            from src.file2edi.store import get_store as _gs
+            import datetime as _dt
+            store = _gs()
+            settings = store.load_app_settings()
+            keys_list = list(settings.get("api_keys") or [])
+            keys_list.append({
+                "id": key_id, "name": name, "key_hash": key_hash,
+                "created_by": admin_actor,
+                "created_at": _dt.datetime.utcnow().isoformat(),
+                "last_used_at": None,
+            })
+            store.save_app_settings({**settings, "api_keys": keys_list})
         return {
-            "ok": True,
-            "key_id": key_id,
-            "name": name,
-            "api_key": api_key,
+            "ok": True, "key_id": key_id, "name": name, "api_key": api_key,
             "message": "⚠️ Copiez cette clé maintenant, elle ne sera plus affichée!",
         }
     except Exception as exc:
@@ -2275,21 +2235,15 @@ def api_admin_delete_key(key_id: str, req: Request):
     _init_db()
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        cur = conn.execute(
-            """
-            UPDATE api_keys
-            SET is_active=0
-            WHERE id=?
-            """,
-            [key_id],
-        )
-        conn.commit()
-        conn.close()
-
-        save_audit_event("__api_keys__", "key_delete", admin_actor, {"key_id": key_id}, "ok")
-
-        return {"ok": True, "key_id": key_id, "removed": cur.rowcount > 0}
+        removed = False
+        if _PERSIST_BACKEND.get("backend") == "postgres":
+            from src.file2edi.store import get_store as _gs
+            store = _gs()
+            settings = store.load_app_settings()
+            keys_list = [k for k in (settings.get("api_keys") or []) if k.get("id") != key_id]
+            removed = len(keys_list) < len(settings.get("api_keys") or [])
+            store.save_app_settings({**settings, "api_keys": keys_list})
+        return {"ok": True, "key_id": key_id, "removed": removed}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Erreur: {exc}")
 
@@ -2432,6 +2386,34 @@ def _sanitize_callback_url(raw: str | None) -> str | None:
 
 
 def _load_conversion_callback_context(conversion_id: str) -> dict | None:
+    """Load conversion context for webhook callbacks."""
+    try:
+        # Try PostgreSQL store first
+        from src.file2edi.store import get_store as _gs
+        review = _gs().get_order_review(conversion_id)
+        if review:
+            o = review.get("order", {})
+            return {
+                "id": conversion_id,
+                "correlation_id": o.get("uploadId"),
+                "callback_url": None,
+                "source_filename": o.get("fileName"),
+                "pdf_hash": None,
+                "status": o.get("status"),
+                "business_status": o.get("status"),
+                "delivery_status": None,
+                "po_number": o.get("customerOrderNumber"),
+                "soldto": next((p["partnerCode"] for p in review.get("partners", []) if p["partnerFunction"] == "soldto"), None),
+                "shipto": next((p["partnerCode"] for p in review.get("partners", []) if p["partnerFunction"] == "shipto"), None),
+                "tst_filename": None, "sftp_status": None, "email_status": None,
+                "rejection_code": None, "rejection_message": None,
+                "created_at": o.get("createdAt"), "updated_at": o.get("updatedAt"),
+            }
+    except Exception:
+        pass
+    # Legacy SQLite fallback (only when DB_PATH is set)
+    if DB_PATH is None:
+        return None
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.row_factory = sqlite3.Row
@@ -2902,7 +2884,9 @@ def get_storage_mode() -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _sqlite_save_conversion(row: dict) -> None:
-    """Upsert one conversion into container-local SQLite (Req 6 fallback)."""
+    """Upsert one conversion into container-local SQLite (workspace_jsonl fallback only)."""
+    if DB_PATH is None:
+        return
     conn = sqlite3.connect(DB_PATH, timeout=5)
     try:
         sets     = ", ".join(f"{c}=excluded.{c}" for c in _CONV_COLS if c not in ("id", "created_at"))
@@ -3008,7 +2992,9 @@ def load_conversion(cid: str) -> dict | None:
         rows = _ws_read_jsonl(ws_path)
         return next((r for r in rows if r.get("id") == cid), None)
 
-    # sqlite
+    # postgres: no legacy conversions table — return None
+    if DB_PATH is None:
+        return None
     try:
         conn = sqlite3.connect(DB_PATH, timeout=5)
         conn.row_factory = sqlite3.Row
@@ -3112,8 +3098,8 @@ def save_audit_event(
             _sqlite_append_audit(conversion_id, event_type, actor, payload, result)
         return
 
-    # sqlite — delegate to existing _add_audit
-    _add_audit(conversion_id, event_type, actor, payload, result)
+    # postgres/sqlite fallback — no-op (audit stored via File2EDI store in router.py)
+    log.debug("save_audit_event(%s, %s): non-delta backend, skipped", conversion_id, event_type)
 
 
 def list_audit_events(conversion_id: str) -> list[dict]:
@@ -3136,19 +3122,8 @@ def list_audit_events(conversion_id: str) -> list[dict]:
             key=lambda r: r.get("created_at", ""),
         )
 
-    # sqlite
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            "SELECT * FROM audit_events WHERE conversion_id=? ORDER BY created_at ASC",
-            [conversion_id]
-        ).fetchall()
-        conn.close()
-        return [dict(r) for r in rows]
-    except Exception as exc:
-        log.warning("list_audit_events(%s): %s", conversion_id, exc)
-        return []
+    # postgres/sqlite fallback: no legacy audit table
+    return []
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -3157,17 +3132,12 @@ def list_audit_events(conversion_id: str) -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _maybe_migrate_sqlite_to_backend() -> None:
-    """If backend != sqlite AND local DB has data, migrate it once.
-
-    Uses a `migration_sentinel.json` file in the persist folder as the primary
-    idempotency guard for workspace_jsonl (Req 3+9).  Falls back to scanning
-    audit_events for a `storage_migration_checked` event (Delta + defensive path).
-    """
+    """Migration from SQLite to backend — no-op when using PostgreSQL."""
     bk = _PERSIST_BACKEND.get("backend", "sqlite")
-    if bk == "sqlite":
-        return  # nothing to do
-    if not Path(DB_PATH).exists():
-        return  # no local data
+    if bk in ("postgres", "sqlite"):
+        return  # nothing to migrate
+    if DB_PATH is None or not Path(DB_PATH).exists():
+        return  # no local SQLite data
 
     # ── Idempotency check ────────────────────────────────────────────────────
     sentinel_key  = "storage_migration_checked"
@@ -4005,14 +3975,26 @@ async def api_generate(cid: str, req: Request):
     actor, _ = _ensure_can_mutate(req, request)
 
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        row = conn.execute(
-            "SELECT extraction_json, corrections_json, source_filename, po_number, soldto, shipto"
-            " FROM conversions WHERE id=?", [cid]
-        ).fetchone()
-        conn.close()
+        # Load from PostgreSQL store (React API) or fallback lookup
+        row = None
+        try:
+            from src.file2edi.store import get_store as _gs
+            review = _gs().get_order_review(cid)
+            if review:
+                o = review.get("order", {})
+                engine = review.get("_engine_result") or {}
+                row = (
+                    _json.dumps(engine) if engine else "{}",
+                    "{}",
+                    o.get("fileName", ""),
+                    o.get("customerOrderNumber", ""),
+                    next((p["partnerCode"] for p in review.get("partners", []) if p["partnerFunction"] == "soldto"), ""),
+                    next((p["partnerCode"] for p in review.get("partners", []) if p["partnerFunction"] == "shipto"), ""),
+                )
+        except Exception:
+            pass
         if not row:
-            return JSONResponse(status_code=404, content={"error": "Conversion introuvable"})
+            return JSONResponse(status_code=404, content={"error": "Conversion introuvable — utilisez /api/orders/{id}/generate"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -4151,20 +4133,15 @@ async def api_generate(cid: str, req: Request):
         # Store in-memory only
         tst_path = None
 
-    # ── Update conversion in DB ───────────────────────────────────────────
+    # ── Update order in PostgreSQL store ────────────────────────────────────
     try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute("""
-            UPDATE conversions SET
-                status=?, delivery_status=?, tst_filename=?,
-                edifact_content=?, po_number=?, soldto=?, shipto=?,
-                corrections_json=?, updated_at=datetime('now')
-            WHERE id=?""",
-            [new_status, delivery_status, tst_fname,
-             edi_msg, po_number, soldto_code, shipto_code,
-             _json.dumps(cor), cid])
-        conn.commit()
-        conn.close()
+        from src.file2edi.store import get_store as _gs
+        store = _gs()
+        review = store.get_order_review(cid)
+        if review:
+            review["order"]["status"] = new_status
+            review["order"]["lineCount"] = len(resolved_lines)
+            store.save_order_review(review)
     except Exception as e:
         log.warning("DB update after generate failed: %s", e)
 
@@ -4199,208 +4176,51 @@ async def api_retry_sftp(cid: str):
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 @app.get("/api/dashboard")
 def api_dashboard():
-    """KPIs + work queue for the cockpit page."""
-    _init_db()
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        # Status counts today
-        rows = conn.execute("""
-          SELECT status, COUNT(*) as n FROM conversions
-          WHERE date(created_at) = date('now') GROUP BY status
-        """).fetchall()
-        today = {r[0]: r[1] for r in rows}
-        # Total counts
-        total_rows = conn.execute(
-            "SELECT status, COUNT(*) FROM conversions GROUP BY status"
-        ).fetchall()
-        totals = {r[0]: r[1] for r in total_rows}
-        # Work queue: REVIEW_REQUIRED + recent FAILED + SFTP_FAILED
-        queue = conn.execute("""
-          SELECT id, source_filename, status, rejection_code, po_number, soldto, created_at
-          FROM conversions WHERE status IN ('REVIEW_REQUIRED','SFTP_FAILED','EMAIL_FAILED','FAILED')
-          ORDER BY created_at DESC LIMIT 20
-        """).fetchall()
-        queue_cols = ["id","source_filename","status","rejection_code","po_number","soldto","created_at"]
-        conn.close()
-        return {
-            "today": today,
-            "totals": totals,
-            "work_queue": [dict(zip(queue_cols, r)) for r in queue],
-        }
-    except Exception as e:
-        return {"today": {}, "totals": {}, "work_queue": [], "error": str(e)}
+    """Legacy KPIs endpoint — redirected to PostgreSQL-backed React API."""
+    return {"today": {}, "totals": {}, "work_queue": [],
+            "_note": "Use /api/dashboard/metrics and /api/dashboard/review-queue"}
 
 
 # ── Conversions list ──────────────────────────────────────────────────────────
 @app.get("/api/conversions")
 def api_conversions(status: str = "", q: str = "", limit: int = 100):
-    """Return conversion history with optional status/text filter."""
-    _init_db()
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        where, params = [], []
-        if status:
-            where.append("status = ?"); params.append(status)
-        if q:
-            where.append("(source_filename LIKE ? OR po_number LIKE ? OR soldto LIKE ? OR shipto LIKE ?)")
-            params += [f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%"]
-        clause = ("WHERE " + " AND ".join(where)) if where else ""
-        rows = conn.execute(
-            f"SELECT id,correlation_id,source_filename,pdf_hash,status,business_status,"
-            f"delivery_status,po_number,order_date,delivery_date,soldto,shipto,"
-            f"customer_name,confidence,line_count,missing_material_count,"
-            f"rejection_code,rejection_message,tst_filename,sftp_status,email_status,"
-            f"operator,created_at,updated_at "
-            f"FROM conversions {clause} ORDER BY created_at DESC LIMIT ?",
-            params + [limit]
-        ).fetchall()
-        cols = ["id","correlation_id","source_filename","pdf_hash","status","business_status",
-                "delivery_status","po_number","order_date","delivery_date","soldto","shipto",
-                "customer_name","confidence","line_count","missing_material_count",
-                "rejection_code","rejection_message","tst_filename","sftp_status","email_status",
-                "operator","created_at","updated_at"]
-        conn.close()
-        return {"conversions": [dict(zip(cols, r)) for r in rows]}
-    except Exception as e:
-        return {"conversions": [], "error": str(e)}
+    """Legacy endpoint — use /api/orders instead."""
+    return {"conversions": [], "_note": "Use /api/orders for PostgreSQL-backed order list"}
 
 
 # ── Single conversion detail ──────────────────────────────────────────────────
 @app.get("/api/conversions/{cid}")
 def api_conversion_detail(cid: str):
-    """Return a single conversion with extraction JSON and audit events."""
-    _init_db()
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        row = conn.execute(
-            "SELECT *,extraction_json,corrections_json FROM conversions WHERE id=?", [cid]
-        ).fetchone()
-        if not row:
-            conn.close()
-            return JSONResponse(status_code=404, content={"error": "Conversion introuvable"})
-        cols = [d[0] for d in conn.execute("SELECT * FROM conversions LIMIT 0").description or []]
-        detail = dict(zip(cols, row))
-        # Parse JSON fields
-        for field in ("extraction_json", "corrections_json"):
-            try:
-                if detail.get(field):
-                    detail[field] = _json.loads(detail[field])
-            except Exception:
-                pass
-        events = conn.execute(
-            "SELECT event_type,actor,payload,result,created_at FROM audit_events"
-            " WHERE conversion_id=? ORDER BY created_at ASC", [cid]
-        ).fetchall()
-        conn.close()
-        detail["audit_events"] = [
-            {"event_type": e[0], "actor": e[1], "payload": e[2], "result": e[3], "created_at": e[4]}
-            for e in events
-        ]
-        return detail
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    """Legacy endpoint — use /api/orders/{id}/review instead."""
+    return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/review"})
 
 
 # ── Approve ───────────────────────────────────────────────────────────────────
 @app.post("/api/conversions/{cid}/approve")
 async def api_approve(cid: str, req: Request):
-    """Operator approves a REVIEW_REQUIRED conversion — marks it ACCEPTED."""
-    try:
-        request = await req.json()
-    except Exception:
-        request = {}
-    actor, _ = _ensure_can_mutate(req, request)
-    _init_db()
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            "UPDATE conversions SET status='ACCEPTED',delivery_status='READY_FOR_DOWNLOAD',"
-            "operator=?,corrections_json=?,updated_at=datetime('now') WHERE id=?",
-            [actor,
-             _json.dumps(request.get("corrections",{})), cid]
-        )
-        conn.commit(); conn.close()
-        _add_audit(cid, "user_approved", actor,
-                   request, "ACCEPTED")
-        _emit_conversion_callback(cid, "user_approved", actor, request)
-        return {"ok": True, "status": "ACCEPTED"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    """Legacy approve — use /api/orders/{id}/approve instead."""
+    return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/approve"})
 
 
 # ── Reject ────────────────────────────────────────────────────────────────────
 @app.post("/api/conversions/{cid}/reject")
 async def api_reject(cid: str, req: Request):
-    """Operator manually rejects a conversion."""
-    try:
-        request = await req.json()
-    except Exception:
-        request = {}
-    actor, _ = _ensure_can_mutate(req, request)
-    _init_db()
-    try:
-        code = request.get("rejection_code","MANUAL_REJECTION")
-        msg  = request.get("rejection_message") or REJECT_LABELS.get(code,code)
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            "UPDATE conversions SET status='REJECTED',rejection_code=?,rejection_message=?,"
-            "operator=?,updated_at=datetime('now') WHERE id=?",
-            [code, msg, actor, cid]
-        )
-        conn.commit(); conn.close()
-        _add_audit(cid, "user_rejected", actor,
-                   request, "REJECTED")
-        _emit_conversion_callback(cid, "user_rejected", actor, request)
-        return {"ok": True, "status": "REJECTED"}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    """Legacy reject — use /api/orders/{id}/reject instead."""
+    return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/reject"})
 
 
 # ── Save corrections ──────────────────────────────────────────────────────────
 @app.post("/api/conversions/{cid}/review")
 async def api_save_review(cid: str, req: Request):
-    """Save operator corrections — keeps REVIEW_REQUIRED status."""
-    try:
-        request = await req.json()
-    except Exception:
-        request = {}
-    actor, _ = _ensure_can_mutate(req, request)
-    _init_db()
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            "UPDATE conversions SET corrections_json=?,operator=?,"
-            "po_number=COALESCE(?,po_number),updated_at=datetime('now') WHERE id=?",
-            [_json.dumps(request.get("corrections",{})),
-             actor,
-             request.get("po_number"), cid]
-        )
-        conn.commit(); conn.close()
-        _add_audit(cid, "user_corrected", actor, request)
-        _emit_conversion_callback(cid, "user_corrected", actor, request)
-        return {"ok": True}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    """Legacy corrections endpoint — use /api/orders/{id}/update instead."""
+    return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/update"})
 
 
 # ── Audit trail ───────────────────────────────────────────────────────────────
 @app.get("/api/conversions/{cid}/audit")
 def api_audit(cid: str):
-    """Return audit events for a conversion."""
-    _init_db()
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        events = conn.execute(
-            "SELECT event_type,actor,payload,result,created_at "
-            "FROM audit_events WHERE conversion_id=? ORDER BY created_at ASC", [cid]
-        ).fetchall()
-        conn.close()
-        return {"events": [
-            {"event_type": e[0],"actor": e[1],"payload": e[2],"result": e[3],"created_at": e[4]}
-            for e in events
-        ]}
-    except Exception as e:
-        return {"events": [], "error": str(e)}
+    """Legacy audit endpoint — use /api/orders/{id}/review (includes traceability)."""
+    return {"events": []}
 
 
 # ── Send SFTP ─────────────────────────────────────────────────────────────────
@@ -4422,65 +4242,13 @@ def api_sftp_status():
 
 @app.post("/api/conversions/{cid}/send-sftp")
 def api_send_sftp(cid: str, req: Request):
-    """Send the .tst file for this conversion via SFTP."""
-    _init_db()
-    actor, _ = _ensure_can_mutate(req)
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        row = conn.execute(
-            "SELECT tst_filename,edifact_content FROM conversions WHERE id=?", [cid]
-        ).fetchone()
-        if not row or not row[0]:
-            conn.close()
-            return JSONResponse(status_code=404, content={"error": "Aucun .tst pour cette conversion"})
-        tst_filename, edifact_content = row
-        conn.close()
-        # Write to outbox if needed
-        tst_path = Path(OUTBOX_DIR) / tst_filename
-        if edifact_content and not tst_path.exists():
-            tst_path.write_text(edifact_content, encoding="utf-8")
-        ok, msg = _test_sftp()  # quick connectivity test
-        if not ok:
-            _upsert_sftp_status(cid, "SFTP_FAILED", msg)
-            _add_audit(cid, "sftp_failed", actor, {"tst_filename": tst_filename}, msg)
-            _emit_conversion_callback(cid, "sftp_failed", actor, {"tst_filename": tst_filename, "error": msg})
-            return {"ok": False, "error": msg}
-        # Use paramiko to upload
-        try:
-            import paramiko as _pm
-            sftp_host = os.environ["SFTP_HOST"]
-            sftp_user = os.environ["SFTP_USERNAME"]
-            sftp_pass = os.environ.get("SFTP_PASSWORD","")
-            sftp_dir  = os.environ.get("SFTP_REMOTE_DIR","/")
-            client = _pm.SSHClient()
-            client.set_missing_host_key_policy(_pm.AutoAddPolicy())
-            client.connect(sftp_host, username=sftp_user, password=sftp_pass, timeout=15)
-            sftp = client.open_sftp()
-            remote = f"{sftp_dir.rstrip('/')}/{tst_filename}"
-            sftp.put(str(tst_path), remote)
-            sftp.close(); client.close()
-            _upsert_sftp_status(cid, "SFTP_DELIVERED", remote)
-            _add_audit(cid, "sftp_sent", actor, {"remote": remote}, "SFTP_DELIVERED")
-            _emit_conversion_callback(cid, "sftp_sent", actor, {"remote": remote})
-            return {"ok": True, "remote_path": remote}
-        except Exception as e:
-            _upsert_sftp_status(cid, "SFTP_FAILED", str(e))
-            _add_audit(cid, "sftp_failed", actor, {}, str(e))
-            _emit_conversion_callback(cid, "sftp_failed", actor, {"error": str(e)})
-            return {"ok": False, "error": str(e)}
-    except Exception as e:
-        return JSONResponse(status_code=500, content={"error": str(e)})
+    """Legacy SFTP endpoint — use /api/orders/{id}/send-sftp instead."""
+    return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/send-sftp"})
 
 
 def _upsert_sftp_status(cid: str, sftp_status: str, detail: str = "") -> None:
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            "UPDATE conversions SET sftp_status=?,updated_at=datetime('now') WHERE id=?",
-            [sftp_status, cid]
-        )
-        conn.commit(); conn.close()
-    except Exception: pass
+    """Update SFTP status — no-op for PostgreSQL (status tracked via File2EDI store)."""
+    log.debug("_upsert_sftp_status(%s, %s): postgres backend, skipped", cid, sftp_status)
 
 
 # ── Rejection email preview ───────────────────────────────────────────────────
@@ -4564,12 +4332,7 @@ async def api_send_rejection_email(cid: str, req: Request):
         with smtplib.SMTP(smtp_host, int(os.environ.get("SMTP_PORT",25))) as server:
             server.sendmail(msg["From"], [msg["To"]], msg.as_string())
         # Update email_status
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.execute(
-            "UPDATE conversions SET email_status='EMAIL_SENT',updated_at=datetime('now') WHERE id=?",
-            [cid]
-        )
-        conn.commit(); conn.close()
+        log.info("rejection_email_sent for %s", cid)
         _add_audit(cid, "rejection_email_sent", actor, request, "EMAIL_SENT")
         return {"ok": True, "status": "EMAIL_SENT"}
     except Exception as e:

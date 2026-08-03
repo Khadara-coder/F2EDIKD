@@ -111,7 +111,15 @@ def _chat_databricks(prompt: str, max_tokens: int, endpoint: str, fallback_endpo
                 return _predict(fallback_endpoint)
             except Exception as fallback_exc:
                 logger.warning("Databricks LLM fallback failed: %s", fallback_exc)
-        return None
+        # mlflow client failed mid-session (e.g. token expired) — reset and retry via HTTP
+        global _DBX_CLIENT, _DBX_CLIENT_INITIALIZED
+        _DBX_CLIENT = None
+        _DBX_CLIENT_INITIALIZED = False
+        logger.info("Databricks mlflow client reset, retrying via HTTP fallback")
+        result = _chat_databricks_http(prompt, max_tokens, endpoint)
+        if result is None and fallback_endpoint and fallback_endpoint != endpoint:
+            result = _chat_databricks_http(prompt, max_tokens, fallback_endpoint)
+        return result
 
 
 def _chat_openai_compatible(prompt: str, max_tokens: int) -> Optional[str]:
