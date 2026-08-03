@@ -97,7 +97,11 @@ export interface ReviewQueueItem {
   status: OrderStatus;
   processedAt?: string;
   processedBy?: string;
-  assignedTo?: string;   // username du gestionnaire assigné
+  assignedTo?: string;       // username du gestionnaire assigné
+  holdReason?: string;       // motif mise en attente
+  transferredFrom?: string;  // username de celui qui a transféré
+  transferredTo?: string;    // username du destinataire
+  transferNote?: string;     // note de transfert
   source?: "ui" | "n8n" | "api" | "unknown";
 }
 

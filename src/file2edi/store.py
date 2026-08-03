@@ -769,6 +769,8 @@ class File2EdiStore:
                       COALESCE(u.file_name, o.file_name) AS file_name,
                       o.client_name, o.global_confidence, o.status,
                       o.source, o.assigned_to, o.uploaded_by,
+                      o.hold_reason, o.hold_by,
+                      o.transferred_from, o.transferred_to, o.transfer_note,
                       o.created_at, o.updated_at,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o

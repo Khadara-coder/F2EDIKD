@@ -396,6 +396,7 @@ export function RevueListPage() {
                     </button>
                   </TableHead>
                   <TableHead>Statut</TableHead>
+                  <TableHead>Motif</TableHead>
                   <TableHead>
                     <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
                       Gestionnaire
@@ -434,8 +435,28 @@ export function RevueListPage() {
                         {GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].label}
                       </Badge>
                     </TableCell>
+                    <TableCell className="max-w-[200px] text-xs text-muted-foreground">
+                      {row.status === "En attente" && row.holdReason && (
+                        <span className="text-orange-700">{row.holdReason}</span>
+                      )}
+                      {row.status === "Rejeté" && row.issue && (
+                        <span className="text-destructive">{row.issue}</span>
+                      )}
+                      {row.status === "Transféré" && (
+                        <span className="text-sky-700">
+                          Transféré par {getDisplayName(row.transferredFrom) || row.transferredFrom || "—"}
+                          {row.transferNote ? ` — ${row.transferNote}` : ""}
+                        </span>
+                      )}
+                      {!["En attente", "Rejeté", "Transféré"].includes(row.status) && (
+                        <span className="text-muted-foreground">—</span>
+                      )}
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {getDisplayName(row.assignedTo || row.processedBy) || <span className="text-muted-foreground">—</span>}
+                      {getDisplayName(
+                        row.status === "Transféré" ? (row.transferredTo || row.assignedTo) : row.assignedTo
+                        || row.processedBy
+                      ) || <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />

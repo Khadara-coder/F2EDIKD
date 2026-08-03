@@ -1382,6 +1382,10 @@ def _order_list_item(o: dict) -> dict:
         "processedAt": processed_at,
         "processedBy": o.get("processed_by") or o.get("uploaded_by"),
         "assignedTo": o.get("assigned_to"),
+        "holdReason": o.get("hold_reason"),
+        "transferredFrom": o.get("transferred_from"),
+        "transferredTo": o.get("transferred_to"),
+        "transferNote": o.get("transfer_note"),
         "source": o.get("source") or "unknown",
     }
 
