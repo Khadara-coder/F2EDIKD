@@ -330,13 +330,24 @@ def create_router() -> APIRouter:
         try:
             import server as srv
             h = srv.api_proxy_health()
+            ai = srv._ai_configuration_status()
             return {
                 "api": "connected" if h.get("api", {}).get("ok") else "disconnected",
                 "database": "connected" if h.get("database", {}).get("ok") else "disconnected",
                 "csv": "connected" if h.get("masterdata", {}).get("ok") else "disconnected",
+                "sftp": "connected" if h.get("sftp_configured") else "disconnected",
+                "ai": "connected" if ai.get("configured") else "disconnected",
+                "aiProvider": ai.get("provider"),
+                "aiDetail": ai.get("detail"),
             }
         except Exception:
-            return {"api": "disconnected", "database": "disconnected", "csv": "disconnected"}
+            return {
+                "api": "disconnected",
+                "database": "disconnected",
+                "csv": "disconnected",
+                "sftp": "disconnected",
+                "ai": "disconnected",
+            }
 
     # ── Dashboard ───────────────────────────────────────────────────────────
     @router.get("/dashboard/metrics")

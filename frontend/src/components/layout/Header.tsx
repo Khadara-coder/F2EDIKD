@@ -20,20 +20,32 @@ function SystemBadges() {
 
   const badges = [
     {
+      key: "api",
       label: data?.api === "connected" ? "API OK" : "API X",
       ok: data?.api === "connected",
     },
     {
+      key: "database",
       label: data?.database === "connected" ? "BDD OK" : "BDD X",
       ok: data?.database === "connected",
     },
     {
+      key: "csv",
       label: data?.csv === "connected" ? "CSV OK" : "CSV X",
       ok: data?.csv === "connected",
     },
     {
+      key: "sftp",
       label: data?.sftp === "connected" ? "SFTP OK" : "SFTP X",
       ok: data?.sftp === "connected",
+    },
+    {
+      key: "ai",
+      label: data?.ai === "connected" ? "IA OK" : "IA X",
+      ok: data?.ai === "connected",
+      title: data?.aiDetail
+        ? `${data.aiProvider || "IA"} — ${data.aiDetail}`
+        : "Statut de configuration IA",
     },
   ];
 
@@ -41,8 +53,9 @@ function SystemBadges() {
     <div className="flex items-center gap-2">
       {badges.map((b) => (
         <Badge
-          key={b.label}
+          key={b.key}
           variant="outline"
+          title={"title" in b ? b.title : undefined}
           className={cn(
             "text-xs font-medium",
             b.ok

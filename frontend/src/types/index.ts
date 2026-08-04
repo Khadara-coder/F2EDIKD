@@ -67,6 +67,9 @@ export interface SystemHealth {
   database: ConnectorStatus;
   csv: ConnectorStatus;
   sftp: ConnectorStatus;
+  ai?: ConnectorStatus;
+  aiProvider?: string;
+  aiDetail?: string;
 }
 
 export interface DashboardMetrics {
