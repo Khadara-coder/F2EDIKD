@@ -886,6 +886,10 @@ def create_router() -> APIRouter:
                     "sftp": "connected" if is_configured_from_env() else "disconnected",
                 },
                 "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
+                "masterdataApiConfig": {
+                    **_default_settings().get("masterdataApiConfig", {}),
+                    **(persisted.get("masterdataApiConfig") or {}),
+                },
                 "aiProvider": persisted.get("aiProvider", _default_settings().get("aiProvider", "databricks")),
                 "databricksConfig": {
                     **_default_settings().get("databricksConfig", {}),
@@ -942,6 +946,10 @@ def create_router() -> APIRouter:
             "aiProvider": persisted.get("aiProvider", settings.get("aiProvider", "databricks")),
         })
         settings["connectorConfig"] = {**settings.get("connectorConfig", {}), **(persisted.get("connectorConfig") or {})}
+        settings["masterdataApiConfig"] = {
+            **settings.get("masterdataApiConfig", {}),
+            **(persisted.get("masterdataApiConfig") or {}),
+        }
         settings["databricksConfig"] = {**settings.get("databricksConfig", {}), **(persisted.get("databricksConfig") or {})}
         settings["openaiConfig"] = {**settings.get("openaiConfig", {}), **(persisted.get("openaiConfig") or {})}
         settings["ollamaConfig"] = {**settings.get("ollamaConfig", {}), **(persisted.get("ollamaConfig") or {})}
@@ -1004,6 +1012,19 @@ def create_router() -> APIRouter:
                     "message": f"Backend: {backend}",
                 }
             if connector == "csvExport":
+                incoming_md = (payload or {}).get("masterdataApiConfig")
+                if isinstance(incoming_md, dict) and (
+                    incoming_md.get("enabled") or incoming_md.get("baseUrl")
+                ):
+                    from src.masterdata_api_sync import test_connection as _md_api_test
+
+                    persisted = get_store().load_app_settings()
+                    merged = {
+                        **((persisted or {}).get("masterdataApiConfig") or {}),
+                        **incoming_md,
+                    }
+                    ok, msg = _md_api_test(merged)
+                    return {"status": "connected" if ok else "disconnected", "message": msg}
                 stats = masterdata_stats()
                 if not isinstance(stats, dict) or not stats:
                     return {"status": "disconnected", "message": "Aucune source CSV chargée"}
@@ -1238,6 +1259,16 @@ def _default_settings() -> dict:
             "dbSyncEnabled": True,
             "csvDelimiter": ";",
             "sftpProfile": "default",
+        },
+        "masterdataApiConfig": {
+            "enabled": True,
+            "baseUrl": "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
+            "healthPath": "/health",
+            "customersPath": "/customers",
+            "partnersPath": "/partners",
+            "materialsPath": "/materials",
+            "salesordersPath": "/salesorders",
+            "pageSize": 5000,
         },
         "aiProvider": "databricks",
         "databricksConfig": {

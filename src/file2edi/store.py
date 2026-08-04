@@ -92,6 +92,16 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "manualReviewOnAnomaly": True,
         "notifyOnDuplicate": False,
     },
+    "masterdataApiConfig": {
+        "enabled": True,
+        "baseUrl": "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
+        "healthPath": "/health",
+        "customersPath": "/customers",
+        "partnersPath": "/partners",
+        "materialsPath": "/materials",
+        "salesordersPath": "/salesorders",
+        "pageSize": 5000,
+    },
 }
 
 
@@ -286,6 +296,34 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 opts[key] = _as_bool(raw_options.get(key))
         if opts:
             out["options"] = opts
+
+    raw_md_api = payload.get("masterdataApiConfig")
+    if isinstance(raw_md_api, dict):
+        md_api: dict[str, Any] = {}
+        if "enabled" in raw_md_api:
+            md_api["enabled"] = _as_bool(raw_md_api.get("enabled"))
+        if "baseUrl" in raw_md_api:
+            md_api["baseUrl"] = str(raw_md_api.get("baseUrl") or "").strip().rstrip("/")
+        for key in (
+            "healthPath",
+            "customersPath",
+            "partnersPath",
+            "materialsPath",
+            "salesordersPath",
+        ):
+            if key in raw_md_api:
+                path = str(raw_md_api.get(key) or "").strip()
+                if path and not path.startswith("/"):
+                    path = "/" + path
+                md_api[key] = path
+        if "pageSize" in raw_md_api:
+            try:
+                page_size = int(raw_md_api.get("pageSize"))
+            except (TypeError, ValueError):
+                page_size = 5000
+            md_api["pageSize"] = max(100, min(20000, page_size))
+        if md_api:
+            out["masterdataApiConfig"] = md_api
 
     # Admin-managed secrets / RBAC persisted in the same settings blob.
     if "api_keys" in payload:

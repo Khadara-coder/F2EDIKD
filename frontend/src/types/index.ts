@@ -382,6 +382,16 @@ export interface AppSettings {
     csvDelimiter: string;
     sftpProfile: string;
   };
+  masterdataApiConfig: {
+    enabled: boolean;
+    baseUrl: string;
+    healthPath: string;
+    customersPath: string;
+    partnersPath: string;
+    materialsPath: string;
+    salesordersPath: string;
+    pageSize: number;
+  };
   aiProvider: "databricks" | "openai" | "ollama" | "custom";
   databricksConfig: {
     host: string;

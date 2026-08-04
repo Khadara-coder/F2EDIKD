@@ -270,15 +270,19 @@ export const api = {
     return request<MasterDataResponse>(`/master-data?${params}`);
   },
 
-  /** Manual masterdata sync (Git repo → runtime cache). Works even when auto-sync is on. */
-  syncMasterData: (opts?: { fromRepo?: boolean }) => {
-    const fromRepo = opts?.fromRepo !== false;
-    const params = new URLSearchParams({ from_repo: fromRepo ? "true" : "false" });
+  /** Manual masterdata sync. source=auto prefers admin-configured Databricks API. */
+  syncMasterData: (opts?: { fromRepo?: boolean; source?: "auto" | "api" | "git" | "local" }) => {
+    const source = opts?.source || (opts?.fromRepo === false ? "local" : "auto");
+    const params = new URLSearchParams({
+      source,
+      from_repo: source === "git" || opts?.fromRepo === true ? "true" : "false",
+    });
     return request<{
       synced: number;
       failed: number;
       cache_reloaded: boolean;
       from_repo?: boolean;
+      source?: string;
       commit?: string;
       message: string;
     }>(`/masterdata/sync?${params}`, { method: "POST" });

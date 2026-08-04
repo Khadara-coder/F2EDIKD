@@ -149,7 +149,7 @@ export function DonneesMaitresPage() {
   };
 
   const syncMutation = useMutation({
-    mutationFn: () => api.syncMasterData({ fromRepo: true }),
+    mutationFn: () => api.syncMasterData({ source: "auto" }),
     onMutate: () => setSyncMessage(null),
     onSuccess: (res) => {
       setSyncMessage(res.message || "Synchronisation terminée");
@@ -247,7 +247,7 @@ export function DonneesMaitresPage() {
                 className="gap-2"
                 disabled={syncMutation.isPending}
                 onClick={() => syncMutation.mutate()}
-                title="Synchroniser depuis le dépôt Git (indépendamment de l’auto-sync)"
+                title="Synchroniser (API Databricks si configurée, sinon Git / fichiers locaux)"
               >
                 <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
                 {syncMutation.isPending ? "Synchronisation…" : "Synchroniser"}

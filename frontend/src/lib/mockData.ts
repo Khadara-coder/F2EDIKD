@@ -470,6 +470,16 @@ export const mockSettings: AppSettings = {
     csvDelimiter: ";",
     sftpProfile: "default",
   },
+  masterdataApiConfig: {
+    enabled: true,
+    baseUrl: "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
+    healthPath: "/health",
+    customersPath: "/customers",
+    partnersPath: "/partners",
+    materialsPath: "/materials",
+    salesordersPath: "/salesorders",
+    pageSize: 5000,
+  },
   aiProvider: "databricks",
   databricksConfig: {
     host: "https://adb-5555213114570927.7.azuredatabricks.net",

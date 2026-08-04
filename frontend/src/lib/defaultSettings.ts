@@ -21,6 +21,16 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     csvDelimiter: ";",
     sftpProfile: "default",
   },
+  masterdataApiConfig: {
+    enabled: true,
+    baseUrl: "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
+    healthPath: "/health",
+    customersPath: "/customers",
+    partnersPath: "/partners",
+    materialsPath: "/materials",
+    salesordersPath: "/salesorders",
+    pageSize: 5000,
+  },
   aiProvider: "databricks",
   databricksConfig: {
     host: "https://adb-5555213114570927.7.azuredatabricks.net",
@@ -97,6 +107,10 @@ export function mergeSettings(partial?: Partial<AppSettings> | null): AppSetting
     ...partial,
     connectors: { ...DEFAULT_APP_SETTINGS.connectors, ...partial.connectors },
     connectorConfig: { ...DEFAULT_APP_SETTINGS.connectorConfig, ...partial.connectorConfig },
+    masterdataApiConfig: {
+      ...DEFAULT_APP_SETTINGS.masterdataApiConfig,
+      ...partial.masterdataApiConfig,
+    },
     aiProvider: partial.aiProvider ?? DEFAULT_APP_SETTINGS.aiProvider,
     databricksConfig: { ...DEFAULT_APP_SETTINGS.databricksConfig, ...partial.databricksConfig },
     openaiConfig: { ...DEFAULT_APP_SETTINGS.openaiConfig, ...partial.openaiConfig },

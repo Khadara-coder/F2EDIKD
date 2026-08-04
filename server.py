@@ -1824,16 +1824,104 @@ def api_md_stats():
 
 
 @app.post("/api/masterdata/sync")
-def api_md_sync(from_repo: bool = Query(False)):
+def api_md_sync(
+    from_repo: bool = Query(False),
+    source: str = Query("auto"),
+):
     """Sync masterdata into runtime cache.
 
-    - from_repo=false (default): copy from MASTERDATA_SOURCE_DIR (workspace / notify path).
-    - from_repo=true: pull Git snapshot repo then reload cache (manual UI button / on-demand).
-    Auto-sync does not disable this endpoint — manual sync always remains available.
+    source:
+      - auto: masterdata API (if enabled in admin settings) → else git if from_repo → else local copy
+      - api: Databricks Apps masterdata-api (URL from admin settings)
+      - git: Git snapshot repo
+      - local: copy from MASTERDATA_SOURCE_DIR
     """
     import datetime as _dt
 
-    if from_repo:
+    source_mode = (source or "auto").strip().lower()
+    if source_mode not in {"auto", "api", "git", "local"}:
+        source_mode = "auto"
+
+    md_api_cfg: dict = {}
+    try:
+        from src.file2edi.store import get_store as _gs
+
+        md_api_cfg = dict((_gs().load_app_settings() or {}).get("masterdataApiConfig") or {})
+    except Exception:
+        md_api_cfg = {}
+
+    if source_mode == "auto":
+        if md_api_cfg.get("enabled") and str(md_api_cfg.get("baseUrl") or "").strip():
+            source_mode = "api"
+        elif from_repo:
+            source_mode = "git"
+        else:
+            source_mode = "local"
+
+    if source_mode == "api":
+        from src.masterdata_api_sync import sync_from_api
+
+        save_audit_event(
+            "__masterdata__",
+            "masterdata_sync_attempted",
+            "system",
+            {"source": "masterdata_api", "manual": True, "baseUrl": md_api_cfg.get("baseUrl")},
+        )
+        try:
+            api_payload = sync_from_api(target_dir=MASTER_DATA_RUNTIME, config=md_api_cfg)
+        except Exception as exc:
+            err = str(exc)[:400]
+            log.warning("masterdata sync (api) failed, fallback to cache reload: %s", err)
+            now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            for key in _MD_FILES:
+                _MD_LAST_SYNC[key] = now_iso
+            _apply_masterdata_sync_metadata_to_cache_state()
+            _load_masterdata_cache()
+            return {
+                "synced": 0,
+                "failed": 0,
+                "files": [],
+                "cache_reloaded": True,
+                "source": "api",
+                "fallback": True,
+                "sync": _masterdata_sync_freshness(),
+                "message": f"Cache local rechargé (sync API indisponible: {err})",
+            }
+
+        now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        for key in _MD_FILES:
+            _MD_LAST_SYNC[key] = now_iso
+        _apply_masterdata_sync_metadata_to_cache_state()
+        _load_masterdata_cache()
+        files = api_payload.get("files") or {}
+        save_audit_event(
+            "__masterdata__",
+            "masterdata_sync_succeeded",
+            "system",
+            {"source": "masterdata_api", "files": list(files.keys())},
+        )
+        return {
+            "synced": len(files) if isinstance(files, dict) else 0,
+            "failed": 0,
+            "files": [
+                {
+                    "file": name,
+                    "status": "OK",
+                    "detail": f"{info.get('rows', '?')} lignes" if isinstance(info, dict) else "",
+                }
+                for name, info in (files.items() if isinstance(files, dict) else [])
+            ],
+            "cache_reloaded": True,
+            "source": "api",
+            "api": api_payload,
+            "sync": _masterdata_sync_freshness(),
+            "message": (
+                f"Synchronisation API OK ({api_payload.get('base_url')}) — "
+                f"{len(files) if isinstance(files, dict) else 0} fichier(s)"
+            ),
+        }
+
+    if source_mode == "git" or from_repo:
         from src.masterdata_autosync import run_repo_sync
 
         save_audit_event(
@@ -1885,6 +1973,7 @@ def api_md_sync(from_repo: bool = Query(False)):
                 ],
                 "cache_reloaded": True,
                 "from_repo": True,
+                "source": "git",
                 "commit": commit,
                 "repo": repo_payload,
                 "sync": md_sync,
@@ -1903,6 +1992,7 @@ def api_md_sync(from_repo: bool = Query(False)):
             "files": [],
             "cache_reloaded": True,
             "from_repo": True,
+            "source": "git",
             "fallback": True,
             "sync": md_sync,
             "message": (
@@ -1941,6 +2031,7 @@ def api_md_sync(from_repo: bool = Query(False)):
                             for r in rows],
         "cache_reloaded": bool(ok_files),
         "from_repo": False,
+        "source": "local",
         "message": (
             f"{len(ok_files)}/{len(rows)} fichiers synchronisés"
             + (f" — {len(err_files)} erreur(s)" if err_files else "")
