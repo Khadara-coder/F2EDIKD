@@ -39,6 +39,13 @@ _COMP_SEP = ":"
 # EDIFACT data element separator
 _DATA_SEP = "+"
 
+_SAP_ARTICLE_RE = re.compile(r"^[A-Z0-9]{1,18}$")
+_SAP_CUSTOMER_REF_RE = re.compile(r"^[A-Z0-9][A-Z0-9._/-]{0,17}$")
+_PRICE_ONLY_RE = re.compile(r"^\s*\d{1,7}(?:[,.]\d{1,6})?(?:\s+\d{1,7}(?:[,.]\d{1,6})?)*\s*$")
+_PRICE_WITH_UNIT_RE = re.compile(r"\b\d{1,7}[,.]\d{2,6}\s*(?:EUR|EUROS?|HT|TTC)?\b", re.IGNORECASE)
+_LETTER_RE = re.compile(r"[^\W\d_]", re.UNICODE)
+_WORD_TOKEN_RE = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+
 
 def _safe(value: str, max_len: int = 35) -> str:
     """Sanitise a string for inclusion in EDIFACT: remove/replace special chars."""
@@ -47,6 +54,157 @@ def _safe(value: str, max_len: int = 35) -> str:
     # Replace EDIFACT special chars with space (release char is '?')
     s = re.sub(r"[\?'\+:\n\r]", " ", str(value))
     return s.strip()[:max_len]
+
+
+def _normalize_sap_reference(value: Any) -> str:
+    raw = str(value or "").strip().upper()
+    if not raw:
+        return ""
+    raw = re.sub(r"^EL[M]?\s*", "", raw)
+    raw = raw.replace("\u00a0", " ")
+    raw = re.sub(r"\s+", "", raw)
+    raw = raw.replace("-", "")
+    return raw
+
+
+def _validate_bosch_material(value: Any) -> str:
+    matnr = _normalize_sap_reference(value)
+    if not matnr or not _SAP_ARTICLE_RE.fullmatch(matnr):
+        raise EdifactBuildError(f"INVALID_MATERIAL_REFERENCE: invalid Bosch material {value!r}")
+    return matnr
+
+
+def _customer_reference_for_pia(line: dict[str, Any], matnr: str) -> str:
+    raw = (
+        line.get("customer_reference")
+        or line.get("customerReference")
+        or line.get("original_article")
+        or line.get("customer_article")
+        or ""
+    )
+    ref = _normalize_sap_reference(raw)
+    if not ref or ref == matnr:
+        return ""
+    if not _SAP_CUSTOMER_REF_RE.fullmatch(ref):
+        return ""
+    return ref
+
+
+def _description_contains_price(description: str, line: dict[str, Any]) -> bool:
+    compact = str(description or "").strip()
+    if not compact:
+        return False
+    if _PRICE_ONLY_RE.fullmatch(compact):
+        return True
+    for key in ("unit_price", "price", "amount", "montant_ligne_ht"):
+        formatted = format_decimal(line.get(key))
+        if formatted:
+            raw = str(line.get(key) or "").strip()
+            if compact in {formatted, raw, raw.replace(".", ","), formatted.replace(".", ",")}:
+                return True
+    return False
+
+
+def _clean_item_description(line: dict[str, Any]) -> str:
+    raw = str(
+        line.get("description")
+        or line.get("designation")
+        or line.get("product_description")
+        or ""
+    ).strip()
+    raw = re.sub(r"\s+", " ", raw)
+    if not raw:
+        return ""
+    if _description_contains_price(raw, line):
+        raise EdifactBuildError(f"INVALID_ITEM_DESCRIPTION: price-like IMD description {raw!r}")
+    # A product text may contain model numbers, but it must contain at least one letter.
+    if not _LETTER_RE.search(raw):
+        raise EdifactBuildError(f"INVALID_ITEM_DESCRIPTION: non-product IMD description {raw!r}")
+    if _PRICE_WITH_UNIT_RE.search(raw) and len(_WORD_TOKEN_RE.findall(raw)) < 2:
+        raise EdifactBuildError(f"INVALID_ITEM_DESCRIPTION: amount leaked into IMD description {raw!r}")
+    return _safe(raw, 70)
+
+
+def _pia_value(segment: str) -> str:
+    parts = segment.split("+")
+    if len(parts) < 3:
+        return ""
+    return parts[2].split(":", 1)[0].strip()
+
+
+def _imd_description(segment: str) -> str:
+    if "+++" not in segment:
+        return ""
+    return segment.split("+++", 1)[1].strip()
+
+
+def _validate_sap_orders05_segments(segments: list[str]) -> None:
+    """Block EDIFACT output that would create invalid SAP ORDERS05 item IDocs."""
+    lin_count = qty_count = pri_count = 0
+    current_line: dict[str, list[str]] | None = None
+
+    def validate_current_line() -> None:
+        if current_line is None:
+            return
+        pia_values = current_line["pia1"] + current_line["pia5"]
+        duplicates = {value for value in pia_values if pia_values.count(value) > 1}
+        if duplicates:
+            raise EdifactBuildError(
+                f"INVALID_MATERIAL_REFERENCE: duplicated PIA value {sorted(duplicates)[0]!r}"
+            )
+        for value in current_line["pia1"]:
+            if not _SAP_ARTICLE_RE.fullmatch(value):
+                raise EdifactBuildError(
+                    f"INVALID_MATERIAL_REFERENCE: invalid Bosch material {value!r}"
+                )
+        for value in current_line["pia5"]:
+            if value in current_line["pia1"] or not _SAP_CUSTOMER_REF_RE.fullmatch(value):
+                raise EdifactBuildError(
+                    f"INVALID_MATERIAL_REFERENCE: invalid customer material {value!r}"
+                )
+        if len(current_line["pia1"]) != 1:
+            raise EdifactBuildError("INVALID_MATERIAL_REFERENCE: each LIN requires exactly one PIA+1")
+
+    for segment in segments:
+        if segment.startswith("LIN+"):
+            validate_current_line()
+            current_line = {"pia1": [], "pia5": []}
+            lin_count += 1
+            continue
+        if segment.startswith("PIA+1+"):
+            if current_line is None:
+                raise EdifactBuildError("INVALID_MATERIAL_REFERENCE: PIA outside LIN")
+            current_line["pia1"].append(_pia_value(segment))
+            continue
+        if segment.startswith("PIA+5+"):
+            if current_line is None:
+                raise EdifactBuildError("INVALID_MATERIAL_REFERENCE: PIA outside LIN")
+            current_line["pia5"].append(_pia_value(segment))
+            continue
+        if segment.startswith("IMD+"):
+            description = _imd_description(segment)
+            if not description or _PRICE_ONLY_RE.fullmatch(description):
+                raise EdifactBuildError(
+                    f"INVALID_ITEM_DESCRIPTION: invalid IMD description {description!r}"
+                )
+            if _PRICE_WITH_UNIT_RE.search(description) and len(
+                _WORD_TOKEN_RE.findall(description)
+            ) < 2:
+                raise EdifactBuildError(
+                    f"INVALID_ITEM_DESCRIPTION: amount leaked into IMD description {description!r}"
+                )
+            continue
+        if segment.startswith("QTY+21:"):
+            qty_count += 1
+            continue
+        if segment.startswith("PRI+AAA:"):
+            pri_count += 1
+
+    validate_current_line()
+    if lin_count != qty_count or lin_count != pri_count:
+        raise EdifactBuildError(
+            f"INVALID_EDIFACT_STRUCTURE: LIN={lin_count} QTY={qty_count} PRI={pri_count}"
+        )
 
 
 def _validate_date_parts(yyyy: str, mm: str, dd: str) -> Optional[str]:
@@ -292,11 +450,13 @@ def build_orders_message(
     # --- Order lines ---
     line_number = 0
     line_count = 0
+    lin_count = qty_count = pri_count = 0
     for line in resolved_lines:
         line_number += 10
         line_count += 1
-        matnr = _safe(line.get("matnr", ""), 18)
-        description = _safe(line.get("description", ""), 35)
+        matnr = _validate_bosch_material(line.get("matnr", ""))
+        customer_ref = _customer_reference_for_pia(line, matnr)
+        description = _clean_item_description(line)
         qty_raw = _parse_decimal_fr(line.get("quantity", "1"))
         try:
             qty_clean = str(int(float(qty_raw)))
@@ -308,22 +468,25 @@ def build_orders_message(
         # LIN
         segments.append(f"LIN+{line_number}")
         seg_count += 1
+        lin_count += 1
 
-        # PIA+5 (primary identification)
-        segments.append(f"PIA+5+{matnr}:SA::91")
+        # PIA+1 is the single Bosch master material reference expected by SAP.
+        segments.append(f"PIA+1+{matnr}:SA::91")
         seg_count += 1
-        # PIA+1 (additional identification — optional, default=True)
-        if include_pia_1:
-            segments.append(f"PIA+1+{matnr}:SA::91")
+        # PIA+5 is only allowed for a distinct, valid customer material reference.
+        if customer_ref:
+            segments.append(f"PIA+5+{customer_ref}:SA::91")
             seg_count += 1
 
-        # IMD
-        segments.append(f"IMD+A+++{description}")
-        seg_count += 1
+        # IMD is optional: omit it when OCR did not provide a reliable product text.
+        if description:
+            segments.append(f"IMD+A+++{description}")
+            seg_count += 1
 
         # QTY+21
         segments.append(f"QTY+21:{qty_clean}:{unit_code}")
         seg_count += 1
+        qty_count += 1
 
         # PRI - only when unit price present
         if unit_price_raw:
@@ -331,8 +494,14 @@ def build_orders_message(
                 float(unit_price_raw)  # validate numeric
                 segments.append(f"PRI+AAA:{unit_price_raw}:::1")
                 seg_count += 1
+                pri_count += 1
             except ValueError:
-                log.debug("Skipping invalid unit price: %r", unit_price_raw)
+                raise EdifactBuildError(f"INVALID_PRICE: {line.get('unit_price')!r}") from None
+
+    if lin_count != qty_count:
+        raise EdifactBuildError(f"INVALID_EDIFACT_STRUCTURE: LIN={lin_count} QTY={qty_count}")
+    if pri_count != lin_count:
+        raise EdifactBuildError(f"INVALID_EDIFACT_STRUCTURE: LIN={lin_count} PRI={pri_count}")
 
     # --- UNS+S ---
     segments.append("UNS+S")
@@ -349,6 +518,8 @@ def build_orders_message(
 
     # --- UNZ ---
     segments.append(f"UNZ+1+{ctrl_ref}")
+
+    _validate_sap_orders05_segments(segments)
 
     # Join with EDIFACT segment terminator + newline for readability
     message = "'\n".join(segments) + "'\n"

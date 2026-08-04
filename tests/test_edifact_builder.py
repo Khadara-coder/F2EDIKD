@@ -160,3 +160,110 @@ class TestEdifactBuilder:
             _minimal_order(), lines, _minimal_soldto(), _minimal_shipto()
         )
         assert "QTY+21:5:PCE" in msg
+
+    def test_bosch_material_generates_only_pia_1_when_customer_ref_is_same(self):
+        lines = [{
+            "matnr": "7735500779",
+            "original_article": "7735500779",
+            "description": "BALLON ECS STORA W 120-5 P1 B",
+            "quantity": "1",
+            "unit_price": "978,00",
+        }]
+        msg = build_orders_message(
+            _minimal_order(), lines, _minimal_soldto(), _minimal_shipto()
+        )
+        assert "PIA+1+7735500779:SA::91" in msg
+        assert "PIA+5+7735500779:SA::91" not in msg
+        assert msg.count("PIA+") == 1
+        assert "IMD+A+++BALLON ECS STORA W 120-5 P1 B" in msg
+        assert "PRI+AAA:978:::1" in msg
+
+    def test_distinct_valid_customer_reference_generates_pia_5(self):
+        lines = [{
+            "matnr": "7735500779",
+            "customer_reference": "CUSTREF01",
+            "description": "BALLON ECS STORA W 120-5 P1 B",
+            "quantity": "1",
+            "unit_price": "978,00",
+        }]
+        msg = build_orders_message(
+            _minimal_order(), lines, _minimal_soldto(), _minimal_shipto()
+        )
+        assert "PIA+1+7735500779:SA::91" in msg
+        assert "PIA+5+CUSTREF01:SA::91" in msg
+
+    def test_expected_sap_orders05_line_segments_are_generated(self):
+        lines = [
+            {
+                "matnr": "7735500779",
+                "original_article": "7735500779",
+                "description": "BALLON ECS STORA W 120-5 P1 B",
+                "quantity": "1",
+                "unit_price": "978,00",
+            },
+            {
+                "matnr": "7735502289",
+                "description": "KIT SONDE ECS POUR REGULATION EMS 2.0",
+                "quantity": "1",
+                "unit_price": "19,80",
+            },
+        ]
+        msg = build_orders_message(
+            _minimal_order(), lines, _minimal_soldto(), _minimal_shipto()
+        )
+        assert "LIN+10" in msg
+        assert "PIA+1+7735500779:SA::91" in msg
+        assert "IMD+A+++BALLON ECS STORA W 120-5 P1 B" in msg
+        assert "PRI+AAA:978:::1" in msg
+        assert "LIN+20" in msg
+        assert "PIA+1+7735502289:SA::91" in msg
+        assert "IMD+A+++KIT SONDE ECS POUR REGULATION EMS 2.0" in msg
+        assert "PRI+AAA:19.8:::1" in msg
+        assert "PIA+5+7735500779:SA::91" not in msg
+        assert "PIA+5+7735502289:SA::91" not in msg
+
+    def test_price_like_imd_is_rejected(self):
+        lines = [{
+            "matnr": "7735502289",
+            "description": "19,80 19,80",
+            "quantity": "1",
+            "unit_price": "19,80",
+        }]
+        with pytest.raises(EdifactBuildError, match="INVALID_ITEM_DESCRIPTION"):
+            build_orders_message(_minimal_order(), lines, _minimal_soldto(), _minimal_shipto())
+
+    def test_missing_item_description_omits_imd_without_blocking_tst(self):
+        lines = [{
+            "matnr": "7735502289",
+            "description": "",
+            "quantity": "1",
+            "unit_price": "19,80",
+        }]
+        msg = build_orders_message(
+            _minimal_order(), lines, _minimal_soldto(), _minimal_shipto()
+        )
+        assert "LIN+10" in msg
+        assert "PIA+1+7735502289:SA::91" in msg
+        assert "IMD+A+++" not in msg
+        assert "QTY+21:1:PCE" in msg
+        assert "PRI+AAA:19.8:::1" in msg
+
+    def test_invalid_bosch_material_is_rejected(self):
+        lines = [{
+            "matnr": "7735500779/TOO-LONG?",
+            "description": "BALLON ECS STORA W 120-5 P1 B",
+            "quantity": "1",
+            "unit_price": "978,00",
+        }]
+        with pytest.raises(EdifactBuildError, match="INVALID_MATERIAL_REFERENCE"):
+            build_orders_message(_minimal_order(), lines, _minimal_soldto(), _minimal_shipto())
+
+    def test_missing_unit_price_is_rejected_to_keep_orders05_counts(self):
+        lines = [{
+            "matnr": "7735502289",
+            "description": "KIT SONDE ECS POUR REGULATION EMS 2.0",
+            "quantity": "1",
+            "unit_price": "",
+        }]
+        with pytest.raises(EdifactBuildError, match="INVALID_EDIFACT_STRUCTURE"):
+            build_orders_message(_minimal_order(), lines, _minimal_soldto(), _minimal_shipto())

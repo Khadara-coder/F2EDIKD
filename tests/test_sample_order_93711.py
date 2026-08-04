@@ -30,7 +30,7 @@ _ORDER_93711 = {
     "delivery_text": "ELM LEBLANC DEPOT\n4 RUE TEST\n67500 HAGUENAU",
     "lines": [
         {"customer_article": "7099018", "quantity": "10", "description": "Joint", "unit_price": "5.50", "ean": ""},
-        {"customer_article": "8716796114", "quantity": "5", "description": "Etiquette", "unit_price": "", "ean": ""},
+        {"customer_article": "8716796114", "quantity": "5", "description": "Etiquette", "unit_price": "2.10", "ean": ""},
     ],
 }
 
@@ -48,7 +48,7 @@ _SHIPTO = {
 
 _RESOLVED_LINES = [
     {"matnr": "7099018", "description": "Joint torique", "quantity": "10", "unit_price": "5.50"},
-    {"matnr": "8716796114", "description": "ETIQ REGL GAZ G20", "quantity": "5", "unit_price": ""},
+    {"matnr": "8716796114", "description": "ETIQ REGL GAZ G20", "quantity": "5", "unit_price": "2.10"},
 ]
 
 

@@ -351,9 +351,32 @@ class File2EdiStore:
         _ensure_column("file2edi_orders", "created_at", "created_at TEXT")
         _ensure_column("file2edi_orders", "updated_at", "updated_at TEXT")
         _ensure_column("file2edi_orders", "source", "source TEXT DEFAULT 'unknown'")
+        _ensure_column("file2edi_orders", "corrections_json", "corrections_json TEXT")
+        _ensure_column("file2edi_orders", "processed_by", "processed_by TEXT")
+        _ensure_column("file2edi_orders", "soldto", "soldto TEXT")
+        _ensure_column("file2edi_orders", "assigned_to", "assigned_to TEXT")
 
         _ensure_column("file2edi_pdf_uploads", "file_name", "file_name TEXT")
 
+        conn.execute(
+            """UPDATE file2edi_orders
+               SET soldto = (
+                   SELECT partner_code
+                   FROM file2edi_order_partners
+                   WHERE file2edi_order_partners.order_id=file2edi_orders.order_id
+                     AND partner_function='soldto'
+                     AND COALESCE(partner_code, '')<>''
+                   LIMIT 1
+               )
+               WHERE COALESCE(soldto, '')=''
+                 AND EXISTS (
+                   SELECT 1
+                   FROM file2edi_order_partners
+                   WHERE file2edi_order_partners.order_id=file2edi_orders.order_id
+                     AND partner_function='soldto'
+                     AND COALESCE(partner_code, '')<>''
+                 )"""
+        )
         conn.commit()
         conn.close()
 
@@ -455,6 +478,7 @@ class File2EdiStore:
 
         def _write() -> None:
             o = review["order"]
+            soldto = self._soldto_from_review(review)
             conn = self._conn()
             engine = review.pop("_engine_result", None)
             pdf_path = o.get("pdfPath") or o.get("pdf_path")
@@ -468,8 +492,8 @@ class File2EdiStore:
                       order_id,upload_id,file_name,client_name,customer_order_number,document_reference,
                       order_date,requested_delivery_date,currency,incoterm,delivery_mode,message_type,vendor,
                       total_amount,global_confidence,status,review_required,line_count,pdf_hash,pdf_path,source,
-                      extraction_json,assigned_to,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                      extraction_json,corrections_json,processed_by,soldto,assigned_to,created_at,updated_at
+                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(order_id) DO UPDATE SET
                       upload_id=excluded.upload_id,
                       file_name=excluded.file_name,
@@ -489,6 +513,9 @@ class File2EdiStore:
                       pdf_path=excluded.pdf_path,
                       source=excluded.source,
                       extraction_json=excluded.extraction_json,
+                      corrections_json=excluded.corrections_json,
+                      processed_by=COALESCE(excluded.processed_by, file2edi_orders.processed_by),
+                      soldto=excluded.soldto,
                       assigned_to=COALESCE(excluded.assigned_to, file2edi_orders.assigned_to),
                       updated_at=excluded.updated_at
                     """,
@@ -505,6 +532,9 @@ class File2EdiStore:
                         pdf_path,
                         str(o.get("source") or "unknown"),
                         json.dumps(engine) if engine else None,
+                        json.dumps(self._corrections_snapshot(review)),
+                        o.get("processedBy") or o.get("processed_by"),
+                        soldto,
                         o.get("assignedTo") or o.get("assigned_to"),
                         o.get("createdAt", _now()), _now(),
                     ],
@@ -570,6 +600,114 @@ class File2EdiStore:
                 self._sync_order_graph(review)
 
         self._execute_write(_write)
+
+    def _soldto_from_review(self, review: dict) -> str:
+        return str(next(
+            (
+                p.get("partnerCode") or p.get("partner_code") or ""
+                for p in review.get("partners", [])
+                if (p.get("partnerFunction") or p.get("partner_function")) == "soldto"
+            ),
+            "",
+        ) or "").strip()
+
+    def _corrections_snapshot(self, review: dict) -> dict:
+        order = review.get("order") or {}
+        partners = review.get("partners") or []
+        lines = review.get("lines") or []
+        return {
+            "order": {
+                "customerOrderNumber": order.get("customerOrderNumber"),
+                "orderDate": order.get("orderDate"),
+                "requestedDeliveryDate": order.get("requestedDeliveryDate"),
+                "updatedAt": _now(),
+            },
+            "partners": [
+                {
+                    "partnerFunction": p.get("partnerFunction") or p.get("partner_function"),
+                    "partnerCode": p.get("partnerCode") or p.get("partner_code"),
+                    "partnerName": p.get("partnerName") or p.get("partner_name"),
+                    "manuallyEdited": bool(p.get("manuallyEdited") or p.get("manually_edited")),
+                }
+                for p in partners
+            ],
+            "lines": [
+                {
+                    "lineId": ln.get("lineId") or ln.get("line_id"),
+                    "lineNumber": ln.get("lineNumber") or ln.get("line_number"),
+                    "boschArticle": ln.get("boschArticle") or ln.get("bosch_article"),
+                    "designation": ln.get("designation"),
+                    "quantity": ln.get("quantity"),
+                    "unit": ln.get("unit") or "PCE",
+                    "unitPrice": ln.get("unitPrice") if "unitPrice" in ln else ln.get("unit_price"),
+                    "manuallyEdited": bool(ln.get("manuallyEdited") or ln.get("manually_edited")),
+                    "status": ln.get("status"),
+                }
+                for ln in lines
+            ],
+        }
+
+    def _invalidate_generated_edifact(self, conn, order_id: str) -> None:
+        conn.execute(
+            """UPDATE file2edi_orders
+               SET status='À revoir',
+                   review_required=1,
+                   edifact_content=NULL,
+                   edifact_filename=NULL,
+                   updated_at=?
+               WHERE order_id=?""",
+            [_now(), order_id],
+        )
+
+    def _refresh_corrections_json(self, conn, order_id: str) -> None:
+        order_row = conn.execute("SELECT * FROM file2edi_orders WHERE order_id=?", [order_id]).fetchone()
+        if not order_row:
+            return
+        partners = [
+            {
+                "partnerFunction": row["partner_function"],
+                "partnerCode": row["partner_code"],
+                "partnerName": row["partner_name"],
+                "manuallyEdited": bool(row["manually_edited"]),
+            }
+            for row in conn.execute(
+                "SELECT partner_function, partner_code, partner_name, manually_edited "
+                "FROM file2edi_order_partners WHERE order_id=?",
+                [order_id],
+            ).fetchall()
+        ]
+        lines = [
+            {
+                "lineId": row["line_id"],
+                "lineNumber": row["line_number"],
+                "boschArticle": row["bosch_article"],
+                "designation": row["designation"],
+                "quantity": row["quantity"],
+                "unit": row["unit"],
+                "unitPrice": row["unit_price"],
+                "manuallyEdited": bool(row["manually_edited"]),
+                "status": row["status"],
+            }
+            for row in conn.execute(
+                "SELECT line_id, line_number, bosch_article, designation, quantity, unit, "
+                "unit_price, manually_edited, status FROM file2edi_order_lines WHERE order_id=? "
+                "ORDER BY line_number",
+                [order_id],
+            ).fetchall()
+        ]
+        review = {
+            "order": {
+                "customerOrderNumber": order_row["customer_order_number"],
+                "orderDate": order_row["order_date"],
+                "requestedDeliveryDate": order_row["requested_delivery_date"],
+            },
+            "partners": partners,
+            "lines": lines,
+        }
+        conn.execute(
+            "UPDATE file2edi_orders SET corrections_json=?, updated_at=? WHERE order_id=?",
+            [json.dumps(self._corrections_snapshot(review)), _now(), order_id],
+        )
 
     def _sync_conversion_row(self, review: dict, engine: dict | None) -> None:
         """Mirror into platform conversions table (Delta/JSONL/SQLite via server adapter)."""
@@ -805,6 +943,8 @@ class File2EdiStore:
                 f"UPDATE file2edi_orders SET {', '.join(sets)}, updated_at=? WHERE order_id=?",
                 vals,
             )
+            self._invalidate_generated_edifact(conn, order_id)
+            self._refresh_corrections_json(conn, order_id)
             conn.commit()
         conn.close()
         review = self.load_order_review(order_id)
@@ -865,11 +1005,18 @@ class File2EdiStore:
                 f"UPDATE file2edi_order_partners SET {', '.join(sets)} WHERE partner_id=?",
                 vals,
             )
+            if row["partner_function"] == "soldto" and "partnerCode" in payload:
+                conn.execute(
+                    "UPDATE file2edi_orders SET soldto=?, updated_at=? WHERE order_id=?",
+                    [payload["partnerCode"], _now(), order_id],
+                )
             if row["partner_function"] == "shipto" and payload.get("partnerName"):
                 conn.execute(
                     "UPDATE file2edi_orders SET client_name=?, updated_at=? WHERE order_id=?",
                     [payload["partnerName"], _now(), order_id],
                 )
+            self._invalidate_generated_edifact(conn, order_id)
+            self._refresh_corrections_json(conn, order_id)
             conn.commit()
         conn.close()
         review = self.load_order_review(order_id)
@@ -904,8 +1051,10 @@ class File2EdiStore:
         vals.append(amount)
         vals.append(line_id)
         conn.execute(f"UPDATE file2edi_order_lines SET {', '.join(sets)} WHERE line_id=?", vals)
-        conn.commit()
         self._recalc_order_total(conn, order_id)
+        self._invalidate_generated_edifact(conn, order_id)
+        self._refresh_corrections_json(conn, order_id)
+        conn.commit()
         conn.close()
         review = self.load_order_review(order_id)
         self._sync_order_graph(review)
@@ -946,8 +1095,10 @@ class File2EdiStore:
                 payload.get("specialInstructions"), payload.get("warnings"),
             ],
         )
-        conn.commit()
         self._recalc_order_total(conn, order_id)
+        self._invalidate_generated_edifact(conn, order_id)
+        self._refresh_corrections_json(conn, order_id)
+        conn.commit()
         conn.close()
         review = self.load_order_review(order_id)
         self._sync_order_graph(review)
@@ -961,8 +1112,10 @@ class File2EdiStore:
             return None
         order_id = row["order_id"]
         conn.execute("DELETE FROM file2edi_order_lines WHERE line_id=?", [line_id])
-        conn.commit()
         self._recalc_order_total(conn, order_id)
+        self._invalidate_generated_edifact(conn, order_id)
+        self._refresh_corrections_json(conn, order_id)
+        conn.commit()
         conn.close()
         review = self.load_order_review(order_id)
         self._sync_order_graph(review)
@@ -1000,6 +1153,7 @@ class File2EdiStore:
             FROM file2edi_orders WHERE order_id=?""",
             [filename, _now(), actor or "operator", order_id],
         )
+        self._refresh_corrections_json(conn, order_id)
         conn.commit()
         conn.close()
         self._sync_order_graph(self.load_order_review(order_id))
@@ -1350,6 +1504,13 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS warnings TEXT",
                 "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS edited_fields_json TEXT",
                 "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS previous_value TEXT",
+                """UPDATE file2edi_orders o
+                   SET soldto=p.partner_code
+                   FROM file2edi_order_partners p
+                   WHERE p.order_id=o.order_id
+                     AND p.partner_function='soldto'
+                     AND COALESCE(o.soldto, '')=''
+                     AND COALESCE(p.partner_code, '')<>''""",
                 # User management & workflow columns
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS assigned_to TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS hold_reason TEXT",
@@ -1403,6 +1564,7 @@ class PostgresFile2EdiStore(File2EdiStore):
                   processed_by=excluded.processed_by""",
                 [filename, _now(), actor or "operator", order_id],
             )
+            self._refresh_corrections_json(conn, order_id)
             conn.commit()
         finally:
             conn.close()

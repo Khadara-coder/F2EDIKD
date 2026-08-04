@@ -39,7 +39,7 @@ class TestForbiddenStrings:
             "shipto": "15000001", "name": "DEPOT", "street": "ST",
             "city": "CITY", "postal_code": "67500", "country": "FR",
         }
-        lines = [{"matnr": "7099018", "description": "Joint", "quantity": "5", "unit_price": ""}]
+        lines = [{"matnr": "7099018", "description": "Joint", "quantity": "5", "unit_price": "5.50"}]
         msg = build_orders_message(order, lines, soldto, shipto)
         for fv in _FORBIDDEN:
             assert fv not in msg, f"Forbidden value {fv!r} found in EDIFACT output!"

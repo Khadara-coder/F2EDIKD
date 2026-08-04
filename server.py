@@ -2524,7 +2524,7 @@ def _load_conversion_callback_context(conversion_id: str) -> dict | None:
     try:
         # Try PostgreSQL store first
         from src.file2edi.store import get_store as _gs
-        review = _gs().get_order_review(conversion_id)
+        review = _gs().load_order_review(conversion_id)
         if review:
             o = review.get("order", {})
             return {
@@ -4280,7 +4280,7 @@ async def api_generate(cid: str, req: Request):
     try:
         from src.file2edi.store import get_store as _gs
         store = _gs()
-        review = store.get_order_review(cid)
+        review = store.load_order_review(cid)
         if review:
             review["order"]["status"] = new_status
             review["order"]["lineCount"] = len(resolved_lines)

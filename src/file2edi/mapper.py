@@ -31,6 +31,17 @@ def _qty_from_description(description: str) -> float:
     return 0.0
 
 
+def _looks_like_valid_date(value: object) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    try:
+        from src.edifact_builder import parse_date_to_ccyymmdd
+        return bool(parse_date_to_ccyymmdd(text))
+    except Exception:
+        return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", text))
+
+
 def _status_from_engine(result: dict) -> str:
     rej = result.get("rejection") or {}
     decision = (rej.get("decision") or "").upper()
@@ -112,6 +123,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             line_conf = int(ln.get("Confiance") or ln.get("confidence") or 90)
             if "?" in art or line_conf < 80:
                 line_status = "À vérifier"
+            delivery_date = str(ln.get("date_livraison") or "")
             parsed_lines.append({
                 "lineId": ln.get("line_id") or f"ln-{order_id}-{i}",
                 "orderId": order_id,
@@ -122,7 +134,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                     or ""
                 ),
                 "paymentTerms": str(ln.get("payment_terms") or ""),
-                "deliveryDate": str(ln.get("date_livraison") or ""),
+                "deliveryDate": delivery_date,
                 "specialInstructions": str(ln.get("special_instructions") or ""),
                 "warnings": str(ln.get("warnings") or ""),
                 "boschArticle": art,
@@ -224,6 +236,21 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "status": "Ouverte",
             "createdAt": _now(),
         })
+    for ln in parsed_lines:
+        if not _looks_like_valid_date(ln.get("deliveryDate")):
+            _add_anomaly({
+                "anomalyId": f"an-line-date-{order_id}-{ln.get('lineNumber')}",
+                "orderId": order_id,
+                "lineId": ln.get("lineId"),
+                "severity": "warning",
+                "fieldName": "deliveryDate",
+                "message": (
+                    f"Ligne {ln.get('lineNumber')} : date de livraison extraite invalide "
+                    f"({ln.get('deliveryDate')})"
+                ),
+                "status": "Ouverte",
+                "createdAt": _now(),
+            })
 
     trace_steps = [
         {"id": "1", "label": "PDF reçu", "status": "completed", "timestamp": _now()},
