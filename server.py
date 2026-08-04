@@ -832,22 +832,9 @@ def _sync_masterdata() -> list[list]:
 
 # ── SFTP helper ────────────────────────────────────────────────────────────────
 def _test_sftp() -> tuple[bool, str]:
-    host = os.environ.get("SFTP_HOST", "")
-    user = os.environ.get("SFTP_USERNAME", "")
-    pwd  = os.environ.get("SFTP_PASSWORD", "")
-    if not host:
-        return False, "SFTP_HOST non configuré. .tst généré localement sans blocage."
-    try:
-        import paramiko
-        t = paramiko.Transport((host, int(os.environ.get("SFTP_PORT","22"))))
-        t.connect(username=user, password=pwd)
-        sftp = paramiko.SFTPClient.from_transport(t)
-        rdir = os.environ.get("SFTP_REMOTE_DIR",".")
-        lst  = sftp.listdir(rdir)
-        t.close()
-        return True, f"Connecté à {host} en tant que {user} — {len(lst)} fichiers dans {rdir}"
-    except Exception as exc:
-        return False, f"Échec ({type(exc).__name__}): {exc}"
+    from src.sftp_delivery import test_connection_from_env
+
+    return test_connection_from_env()
 
 
 # ── PostgreSQL initialization (if available) ──────────────────────────────────
@@ -1360,6 +1347,8 @@ def api_proxy_health():
         except Exception:
             db_ok = False
     storage = get_storage_mode()
+    from src.sftp_delivery import is_configured_from_env
+
     return {
         # ── Top-level contract (required by frontend) ───────────────────────
         "ok":     True,
@@ -1383,7 +1372,7 @@ def api_proxy_health():
         "local":           {"status": "ok", "profile": "ELM_STANDARD",
                             "sender_gln": UNB_SENDER_GLN, "receiver_gln": UNB_RECEIVER_GLN},
         "db_ok":           db_ok,
-        "sftp_configured": bool(os.environ.get("SFTP_HOST", "")),
+        "sftp_configured": is_configured_from_env(),
         "f2edi_base":      "local",
         "mc_status":       mc_status,
         "masterdata_sync": md_sync,
@@ -4117,17 +4106,9 @@ def api_audit(cid: str):
 @app.get("/api/sftp/status")
 def api_sftp_status():
     """Return SFTP configuration state (no secrets)."""
-    host     = os.environ.get("SFTP_HOST","")
-    user     = os.environ.get("SFTP_USERNAME","")
-    rdir     = os.environ.get("SFTP_REMOTE_DIR","")
-    configured = bool(host and user)
-    return {
-        "configured": configured,
-        "host": host or None,
-        "username": user or None,
-        "remote_dir": rdir or None,
-        "auth_mode": "password" if os.environ.get("SFTP_PASSWORD") else "key",
-    }
+    from src.sftp_delivery import status_from_env
+
+    return status_from_env()
 
 
 def _send_generated_edifact_sftp(cid: str, req: Request):

@@ -225,3 +225,61 @@ def upload_tst(
         error_reason=f"SFTP_UPLOAD_FAILED after {max_retries} attempts: {last_error}",
         attempts=max_retries,
     )
+
+
+# --------------------------------------------------------------------------- #
+# Env-based status / connectivity probe (used by API health + settings UI)
+# --------------------------------------------------------------------------- #
+
+def is_configured_from_env() -> bool:
+    """True when a host is configured (credentials may still be incomplete)."""
+    import os
+
+    return bool((os.environ.get("SFTP_HOST") or "").strip())
+
+
+def status_from_env() -> dict:
+    """Return non-secret SFTP configuration state for diagnostics UI."""
+    import os
+
+    host = (os.environ.get("SFTP_HOST") or "").strip()
+    user = (os.environ.get("SFTP_USERNAME") or "").strip()
+    rdir = (os.environ.get("SFTP_REMOTE_DIR") or "").strip()
+    return {
+        "configured": bool(host and user),
+        "host": host or None,
+        "username": user or None,
+        "remote_dir": rdir or None,
+        "auth_mode": "password" if os.environ.get("SFTP_PASSWORD") else "key",
+    }
+
+
+def test_connection_from_env() -> tuple[bool, str]:
+    """Probe SFTP connectivity using current environment variables."""
+    import os
+
+    host = (os.environ.get("SFTP_HOST") or "").strip()
+    user = (os.environ.get("SFTP_USERNAME") or "").strip()
+    pwd = os.environ.get("SFTP_PASSWORD") or ""
+    if not host:
+        return False, "SFTP_HOST non configuré. .tst généré localement sans blocage."
+    try:
+        import paramiko
+
+        port = int(os.environ.get("SFTP_PORT") or "22")
+        transport = paramiko.Transport((host, port))
+        transport.connect(username=user, password=pwd)
+        sftp = paramiko.SFTPClient.from_transport(transport)
+        rdir = (os.environ.get("SFTP_REMOTE_DIR") or ".").strip() or "."
+        listing = sftp.listdir(rdir)
+        try:
+            sftp.close()
+        except Exception:
+            pass
+        try:
+            transport.close()
+        except Exception:
+            pass
+        return True, f"Connecté à {host} en tant que {user} — {len(listing)} fichiers dans {rdir}"
+    except Exception as exc:
+        return False, f"Échec ({type(exc).__name__}): {exc}"
