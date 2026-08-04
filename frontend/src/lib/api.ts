@@ -270,12 +270,10 @@ export const api = {
     return request<MasterDataResponse>(`/master-data?${params}`);
   },
 
-  /** Manual masterdata sync. source=auto prefers admin-configured Databricks API. */
-  syncMasterData: (opts?: { fromRepo?: boolean; source?: "auto" | "api" | "git" | "local" }) => {
-    const source = opts?.source || (opts?.fromRepo === false ? "local" : "auto");
+  /** Manual masterdata sync — triggers configured n8n webhook by default. */
+  syncMasterData: (opts?: { fromRepo?: boolean }) => {
     const params = new URLSearchParams({
-      source,
-      from_repo: source === "git" || opts?.fromRepo === true ? "true" : "false",
+      from_repo: opts?.fromRepo ? "true" : "false",
     });
     return request<{
       synced: number;

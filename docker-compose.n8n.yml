@@ -8,7 +8,14 @@
 #
 # Importer les workflows :
 #   Ouvrir http://localhost:5678 → Settings → Import workflow
-#   Fichiers : n8n_vm_email_to_edifact.json, n8n_vm_status_callback_receiver.json
+#   Fichiers :
+#     - n8n_vm_email_to_edifact.json
+#     - n8n_vm_status_callback_receiver.json
+#     - n8n_masterdata_github_sync.json  (sync masterdata GitHub → File2EDI)
+#
+# Webhook Synchroniser (après activation du workflow) :
+#   http://localhost:5678/webhook/masterdata-sync
+#   À renseigner dans Paramètres → Connecteurs → Sync Masterdata via n8n
 
 services:
   n8n:
@@ -32,6 +39,8 @@ services:
       # ── Variables lues par les workflows File2EDI ───────────────────────
       # Pointe vers l'API File2EDI (stack dev séparée)
       EDIFACT_API_BASE: "http://host.docker.internal:8000"
+      # Clé machine pour /api/masterdata/sync?from_repo=true (même valeur que APP_API_KEYS côté API)
+      EDIFACT_API_KEY: ""
       # URL de callback que l'API appelle après traitement
       EDIFACT_CALLBACK_URL: "http://host.docker.internal:5678/webhook/f2edi-status"
 

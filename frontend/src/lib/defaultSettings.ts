@@ -21,15 +21,11 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     csvDelimiter: ";",
     sftpProfile: "default",
   },
-  masterdataApiConfig: {
+  masterdataN8nConfig: {
     enabled: true,
-    baseUrl: "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
-    healthPath: "/health",
-    customersPath: "/customers",
-    partnersPath: "/partners",
-    materialsPath: "/materials",
-    salesordersPath: "/salesorders",
-    pageSize: 5000,
+    webhookUrl: "http://localhost:5678/webhook/masterdata-sync",
+    authHeader: "x-api-key",
+    timeoutSeconds: 120,
   },
   aiProvider: "databricks",
   databricksConfig: {
@@ -107,9 +103,9 @@ export function mergeSettings(partial?: Partial<AppSettings> | null): AppSetting
     ...partial,
     connectors: { ...DEFAULT_APP_SETTINGS.connectors, ...partial.connectors },
     connectorConfig: { ...DEFAULT_APP_SETTINGS.connectorConfig, ...partial.connectorConfig },
-    masterdataApiConfig: {
-      ...DEFAULT_APP_SETTINGS.masterdataApiConfig,
-      ...partial.masterdataApiConfig,
+    masterdataN8nConfig: {
+      ...DEFAULT_APP_SETTINGS.masterdataN8nConfig,
+      ...partial.masterdataN8nConfig,
     },
     aiProvider: partial.aiProvider ?? DEFAULT_APP_SETTINGS.aiProvider,
     databricksConfig: { ...DEFAULT_APP_SETTINGS.databricksConfig, ...partial.databricksConfig },

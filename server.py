@@ -1824,54 +1824,54 @@ def api_md_stats():
 
 
 @app.post("/api/masterdata/sync")
-def api_md_sync(
-    from_repo: bool = Query(False),
-    source: str = Query("auto"),
-):
+def api_md_sync(from_repo: bool = Query(False), req: Request | None = None):
     """Sync masterdata into runtime cache.
 
-    source:
-      - auto: masterdata API (if enabled in admin settings) → else git if from_repo → else local copy
-      - api: Databricks Apps masterdata-api (URL from admin settings)
-      - git: Git snapshot repo
-      - local: copy from MASTERDATA_SOURCE_DIR
+    Preferred path: trigger the admin-configured n8n webhook (GitHub -> files -> reload-cache).
+    Fallbacks:
+      - from_repo=true: in-process Git pull (legacy)
+      - default: copy from MASTERDATA_SOURCE_DIR
     """
     import datetime as _dt
 
-    source_mode = (source or "auto").strip().lower()
-    if source_mode not in {"auto", "api", "git", "local"}:
-        source_mode = "auto"
-
-    md_api_cfg: dict = {}
+    n8n_cfg: dict = {}
     try:
         from src.file2edi.store import get_store as _gs
 
-        md_api_cfg = dict((_gs().load_app_settings() or {}).get("masterdataApiConfig") or {})
+        n8n_cfg = dict((_gs().load_app_settings() or {}).get("masterdataN8nConfig") or {})
     except Exception:
-        md_api_cfg = {}
+        n8n_cfg = {}
 
-    if source_mode == "auto":
-        if md_api_cfg.get("enabled") and str(md_api_cfg.get("baseUrl") or "").strip():
-            source_mode = "api"
-        elif from_repo:
-            source_mode = "git"
-        else:
-            source_mode = "local"
+    if n8n_cfg.get("enabled") and str(n8n_cfg.get("webhookUrl") or "").strip() and not from_repo:
+        from src.masterdata_n8n import trigger_masterdata_sync_workflow
 
-    if source_mode == "api":
-        from src.masterdata_api_sync import sync_from_api
+        actor = "operator"
+        try:
+            actor = _resolve_actor(req) or "operator"
+        except Exception:
+            actor = "operator"
 
         save_audit_event(
             "__masterdata__",
             "masterdata_sync_attempted",
-            "system",
-            {"source": "masterdata_api", "manual": True, "baseUrl": md_api_cfg.get("baseUrl")},
+            actor,
+            {"source": "n8n_webhook", "manual": True, "webhookUrl": n8n_cfg.get("webhookUrl")},
         )
         try:
-            api_payload = sync_from_api(target_dir=MASTER_DATA_RUNTIME, config=md_api_cfg)
+            n8n_payload = trigger_masterdata_sync_workflow(
+                n8n_cfg,
+                actor=actor,
+                reason="manual_ui",
+            )
         except Exception as exc:
             err = str(exc)[:400]
-            log.warning("masterdata sync (api) failed, fallback to cache reload: %s", err)
+            log.warning("masterdata sync (n8n) failed: %s", err)
+            save_audit_event(
+                "__masterdata__",
+                "masterdata_sync_failed",
+                actor,
+                {"source": "n8n_webhook", "error": err},
+            )
             now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
             for key in _MD_FILES:
                 _MD_LAST_SYNC[key] = now_iso
@@ -1879,13 +1879,13 @@ def api_md_sync(
             _load_masterdata_cache()
             return {
                 "synced": 0,
-                "failed": 0,
+                "failed": 1,
                 "files": [],
                 "cache_reloaded": True,
-                "source": "api",
+                "source": "n8n",
                 "fallback": True,
                 "sync": _masterdata_sync_freshness(),
-                "message": f"Cache local rechargé (sync API indisponible: {err})",
+                "message": f"Échec déclenchement n8n — cache local rechargé ({err})",
             }
 
         now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -1893,35 +1893,27 @@ def api_md_sync(
             _MD_LAST_SYNC[key] = now_iso
         _apply_masterdata_sync_metadata_to_cache_state()
         _load_masterdata_cache()
-        files = api_payload.get("files") or {}
         save_audit_event(
             "__masterdata__",
             "masterdata_sync_succeeded",
-            "system",
-            {"source": "masterdata_api", "files": list(files.keys())},
+            actor,
+            {"source": "n8n_webhook", "result": n8n_payload},
         )
+        message = ""
+        if isinstance(n8n_payload, dict):
+            message = str(n8n_payload.get("message") or n8n_payload.get("status") or "")
         return {
-            "synced": len(files) if isinstance(files, dict) else 0,
+            "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
             "failed": 0,
-            "files": [
-                {
-                    "file": name,
-                    "status": "OK",
-                    "detail": f"{info.get('rows', '?')} lignes" if isinstance(info, dict) else "",
-                }
-                for name, info in (files.items() if isinstance(files, dict) else [])
-            ],
+            "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
             "cache_reloaded": True,
-            "source": "api",
-            "api": api_payload,
+            "source": "n8n",
+            "n8n": n8n_payload,
             "sync": _masterdata_sync_freshness(),
-            "message": (
-                f"Synchronisation API OK ({api_payload.get('base_url')}) — "
-                f"{len(files) if isinstance(files, dict) else 0} fichier(s)"
-            ),
+            "message": message or "Workflow n8n masterdata déclenché et terminé",
         }
 
-    if source_mode == "git" or from_repo:
+    if from_repo:
         from src.masterdata_autosync import run_repo_sync
 
         save_audit_event(
@@ -1938,8 +1930,6 @@ def api_md_sync(
                 notify_api_url="",
             )
         except Exception as exc:
-            # Docker/dev often has no git credentials or a read-only mount.
-            # Fall back to reloading whatever is already on disk (e.g. host Task Scheduler sync).
             repo_error = str(exc)[:300]
             log.warning("masterdata sync (repo) failed, fallback to cache reload: %s", repo_error)
 
@@ -2007,7 +1997,6 @@ def api_md_sync(
     ok_files  = [r[0] for r in rows if len(r) >= 4 and r[3] == "OK"]
     err_files = [r[0] for r in rows if len(r) >= 4 and r[3] != "OK"]
     if ok_files:
-        # Mark synced keys as workspace-sourced BEFORE reloading the cache
         now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         for key, fname in _MD_FILES.items():
             if fname in ok_files:
@@ -2018,7 +2007,6 @@ def api_md_sync(
                          {"ok": ok_files, "errors": err_files})
         log.info("masterdata sync succeeded: %d/%d files", len(ok_files), len(rows))
     else:
-        # All failed — keep existing cache (Tier C)
         save_audit_event("__masterdata__", "masterdata_sync_failed", "system",
                          {"errors": [r[3] for r in rows if len(r) >= 4]})
         log.warning("masterdata sync: all files failed — cache unchanged")
@@ -2037,6 +2025,7 @@ def api_md_sync(
             + (f" — {len(err_files)} erreur(s)" if err_files else "")
         ),
     }
+
 
 @app.post("/api/masterdata/delta")
 def api_md_delta():

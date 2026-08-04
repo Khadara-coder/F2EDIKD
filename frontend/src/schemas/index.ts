@@ -74,15 +74,11 @@ export const appSettingsSchema = z.object({
     csvDelimiter: z.string().min(1).max(1),
     sftpProfile: z.string(),
   }),
-  masterdataApiConfig: z.object({
+  masterdataN8nConfig: z.object({
     enabled: z.boolean(),
-    baseUrl: z.string(),
-    healthPath: z.string(),
-    customersPath: z.string(),
-    partnersPath: z.string(),
-    materialsPath: z.string(),
-    salesordersPath: z.string(),
-    pageSize: z.number().int().min(100).max(20000),
+    webhookUrl: z.string(),
+    authHeader: z.string(),
+    timeoutSeconds: z.number().int().min(5).max(600),
   }),
   aiProvider: z.enum(["databricks", "openai", "ollama", "custom"]).default("databricks"),
   databricksConfig: z.object({

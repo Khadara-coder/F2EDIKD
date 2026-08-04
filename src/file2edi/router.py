@@ -886,9 +886,9 @@ def create_router() -> APIRouter:
                     "sftp": "connected" if is_configured_from_env() else "disconnected",
                 },
                 "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
-                "masterdataApiConfig": {
-                    **_default_settings().get("masterdataApiConfig", {}),
-                    **(persisted.get("masterdataApiConfig") or {}),
+                "masterdataN8nConfig": {
+                    **_default_settings().get("masterdataN8nConfig", {}),
+                    **(persisted.get("masterdataN8nConfig") or {}),
                 },
                 "aiProvider": persisted.get("aiProvider", _default_settings().get("aiProvider", "databricks")),
                 "databricksConfig": {
@@ -946,9 +946,9 @@ def create_router() -> APIRouter:
             "aiProvider": persisted.get("aiProvider", settings.get("aiProvider", "databricks")),
         })
         settings["connectorConfig"] = {**settings.get("connectorConfig", {}), **(persisted.get("connectorConfig") or {})}
-        settings["masterdataApiConfig"] = {
-            **settings.get("masterdataApiConfig", {}),
-            **(persisted.get("masterdataApiConfig") or {}),
+        settings["masterdataN8nConfig"] = {
+            **settings.get("masterdataN8nConfig", {}),
+            **(persisted.get("masterdataN8nConfig") or {}),
         }
         settings["databricksConfig"] = {**settings.get("databricksConfig", {}), **(persisted.get("databricksConfig") or {})}
         settings["openaiConfig"] = {**settings.get("openaiConfig", {}), **(persisted.get("openaiConfig") or {})}
@@ -1012,19 +1012,38 @@ def create_router() -> APIRouter:
                     "message": f"Backend: {backend}",
                 }
             if connector == "csvExport":
-                incoming_md = (payload or {}).get("masterdataApiConfig")
-                if isinstance(incoming_md, dict) and (
-                    incoming_md.get("enabled") or incoming_md.get("baseUrl")
+                incoming_n8n = (payload or {}).get("masterdataN8nConfig")
+                if isinstance(incoming_n8n, dict) and (
+                    incoming_n8n.get("enabled") or incoming_n8n.get("webhookUrl")
                 ):
-                    from src.masterdata_api_sync import test_connection as _md_api_test
+                    import requests as _requests
 
                     persisted = get_store().load_app_settings()
                     merged = {
-                        **((persisted or {}).get("masterdataApiConfig") or {}),
-                        **incoming_md,
+                        **((persisted or {}).get("masterdataN8nConfig") or {}),
+                        **incoming_n8n,
                     }
-                    ok, msg = _md_api_test(merged)
-                    return {"status": "connected" if ok else "disconnected", "message": msg}
+                    url = str(merged.get("webhookUrl") or "").strip()
+                    if not url:
+                        return {"status": "disconnected", "message": "URL webhook n8n manquante"}
+                    try:
+                        # Prefer OPTIONS/HEAD-less: POST with dryRun flag; many n8n webhooks accept POST only.
+                        resp = _requests.post(
+                            url,
+                            json={"action": "masterdata_sync", "reason": "connectivity_test", "dryRun": True},
+                            timeout=10,
+                        )
+                        if resp.status_code < 500:
+                            return {
+                                "status": "connected",
+                                "message": f"Webhook n8n joignable (HTTP {resp.status_code})",
+                            }
+                        return {
+                            "status": "disconnected",
+                            "message": f"Webhook n8n HTTP {resp.status_code}",
+                        }
+                    except Exception as exc:
+                        return {"status": "disconnected", "message": f"Webhook n8n injoignable: {exc}"}
                 stats = masterdata_stats()
                 if not isinstance(stats, dict) or not stats:
                     return {"status": "disconnected", "message": "Aucune source CSV chargée"}
@@ -1260,15 +1279,11 @@ def _default_settings() -> dict:
             "csvDelimiter": ";",
             "sftpProfile": "default",
         },
-        "masterdataApiConfig": {
+        "masterdataN8nConfig": {
             "enabled": True,
-            "baseUrl": "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
-            "healthPath": "/health",
-            "customersPath": "/customers",
-            "partnersPath": "/partners",
-            "materialsPath": "/materials",
-            "salesordersPath": "/salesorders",
-            "pageSize": 5000,
+            "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
+            "authHeader": "x-api-key",
+            "timeoutSeconds": 120,
         },
         "aiProvider": "databricks",
         "databricksConfig": {

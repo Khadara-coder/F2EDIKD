@@ -92,15 +92,11 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "manualReviewOnAnomaly": True,
         "notifyOnDuplicate": False,
     },
-    "masterdataApiConfig": {
+    "masterdataN8nConfig": {
         "enabled": True,
-        "baseUrl": "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
-        "healthPath": "/health",
-        "customersPath": "/customers",
-        "partnersPath": "/partners",
-        "materialsPath": "/materials",
-        "salesordersPath": "/salesorders",
-        "pageSize": 5000,
+        "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
+        "authHeader": "x-api-key",
+        "timeoutSeconds": 120,
     },
 }
 
@@ -297,33 +293,23 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
         if opts:
             out["options"] = opts
 
-    raw_md_api = payload.get("masterdataApiConfig")
-    if isinstance(raw_md_api, dict):
-        md_api: dict[str, Any] = {}
-        if "enabled" in raw_md_api:
-            md_api["enabled"] = _as_bool(raw_md_api.get("enabled"))
-        if "baseUrl" in raw_md_api:
-            md_api["baseUrl"] = str(raw_md_api.get("baseUrl") or "").strip().rstrip("/")
-        for key in (
-            "healthPath",
-            "customersPath",
-            "partnersPath",
-            "materialsPath",
-            "salesordersPath",
-        ):
-            if key in raw_md_api:
-                path = str(raw_md_api.get(key) or "").strip()
-                if path and not path.startswith("/"):
-                    path = "/" + path
-                md_api[key] = path
-        if "pageSize" in raw_md_api:
+    raw_md_n8n = payload.get("masterdataN8nConfig")
+    if isinstance(raw_md_n8n, dict):
+        md_n8n: dict[str, Any] = {}
+        if "enabled" in raw_md_n8n:
+            md_n8n["enabled"] = _as_bool(raw_md_n8n.get("enabled"))
+        if "webhookUrl" in raw_md_n8n:
+            md_n8n["webhookUrl"] = str(raw_md_n8n.get("webhookUrl") or "").strip()
+        if "authHeader" in raw_md_n8n:
+            md_n8n["authHeader"] = str(raw_md_n8n.get("authHeader") or "x-api-key").strip() or "x-api-key"
+        if "timeoutSeconds" in raw_md_n8n:
             try:
-                page_size = int(raw_md_api.get("pageSize"))
+                timeout = int(raw_md_n8n.get("timeoutSeconds"))
             except (TypeError, ValueError):
-                page_size = 5000
-            md_api["pageSize"] = max(100, min(20000, page_size))
-        if md_api:
-            out["masterdataApiConfig"] = md_api
+                timeout = 120
+            md_n8n["timeoutSeconds"] = max(5, min(600, timeout))
+        if md_n8n:
+            out["masterdataN8nConfig"] = md_n8n
 
     # Admin-managed secrets / RBAC persisted in the same settings blob.
     if "api_keys" in payload:

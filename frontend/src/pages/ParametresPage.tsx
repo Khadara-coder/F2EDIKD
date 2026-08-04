@@ -173,7 +173,7 @@ export function ParametresPage() {
       documentLanguage: DEFAULT_APP_SETTINGS.documentLanguage,
       timezone: DEFAULT_APP_SETTINGS.timezone,
       connectorConfig: DEFAULT_APP_SETTINGS.connectorConfig,
-      masterdataApiConfig: DEFAULT_APP_SETTINGS.masterdataApiConfig,
+      masterdataN8nConfig: DEFAULT_APP_SETTINGS.masterdataN8nConfig,
       aiProvider: DEFAULT_APP_SETTINGS.aiProvider,
       databricksConfig: DEFAULT_APP_SETTINGS.databricksConfig,
       openaiConfig: DEFAULT_APP_SETTINGS.openaiConfig,
@@ -199,7 +199,7 @@ export function ParametresPage() {
         documentLanguage: s.documentLanguage,
         timezone: s.timezone,
         connectorConfig: s.connectorConfig,
-        masterdataApiConfig: s.masterdataApiConfig,
+        masterdataN8nConfig: s.masterdataN8nConfig,
         aiProvider: s.aiProvider,
         databricksConfig: s.databricksConfig,
         openaiConfig: s.openaiConfig,
@@ -512,71 +512,60 @@ export function ParametresPage() {
 
               <Card className="lg:col-span-2">
                 <CardHeader>
-                  <CardTitle className="text-base">API Masterdata (Databricks Apps)</CardTitle>
+                  <CardTitle className="text-base">Sync Masterdata via n8n</CardTitle>
                   <p className="text-xs text-muted-foreground">
-                    URL et chemins de récupération des données maîtres. Auth via le token Databricks
-                    (Paramètres → IA). Si l&apos;adresse change, mettez-la à jour ici puis Enregistrer.
+                    Le bouton Synchroniser déclenche ce webhook n8n. Le workflow tire GitHub puis
+                    recharge le cache File2EDI. Si l&apos;URL change, mettez-la à jour ici.
                   </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
                   <div className="flex items-center justify-between gap-4">
                     <div>
-                      <Label className="text-sm font-medium">Activer la sync API</Label>
+                      <Label className="text-sm font-medium">Activer le déclenchement n8n</Label>
                       <p className="text-xs text-muted-foreground">
-                        Prioritaire pour le bouton Synchroniser des données maîtres
+                        Prioritaire pour Synchroniser (sinon fallback Git/local)
                       </p>
                     </div>
                     <Switch
-                      checked={form.watch("masterdataApiConfig.enabled")}
-                      onCheckedChange={(v) => form.setValue("masterdataApiConfig.enabled", v)}
+                      checked={form.watch("masterdataN8nConfig.enabled")}
+                      onCheckedChange={(v) => form.setValue("masterdataN8nConfig.enabled", v)}
                     />
                   </div>
 
                   <EditableField
-                    label="URL de base (Databricks App)"
-                    value={form.watch("masterdataApiConfig.baseUrl")}
-                    onChange={(v) => form.setValue("masterdataApiConfig.baseUrl", v)}
+                    label="URL webhook n8n"
+                    value={form.watch("masterdataN8nConfig.webhookUrl")}
+                    onChange={(v) => form.setValue("masterdataN8nConfig.webhookUrl", v)}
                   />
 
                   <div className="grid gap-4 md:grid-cols-2">
                     <EditableField
-                      label="Chemin health"
-                      value={form.watch("masterdataApiConfig.healthPath")}
-                      onChange={(v) => form.setValue("masterdataApiConfig.healthPath", v)}
+                      label="Header d'auth"
+                      value={form.watch("masterdataN8nConfig.authHeader")}
+                      onChange={(v) => form.setValue("masterdataN8nConfig.authHeader", v)}
                     />
                     <div className="space-y-2">
-                      <Label>Taille de page</Label>
+                      <Label>Timeout (secondes)</Label>
                       <Input
                         type="number"
-                        min={100}
-                        max={20000}
-                        value={form.watch("masterdataApiConfig.pageSize")}
+                        min={5}
+                        max={600}
+                        value={form.watch("masterdataN8nConfig.timeoutSeconds")}
                         onChange={(e) =>
-                          form.setValue("masterdataApiConfig.pageSize", Number(e.target.value) || 5000)
+                          form.setValue(
+                            "masterdataN8nConfig.timeoutSeconds",
+                            Number(e.target.value) || 120,
+                          )
                         }
                       />
                     </div>
-                    <EditableField
-                      label="Chemin customers"
-                      value={form.watch("masterdataApiConfig.customersPath")}
-                      onChange={(v) => form.setValue("masterdataApiConfig.customersPath", v)}
-                    />
-                    <EditableField
-                      label="Chemin partners"
-                      value={form.watch("masterdataApiConfig.partnersPath")}
-                      onChange={(v) => form.setValue("masterdataApiConfig.partnersPath", v)}
-                    />
-                    <EditableField
-                      label="Chemin materials"
-                      value={form.watch("masterdataApiConfig.materialsPath")}
-                      onChange={(v) => form.setValue("masterdataApiConfig.materialsPath", v)}
-                    />
-                    <EditableField
-                      label="Chemin salesorders"
-                      value={form.watch("masterdataApiConfig.salesordersPath")}
-                      onChange={(v) => form.setValue("masterdataApiConfig.salesordersPath", v)}
-                    />
                   </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Clé secrète : variable d&apos;environnement{" "}
+                    <code>MASTERDATA_N8N_WEBHOOK_KEY</code> (ou premier <code>APP_API_KEYS</code>).
+                    Importer <code>n8n_masterdata_github_sync.json</code> dans n8n.
+                  </p>
 
                   <div className="flex items-center gap-3">
                     <Button
@@ -587,13 +576,13 @@ export function ParametresPage() {
                         testConnectorMutation.mutate({
                           connector: "csvExport",
                           payload: {
-                            masterdataApiConfig: form.getValues("masterdataApiConfig"),
+                            masterdataN8nConfig: form.getValues("masterdataN8nConfig"),
                           },
                         })
                       }
                       disabled={testConnectorMutation.isPending}
                     >
-                      {testingConnector === "csvExport" ? "Test..." : "Tester l'API masterdata"}
+                      {testingConnector === "csvExport" ? "Test..." : "Tester le webhook n8n"}
                     </Button>
                     {connectorMessages.csvExport && (
                       <p className="text-xs text-muted-foreground">{connectorMessages.csvExport}</p>

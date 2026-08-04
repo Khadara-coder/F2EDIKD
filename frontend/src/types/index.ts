@@ -382,15 +382,11 @@ export interface AppSettings {
     csvDelimiter: string;
     sftpProfile: string;
   };
-  masterdataApiConfig: {
+  masterdataN8nConfig: {
     enabled: boolean;
-    baseUrl: string;
-    healthPath: string;
-    customersPath: string;
-    partnersPath: string;
-    materialsPath: string;
-    salesordersPath: string;
-    pageSize: number;
+    webhookUrl: string;
+    authHeader: string;
+    timeoutSeconds: number;
   };
   aiProvider: "databricks" | "openai" | "ollama" | "custom";
   databricksConfig: {

@@ -1,0 +1,192 @@
+{
+  "name": "F2EDI - Sync Masterdata GitHub",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "masterdata-sync",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "webhook-md-001",
+      "name": "Webhook: Synchroniser",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [200, 240],
+      "webhookId": "masterdata-sync"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "15 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-md-001",
+      "name": "Schedule: quotidien 02:15",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [200, 460]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "a1",
+              "name": "reason",
+              "value": "={{ $json.body?.reason || $json.reason || 'schedule' }}",
+              "type": "string"
+            },
+            {
+              "id": "a2",
+              "name": "actor",
+              "value": "={{ $json.body?.actor || $json.actor || 'n8n' }}",
+              "type": "string"
+            },
+            {
+              "id": "a3",
+              "name": "dryRun",
+              "value": "={{ $json.body?.dryRun === true || $json.dryRun === true }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "normalize-md-001",
+      "name": "Normaliser payload",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [460, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.dryRun }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "if-dryrun-001",
+      "name": "Dry-run ?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [680, 340]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "r1",
+              "name": "ok",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "r2",
+              "name": "synced",
+              "value": 0,
+              "type": "number"
+            },
+            {
+              "id": "r3",
+              "name": "message",
+              "value": "Webhook n8n OK (dry-run, sync non exécuté)",
+              "type": "string"
+            },
+            {
+              "id": "r4",
+              "name": "source",
+              "value": "n8n",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "respond-dry-001",
+      "name": "Réponse dry-run",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [920, 220]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ ($env.EDIFACT_API_BASE || 'http://host.docker.internal:8000') + '/api/masterdata/sync?from_repo=true' }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-api-key",
+              "value": "={{ $env.EDIFACT_API_KEY || $env.APP_API_KEYS || '' }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"reason\": \"{{ $json.reason }}\",\n  \"actor\": \"{{ $json.actor }}\",\n  \"triggered_by\": \"n8n\"\n}",
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "http-sync-001",
+      "name": "File2EDI: sync GitHub",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [920, 460]
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json || {};\nconst synced = Number(item.synced || 0);\nconst failed = Number(item.failed || 0);\nconst message = String(item.message || 'Sync masterdata terminée');\nreturn [{\n  json: {\n    ok: failed === 0,\n    synced,\n    failed,\n    files: item.files || [],\n    commit: item.commit || null,\n    source: 'n8n',\n    message,\n    file2edi: item,\n  }\n}];"
+      },
+      "id": "format-resp-001",
+      "name": "Formater réponse",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1160, 460]
+    }
+  ],
+  "connections": {
+    "Webhook: Synchroniser": {
+      "main": [[{ "node": "Normaliser payload", "type": "main", "index": 0 }]]
+    },
+    "Schedule: quotidien 02:15": {
+      "main": [[{ "node": "Normaliser payload", "type": "main", "index": 0 }]]
+    },
+    "Normaliser payload": {
+      "main": [[{ "node": "Dry-run ?", "type": "main", "index": 0 }]]
+    },
+    "Dry-run ?": {
+      "main": [
+        [{ "node": "Réponse dry-run", "type": "main", "index": 0 }],
+        [{ "node": "File2EDI: sync GitHub", "type": "main", "index": 0 }]
+      ]
+    },
+    "File2EDI: sync GitHub": {
+      "main": [[{ "node": "Formater réponse", "type": "main", "index": 0 }]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "masterdata-github-sync-v1"
+}

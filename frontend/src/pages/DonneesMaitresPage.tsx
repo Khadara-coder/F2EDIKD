@@ -149,7 +149,7 @@ export function DonneesMaitresPage() {
   };
 
   const syncMutation = useMutation({
-    mutationFn: () => api.syncMasterData({ source: "auto" }),
+    mutationFn: () => api.syncMasterData(),
     onMutate: () => setSyncMessage(null),
     onSuccess: (res) => {
       setSyncMessage(res.message || "Synchronisation terminée");
@@ -247,7 +247,7 @@ export function DonneesMaitresPage() {
                 className="gap-2"
                 disabled={syncMutation.isPending}
                 onClick={() => syncMutation.mutate()}
-                title="Synchroniser (API Databricks si configurée, sinon Git / fichiers locaux)"
+                title="Déclencher le workflow n8n (GitHub → masterdata → reload-cache)"
               >
                 <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
                 {syncMutation.isPending ? "Synchronisation…" : "Synchroniser"}

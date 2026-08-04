@@ -470,15 +470,11 @@ export const mockSettings: AppSettings = {
     csvDelimiter: ";",
     sftpProfile: "default",
   },
-  masterdataApiConfig: {
+  masterdataN8nConfig: {
     enabled: true,
-    baseUrl: "https://masterdata-api-5555213114570927.7.azure.databricksapps.com",
-    healthPath: "/health",
-    customersPath: "/customers",
-    partnersPath: "/partners",
-    materialsPath: "/materials",
-    salesordersPath: "/salesorders",
-    pageSize: 5000,
+    webhookUrl: "http://localhost:5678/webhook/masterdata-sync",
+    authHeader: "x-api-key",
+    timeoutSeconds: 120,
   },
   aiProvider: "databricks",
   databricksConfig: {
