@@ -1413,6 +1413,16 @@ def _users_mixin(cls):
         pw_hash = _hash_password(password)
         role = role.strip().lower() if role in ("adv", "admin") else "adv"
         conn = self._conn()
+        sap_norm = sap_id.strip()
+        if sap_norm:
+            dup = conn.execute(
+                "SELECT user_id, username FROM file2edi_users "
+                "WHERE is_active=1 AND sap_id=? LIMIT 1",
+                [sap_norm],
+            ).fetchone()
+            if dup:
+                conn.close()
+                raise ValueError(f"Identifiant SAP déjà utilisé par l'utilisateur '{dup['username']}'")
         conn.execute(
             "INSERT INTO file2edi_users (user_id,username,display_name,email,sap_id,role,password_hash,created_at,is_active) "
             "VALUES (?,?,?,?,?,?,?,?,1)",
@@ -1522,7 +1532,17 @@ def _users_mixin(cls):
         if email is not None:
             sets.append("email=?"); params.append(email.strip())
         if sap_id is not None:
-            sets.append("sap_id=?"); params.append(sap_id.strip())
+            sap_norm = sap_id.strip()
+            if sap_norm:
+                dup = conn.execute(
+                    "SELECT user_id, username FROM file2edi_users "
+                    "WHERE is_active=1 AND sap_id=? AND user_id<>? LIMIT 1",
+                    [sap_norm, user_id],
+                ).fetchone()
+                if dup:
+                    conn.close()
+                    raise ValueError(f"Identifiant SAP déjà utilisé par l'utilisateur '{dup['username']}'")
+            sets.append("sap_id=?"); params.append(sap_norm)
         if role is not None and role in ("adv", "admin"):
             sets.append("role=?"); params.append(role)
         if not sets:

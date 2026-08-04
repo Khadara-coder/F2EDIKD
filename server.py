@@ -198,7 +198,7 @@ _apply_runtime_databricks_config()
 os.environ.setdefault("MASTER_DATA_DIR", MASTER_DATA_RUNTIME)
 
 
-# ── Environment detection (local dev vs Databricks Apps) ───────────────────────
+# ── Environment detection (local dev vs legacy Databricks runtime) ─────────────
 def _detect_databricks_runtime() -> bool:
     """True when running inside a Databricks App / cluster, False for local dev."""
     for var in ("DATABRICKS_APP_NAME", "DATABRICKS_APP_PORT",
@@ -230,8 +230,8 @@ log.info("environment: %s (databricks=%s dev_actor=%s)",
 def _auth_headers() -> dict:
     """Bearer auth: explicit token → Databricks CLI profile / SP OAuth.
 
-    Locally this resolves through DATABRICKS_CONFIG_PROFILE (e.g. `Khadara`)
-    so the LLM serving endpoint behaves the same as on Databricks Apps.
+    Prefer DATABRICKS_TOKEN on VM/Docker. Locally this can resolve through
+    DATABRICKS_CONFIG_PROFILE (e.g. `Khadara`) for CLI-profile OAuth.
     """
     token = os.environ.get("DATABRICKS_TOKEN", "")
     if token:
@@ -1815,7 +1815,7 @@ async def api_extract(
             except Exception:
                 pass
 
-    # Text fallback — mlflow.deployments LLM (auth-portable inside Databricks Apps)
+    # Text fallback via Databricks Model Serving over HTTP.
     text = (request.text if request else "") or ""
     if not text.strip():
         return JSONResponse({"ok": False, "result": {}, "status": "Texte vide"})
@@ -1835,7 +1835,7 @@ async def api_extract(
         )
         if result is None:
             return JSONResponse({"ok": False, "result": {}, "status": "LLM unavailable or JSON parse error"})
-        return JSONResponse({"ok": True, "result": result, "status": "LLM OK (mlflow.deployments)"})
+        return JSONResponse({"ok": True, "result": result, "status": "LLM OK (Databricks Model Serving)"})
     except Exception as exc:
         return JSONResponse({"ok": False, "result": {}, "status": str(exc)})
 
@@ -2046,7 +2046,7 @@ def api_settings():
         "sender_gln":        UNB_SENDER_GLN,
         "receiver_gln":      UNB_RECEIVER_GLN,
         "model_endpoint":    dbx["model_endpoint"],
-        "token_status":      "SET" if os.environ.get("DATABRICKS_TOKEN") else "NOT SET (OAuth)",
+        "token_status":      "SET" if os.environ.get("DATABRICKS_TOKEN") else "NOT SET (SDK OAuth fallback)",
         "catalog":           dbx["catalog"],
         "schema":            dbx["schema"],
         "masterdata_source": MASTER_DATA_SRC,

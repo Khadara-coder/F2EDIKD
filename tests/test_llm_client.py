@@ -101,19 +101,20 @@ class TestAuthHeaders:
 
     def test_no_token_falls_through_to_sdk(self, monkeypatch):
         monkeypatch.setenv("DATABRICKS_TOKEN", "")
-        mock_ws = MagicMock()
-        mock_ws.config.authenticate.return_value = {"Authorization": "Bearer oauth-token"}
-        with patch("databricks.sdk.WorkspaceClient", return_value=mock_ws):
-            from src import llm_client
+        from src import llm_client
+
+        with patch.object(llm_client, "_workspace_auth_headers", return_value={"Authorization": "Bearer oauth-token"}):
             headers = llm_client._auth_headers()
             assert "Authorization" in headers
 
     def test_sdk_failure_returns_content_type_only(self, monkeypatch):
         monkeypatch.setenv("DATABRICKS_TOKEN", "")
-        with patch("databricks.sdk.WorkspaceClient", side_effect=ImportError("no sdk")):
-            from src import llm_client
+        from src import llm_client
+
+        with patch.object(llm_client, "_workspace_auth_headers", return_value={"_auth_error": "no sdk"}):
             headers = llm_client._auth_headers()
             assert "Content-Type" in headers
+            assert "_auth_error" in headers
 
 
 # ── _predict ──────────────────────────────────────────────────────────────────
@@ -174,10 +175,11 @@ class TestPredict:
     def test_auth_error_header_returns_none(self, monkeypatch):
         monkeypatch.setenv("DATABRICKS_HOST", "https://host.azuredatabricks.net")
         monkeypatch.setenv("DATABRICKS_TOKEN", "")
-        with patch("databricks.sdk.WorkspaceClient", side_effect=ImportError("no sdk")):
-            from src import llm_client
-            import importlib
-            importlib.reload(llm_client)
+        from src import llm_client
+        import importlib
+        importlib.reload(llm_client)
+
+        with patch.object(llm_client, "_workspace_auth_headers", return_value={"_auth_error": "no sdk"}):
             result = llm_client._predict("model", [], 100)
 
         assert result is None

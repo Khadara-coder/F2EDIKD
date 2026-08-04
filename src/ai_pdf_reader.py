@@ -117,6 +117,14 @@ def _text_from_content(content: Any) -> str:
 
 
 def _call_llm(prompt: str, max_tokens: int = 2000) -> Optional[str]:
+    try:
+        from src.llm_client import llm_call
+
+        return llm_call(prompt, system=_EXTRACTION_SYSTEM, max_tokens=max_tokens, endpoint=_model_endpoint())
+    except Exception as exc:
+        log.warning("AI extraction LLM call failed: %s", exc)
+        return None
+
     """Call gpt-oss-120b via mlflow.deployments (primary) or requests (fallback).
 
     Returns the raw text response or None on failure.

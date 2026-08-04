@@ -1,10 +1,10 @@
 """Shared LLM client for the EDIFACT Generator.
 
-Direct REST calls to Databricks Model Serving endpoint — no mlflow dependency.
-Works both on VM (Docker Compose) and inside Databricks Apps.
+Direct REST calls to a Databricks Model Serving endpoint.
+Databricks is a remote LLM provider here, not the application runtime.
 
-Auth: DATABRICKS_TOKEN env var → Bearer token
-      Fallback: databricks-sdk WorkspaceClient OAuth (requires SDK + profile)
+Auth: DATABRICKS_TOKEN env var -> Bearer token
+      Optional local-dev fallback: databricks-sdk WorkspaceClient OAuth
 
 Handles the gpt-oss-120b *reasoning model* response format:
   content is a list of blocks:
@@ -43,20 +43,30 @@ def _invocation_url(endpoint: str) -> str:
     return f"{host}/serving-endpoints/{endpoint}/invocations"
 
 
-def _auth_headers() -> dict:
-    token = os.environ.get("DATABRICKS_TOKEN", "").strip()
-    if token:
-        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+def _workspace_auth_headers() -> dict:
+    """Return OAuth headers from databricks-sdk when no PAT token is configured.
+
+    The SDK is intentionally optional: production VM deployments should prefer
+    DATABRICKS_TOKEN, while developers may use a Databricks CLI profile.
+    """
     try:
         from databricks.sdk import WorkspaceClient
         profile = os.environ.get("DATABRICKS_CONFIG_PROFILE", "").strip()
         w = WorkspaceClient(profile=profile) if profile else WorkspaceClient()
-        h = w.config.authenticate()
-        h["Content-Type"] = "application/json"
-        return h
+        return dict(w.config.authenticate())
     except Exception as exc:
-        log.warning("LLM auth unavailable (set DATABRICKS_TOKEN): %s", exc)
-        return {"Content-Type": "application/json"}
+        return {"_auth_error": str(exc)}
+
+
+def _auth_headers() -> dict:
+    token = os.environ.get("DATABRICKS_TOKEN", "").strip()
+    if token:
+        return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    headers = _workspace_auth_headers()
+    headers["Content-Type"] = "application/json"
+    if "_auth_error" in headers:
+        log.warning("LLM auth unavailable (set DATABRICKS_TOKEN): %s", headers["_auth_error"])
+    return headers
 
 
 # ── Core helpers ──────────────────────────────────────────────────────────────
@@ -86,7 +96,7 @@ def _predict(endpoint: str, messages: list, max_tokens: int) -> Optional[str]:
         log.warning("LLM: DATABRICKS_HOST not set — cannot call endpoint %s", endpoint)
         return None
 
-    import requests  # stdlib on Python 3.x — always available
+    import requests
 
     headers = _auth_headers()
     if "_auth_error" in headers:
