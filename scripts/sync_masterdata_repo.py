@@ -14,12 +14,14 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 REQUIRED_FILES = [
     "10564_Customers.csv",
@@ -31,6 +33,39 @@ REQUIRED_FILES = [
 DEFAULT_REPO_URL = "https://github.boschdevcloud.com/RSR1DY/masterdata.git"
 DEFAULT_BRANCH = "main"
 DEFAULT_METADATA_FILE = ".masterdata_sync_metadata.json"
+
+
+def _ensure_git_available() -> None:
+    if shutil.which("git"):
+        return
+    raise RuntimeError(
+        "git binary not found in PATH. Install git in the runtime image "
+        "(e.g. apt-get install git) or run scripts/sync_masterdata_repo.py on the host "
+        "then call /api/masterdata/reload-cache."
+    )
+
+
+def _authenticated_repo_url(repo_url: str) -> str:
+    """Inject MASTERDATA_GIT_TOKEN / GITHUB_TOKEN into HTTPS clone URL when set."""
+    token = (
+        os.environ.get("MASTERDATA_GIT_TOKEN")
+        or os.environ.get("GITHUB_TOKEN")
+        or os.environ.get("GH_TOKEN")
+        or ""
+    ).strip()
+    if not token:
+        return repo_url
+    parsed = urlparse(repo_url)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return repo_url
+    # Avoid double-embedding if the URL already contains userinfo.
+    if parsed.username:
+        return repo_url
+    host = parsed.hostname
+    if parsed.port:
+        host = f"{host}:{parsed.port}"
+    netloc = f"x-access-token:{token}@{host}"
+    return urlunparse((parsed.scheme, netloc, parsed.path, "", "", ""))
 
 
 def _run(cmd: list[str], cwd: Path | None = None) -> str:
@@ -70,11 +105,13 @@ def _count_data_rows(path: Path) -> int:
 
 
 def _prepare_worktree(repo_url: str, branch: str, worktree: Path) -> str:
+    _ensure_git_available()
+    auth_url = _authenticated_repo_url(repo_url)
     if not (worktree / ".git").exists():
         worktree.parent.mkdir(parents=True, exist_ok=True)
-        _run(["git", "clone", "--branch", branch, "--single-branch", repo_url, str(worktree)])
+        _run(["git", "clone", "--branch", branch, "--single-branch", auth_url, str(worktree)])
     else:
-        _run(["git", "remote", "set-url", "origin", repo_url], cwd=worktree)
+        _run(["git", "remote", "set-url", "origin", auth_url], cwd=worktree)
         _run(["git", "fetch", "origin", branch, "--prune"], cwd=worktree)
         _run(["git", "checkout", branch], cwd=worktree)
         _run(["git", "reset", "--hard", f"origin/{branch}"], cwd=worktree)

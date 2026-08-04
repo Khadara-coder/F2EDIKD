@@ -286,6 +286,41 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
                 opts[key] = _as_bool(raw_options.get(key))
         if opts:
             out["options"] = opts
+
+    # Admin-managed secrets / RBAC persisted in the same settings blob.
+    if "api_keys" in payload:
+        keys_out: list[dict[str, Any]] = []
+        raw_keys = payload.get("api_keys")
+        if isinstance(raw_keys, list):
+            for item in raw_keys:
+                if not isinstance(item, dict):
+                    continue
+                key_id = str(item.get("id") or "").strip()
+                key_hash = str(item.get("key_hash") or "").strip()
+                if not key_id or not key_hash:
+                    continue
+                last_used = item.get("last_used_at")
+                keys_out.append({
+                    "id": key_id,
+                    "name": str(item.get("name") or "").strip() or key_id,
+                    "key_hash": key_hash,
+                    "created_by": str(item.get("created_by") or "").strip(),
+                    "created_at": str(item.get("created_at") or "").strip(),
+                    "last_used_at": str(last_used).strip() if last_used else None,
+                })
+        out["api_keys"] = keys_out
+
+    if "rbac_role_overrides" in payload:
+        overrides: dict[str, str] = {}
+        raw_overrides = payload.get("rbac_role_overrides")
+        if isinstance(raw_overrides, dict):
+            for actor, role in raw_overrides.items():
+                normalized_actor = str(actor or "").strip().lower()
+                normalized_role = str(role or "").strip().lower()
+                if normalized_actor and normalized_role in {"admin", "adv"}:
+                    overrides[normalized_actor] = normalized_role
+        out["rbac_role_overrides"] = overrides
+
     return out
 
 

@@ -356,7 +356,17 @@ def _api_key_authenticated(req: Request | None) -> bool:
     for expected in _api_key_values():
         if hmac.compare_digest(provided, expected):
             return True
-    # PostgreSQL API keys table managed separately; fallback removed
+    # UI-created keys are stored as SHA-256 hashes in app settings.
+    try:
+        provided_hash = hashlib.sha256(provided.encode("utf-8")).hexdigest()
+        from src.file2edi.store import get_store as _gs
+
+        for item in (_gs().load_app_settings().get("api_keys") or []):
+            stored = str((item or {}).get("key_hash") or "").strip()
+            if stored and hmac.compare_digest(provided_hash, stored):
+                return True
+    except Exception:
+        pass
     return False
 
 

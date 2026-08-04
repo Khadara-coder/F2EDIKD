@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 # System deps for pdfplumber / PyMuPDF
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libffi-dev curl wget \
+    gcc libffi-dev curl wget git \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-postgres.txt ./
