@@ -1025,6 +1025,8 @@ _PUBLIC_API_PATHS = {
     "/api/auth/modes",
     "/api/auth/login",
     "/api/auth/logout",
+    # Host Task Scheduler / cron notifies after publishing CSVs to the runtime dir.
+    "/api/masterdata/reload-cache",
     "/health",
     "/healthz",
 }
@@ -2089,50 +2091,73 @@ def api_md_sync(from_repo: bool = Query(False)):
             "system",
             {"source": "git_repo", "manual": True},
         )
+        repo_payload: dict | None = None
+        repo_error: str | None = None
         try:
             repo_payload = run_repo_sync(
                 target_dir=MASTER_DATA_RUNTIME,
                 notify_api_url="",
             )
         except Exception as exc:
-            save_audit_event(
-                "__masterdata__",
-                "masterdata_sync_failed",
-                "system",
-                {"source": "git_repo", "error": str(exc)[:300]},
-            )
-            raise HTTPException(status_code=502, detail=f"Sync repo échouée: {exc}") from exc
+            # Docker/dev often has no git credentials or a read-only mount.
+            # Fall back to reloading whatever is already on disk (e.g. host Task Scheduler sync).
+            repo_error = str(exc)[:300]
+            log.warning("masterdata sync (repo) failed, fallback to cache reload: %s", repo_error)
 
         now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         for key in _MD_FILES:
             _MD_LAST_SYNC[key] = now_iso
         _apply_masterdata_sync_metadata_to_cache_state()
         _load_masterdata_cache()
+        md_sync = _masterdata_sync_freshness()
+
+        if repo_payload is not None:
+            save_audit_event(
+                "__masterdata__",
+                "masterdata_sync_succeeded",
+                "system",
+                {"source": "git_repo", "commit": repo_payload.get("commit")},
+            )
+            commit = repo_payload.get("commit") or "?"
+            files = repo_payload.get("files") or {}
+            log.info("masterdata sync (repo) succeeded: commit=%s files=%s", commit, list(files.keys()))
+            return {
+                "synced": len(files) if isinstance(files, dict) else 0,
+                "failed": 0,
+                "files": [
+                    {
+                        "file": name,
+                        "status": "OK",
+                        "detail": f"{info.get('rows', '?')} lignes" if isinstance(info, dict) else "",
+                    }
+                    for name, info in (files.items() if isinstance(files, dict) else [])
+                ],
+                "cache_reloaded": True,
+                "from_repo": True,
+                "commit": commit,
+                "repo": repo_payload,
+                "sync": md_sync,
+                "message": f"Synchronisation repo OK (commit {str(commit)[:12]})",
+            }
+
         save_audit_event(
             "__masterdata__",
             "masterdata_sync_succeeded",
             "system",
-            {"source": "git_repo", "commit": repo_payload.get("commit")},
+            {"source": "runtime_reload_fallback", "error": repo_error},
         )
-        commit = repo_payload.get("commit") or "?"
-        files = repo_payload.get("files") or {}
-        log.info("masterdata sync (repo) succeeded: commit=%s files=%s", commit, list(files.keys()))
         return {
-            "synced": len(files) if isinstance(files, dict) else 0,
+            "synced": 0,
             "failed": 0,
-            "files": [
-                {
-                    "file": name,
-                    "status": "OK",
-                    "detail": f"{info.get('rows', '?')} lignes" if isinstance(info, dict) else "",
-                }
-                for name, info in (files.items() if isinstance(files, dict) else [])
-            ],
+            "files": [],
             "cache_reloaded": True,
             "from_repo": True,
-            "commit": commit,
-            "repo": repo_payload,
-            "message": f"Synchronisation repo OK (commit {str(commit)[:12]})",
+            "fallback": True,
+            "sync": md_sync,
+            "message": (
+                "Cache masterdata rechargé depuis les fichiers locaux"
+                + (f" (sync git indisponible: {repo_error})" if repo_error else "")
+            ),
         }
 
     save_audit_event("__masterdata__", "masterdata_sync_attempted", "system",
@@ -4992,11 +5017,17 @@ def api_md_salesorders(q: str = "", limit: int = 50):
 
 @app.post("/api/masterdata/reload-cache")
 def api_md_reload_cache():
-    """Force reload of all masterdata caches (Req 13)."""
+    """Force reload of all masterdata caches (Req 13).
+
+    Called by the host daily sync job after publishing CSVs into MASTERDATA_RUNTIME_DIR.
+    """
+    _apply_masterdata_sync_metadata_to_cache_state()
     _load_masterdata_cache()
     stats = _masterdata_stats()
+    md_sync = _masterdata_sync_freshness()
     return {
         "status": "ok",
+        "sync": md_sync,
         "schema_summary": {
             k: {
                 "valid":   v.get("schema_valid"),
@@ -5006,6 +5037,10 @@ def api_md_reload_cache():
             }
             for k, v in stats.items()
         },
+        "message": (
+            f"Cache rechargé — sync={md_sync.get('status')}"
+            + (f" commit={(md_sync.get('commit') or '')[:12]}" if md_sync.get("commit") else "")
+        ),
     }
 
 

@@ -11,7 +11,7 @@ param(
   [string]$RepoUrl = "https://github.boschdevcloud.com/RSR1DY/masterdata.git",
   [string]$Branch = "main",
   [string]$TargetDir = "",
-  [string]$NotifyApiUrl = "http://127.0.0.1:8000/api/masterdata/sync",
+  [string]$NotifyApiUrl = "http://127.0.0.1:8000/api/masterdata/reload-cache",
   [string]$NotifyApiKey = "",
   [string]$Time = "02:15",
   [string]$TaskName = "File2EDI-Masterdata-AutoSync"

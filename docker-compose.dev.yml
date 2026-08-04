@@ -52,7 +52,7 @@ services:
       - /app/frontend/node_modules
       - geniecommande_data_dev:/app/data
       - ./data/file2edi_schema.sql:/app/data/file2edi_schema.sql:ro
-      - ./data/masterdata:/app/data/masterdata:ro
+      - ./data/masterdata:/app/data/masterdata
     depends_on:
       postgres:
         condition: service_healthy
