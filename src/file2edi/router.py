@@ -686,6 +686,7 @@ def create_router() -> APIRouter:
             return {"success": False, "errors": _extract_generate_errors(result)}
         return {"success": False, "errors": ["Génération échouée"]}
 
+    @router.post("/orders/{order_id}/send-sftp")
     @router.post("/orders/{order_id}/send-sap")
     async def send_to_sap(order_id: str, payload: dict = Body(default_factory=dict)):
         store = get_store()

@@ -4383,10 +4383,102 @@ def api_sftp_status():
     }
 
 
+def _send_generated_edifact_sftp(cid: str, req: Request):
+    try:
+        from src.file2edi.store import get_store as _gs
+        from src.sftp_delivery import upload_tst
+
+        store = _gs()
+        export = store.get_edifact_export(cid)
+        if not export:
+            return JSONResponse(status_code=400, content={"error": "EDIFACT non généré pour cette commande"})
+
+        try:
+            from src.file2edi.router import _apply_runtime_sftp_config
+
+            _apply_runtime_sftp_config(store.load_app_settings())
+        except Exception:
+            pass
+
+        host = (os.environ.get("SFTP_HOST") or "").strip()
+        username = (os.environ.get("SFTP_USERNAME") or "").strip()
+        remote_dir = (os.environ.get("SFTP_REMOTE_DIR") or "").strip()
+        password = os.environ.get("SFTP_PASSWORD") or ""
+        private_key_path = os.environ.get("SFTP_PRIVATE_KEY_PATH") or ""
+        if not host or not username or not remote_dir or not (password or private_key_path):
+            missing = []
+            if not host:
+                missing.append("SFTP_HOST")
+            if not username:
+                missing.append("SFTP_USERNAME")
+            if not remote_dir:
+                missing.append("SFTP_REMOTE_DIR")
+            if not (password or private_key_path):
+                missing.append("SFTP_PASSWORD or SFTP_PRIVATE_KEY_PATH")
+            detail = f"Configuration SFTP incomplète: {', '.join(missing)}"
+            store.mark_sftp_delivery(cid, False, detail)
+            return JSONResponse(status_code=400, content={"error": detail})
+
+        try:
+            port = int(os.environ.get("SFTP_PORT") or "22")
+        except Exception:
+            port = 22
+        try:
+            max_retries = int(os.environ.get("SFTP_MAX_RETRIES") or "3")
+        except Exception:
+            max_retries = 3
+
+        cfg = type("RuntimeSftpConfig", (), {
+            "enabled": True,
+            "host": host,
+            "port": max(1, min(65535, port)),
+            "username": username,
+            "password": password,
+            "private_key_path": private_key_path,
+            "private_key_passphrase": os.environ.get("SFTP_PRIVATE_KEY_PASSPHRASE") or "",
+            "remote_dir": remote_dir,
+            "upload_tmp_suffix": os.environ.get("SFTP_UPLOAD_TMP_SUFFIX") or ".uploading",
+            "verify_after_upload": (os.environ.get("SFTP_VERIFY_AFTER_UPLOAD") or "true").strip().lower()
+            not in {"0", "false", "no", "off"},
+            "max_retries": max(1, max_retries),
+            "keep_local_copy": True,
+        })()
+
+        filename = Path(str(export.get("fileName") or f"ORDERS_{cid}.tst")).name
+        with tempfile.TemporaryDirectory(prefix="file2edi-sftp-") as tmp_dir:
+            local_path = Path(tmp_dir) / filename
+            local_path.write_text(str(export.get("content") or ""), encoding="utf-8", newline="")
+            result = upload_tst(local_path, filename, cfg)
+
+        if result.success:
+            store.mark_sftp_delivery(cid, True, result.remote_path)
+            return {
+                "ok": True,
+                "conversion_id": cid,
+                "tst_filename": result.tst_filename,
+                "remote_path": result.remote_path,
+                "file_size": result.file_size,
+                "attempts": result.attempts,
+                "actor": _resolve_actor(req) or "operator",
+            }
+
+        store.mark_sftp_delivery(cid, False, result.error_reason)
+        return JSONResponse(status_code=502, content={"error": result.error_reason})
+    except Exception as exc:
+        log.exception("send-sftp failed for %s", cid)
+        try:
+            from src.file2edi.store import get_store as _gs
+
+            _gs().mark_sftp_delivery(cid, False, str(exc))
+        except Exception:
+            pass
+        return JSONResponse(status_code=500, content={"error": f"Échec envoi SFTP: {exc}"})
+
+
 @app.post("/api/conversions/{cid}/send-sftp")
 def api_send_sftp(cid: str, req: Request):
     """Legacy SFTP endpoint — use /api/orders/{id}/send-sftp instead."""
-    return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/send-sftp"})
+    return _send_generated_edifact_sftp(cid, req)
 
 
 def _upsert_sftp_status(cid: str, sftp_status: str, detail: str = "") -> None:

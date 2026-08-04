@@ -1018,6 +1018,17 @@ class File2EdiStore:
             "content": row["edifact_content"],
         }
 
+    def mark_sftp_delivery(self, order_id: str, ok: bool, detail: str = "") -> None:
+        status = "Envoyé SAP" if ok else "Échec SAP"
+        conn = self._conn()
+        conn.execute(
+            "UPDATE file2edi_orders SET status=?, review_required=?, updated_at=? WHERE order_id=?",
+            [status, 0 if ok else 1, _now(), order_id],
+        )
+        conn.commit()
+        conn.close()
+        self._sync_order_graph(self.load_order_review(order_id))
+
     def load_app_settings(self) -> dict[str, Any]:
         conn = self._conn()
         row = conn.execute(
