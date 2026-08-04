@@ -1051,9 +1051,9 @@ class ProfileLoginPayload(BaseModel):
 
 
 def _profile_login_password() -> str:
-    # Security hardening: no implicit default password.
-    # Local/dev operators must set APP_PROFILE_LOGIN_PASSWORD explicitly.
-    return (os.environ.get("APP_PROFILE_LOGIN_PASSWORD") or "").strip()
+    from src.auth_profile import get_profile_login_password
+
+    return get_profile_login_password()
 
 
 def _configured_profile_login_role(actor: str) -> str:
