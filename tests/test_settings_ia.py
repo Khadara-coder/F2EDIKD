@@ -37,8 +37,9 @@ class FakeSettingsStore:
 def app(tmp_path_factory):
     tmp_path_factory.mktemp("settings")
 
-    # Provide a minimal server stub so the router's `import server as srv`
-    # resolves without loading the real server.py (which needs Databricks env).
+    # Provide a minimal server stub so remaining router `import server as srv`
+    # paths resolve without loading the real server.py.
+    previous = sys.modules.get("server")
     stub = ModuleType("server")
     stub._ensure_admin = MagicMock(return_value=("test-admin@bosch.com", "admin"))
     stub._apply_runtime_databricks_config = MagicMock()
@@ -48,7 +49,11 @@ def app(tmp_path_factory):
 
     application = FastAPI()
     application.include_router(router_mod.create_router(), prefix="/api")
-    return application
+    yield application
+    if previous is not None:
+        sys.modules["server"] = previous
+    else:
+        sys.modules.pop("server", None)
 
 
 @pytest.fixture(scope="module")
@@ -224,7 +229,7 @@ class TestSftpSettings:
             })
             return True, "ok"
 
-        sys.modules["server"]._test_sftp = fake_test_sftp
+        monkeypatch.setattr(router_mod, "test_connection_from_env", fake_test_sftp)
         for key in ("SFTP_HOST", "SFTP_USERNAME", "SFTP_REMOTE_DIR", "SFTP_PORT"):
             monkeypatch.delenv(key, raising=False)
 

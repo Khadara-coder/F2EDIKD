@@ -70,6 +70,9 @@ class FakeStore:
     def load_app_settings(self):
         return {}
 
+    def load_order_review(self, order_id: str):
+        return None
+
     def mark_sftp_delivery(self, order_id: str, ok: bool, detail: str = "") -> None:
         self.delivery_marks.append((order_id, ok, detail))
 
@@ -142,7 +145,7 @@ def test_configured_admin_profile_login_works_without_global_shared_fallback(
     monkeypatch.setattr(server, "ENABLE_PROFILE_LOGIN", True)
     monkeypatch.setattr(server, "_ALLOW_SHARED_PASSWORD_LOGIN", False)
     monkeypatch.setenv("APP_ADMIN_USERS", "dik1dy@bosch.com,dik1dy,khadara")
-    monkeypatch.delenv("APP_PROFILE_LOGIN_PASSWORD", raising=False)
+    monkeypatch.setenv("APP_PROFILE_LOGIN_PASSWORD", "admin123")
 
     response = client.post(
         "/api/auth/login",
@@ -167,7 +170,7 @@ def test_configured_admin_profile_login_resets_existing_postgres_user_password(
     monkeypatch.setattr(server, "ENABLE_PROFILE_LOGIN", True)
     monkeypatch.setattr(server, "_ALLOW_SHARED_PASSWORD_LOGIN", False)
     monkeypatch.setenv("APP_ADMIN_USERS", "existing-admin")
-    monkeypatch.delenv("APP_PROFILE_LOGIN_PASSWORD", raising=False)
+    monkeypatch.setenv("APP_PROFILE_LOGIN_PASSWORD", "admin123")
 
     response = client.post(
         "/api/auth/login",
@@ -215,7 +218,6 @@ def test_sftp_send_routes_upload_generated_edifact(
     monkeypatch.setattr(router_mod, "get_store", lambda: fake_store)
     monkeypatch.setattr(sftp_delivery, "upload_tst", fake_upload_tst)
     monkeypatch.setattr(server, "_APP_REQUIRE_AUTH", False)
-    monkeypatch.setattr(server, "load_conversion", lambda order_id: {})
     monkeypatch.setenv("SFTP_HOST", "sftp.example.test")
     monkeypatch.setenv("SFTP_USERNAME", "sap-user")
     monkeypatch.setenv("SFTP_PASSWORD", "secret")

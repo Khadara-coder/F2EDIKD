@@ -96,3 +96,71 @@ def build_system_health_payload(proxy_health: dict[str, Any]) -> dict[str, Any]:
         "databaseBackend": get_db_backend(),
         "postgresStrict": is_postgres_strict(),
     }
+
+
+def apply_runtime_ai_config(settings_payload: dict[str, Any] | None = None) -> None:
+    """Push persisted AI provider settings into process env for the LLM client."""
+    payload = settings_payload if isinstance(settings_payload, dict) else {}
+    databricks = payload.get("databricksConfig")
+    if not isinstance(databricks, dict):
+        databricks = {}
+
+    ai_provider = str(
+        payload.get("aiProvider") or os.environ.get("F2EDI_LLM_PROVIDER") or "databricks"
+    ).strip().lower()
+    if ai_provider not in {"databricks", "openai", "ollama", "custom"}:
+        ai_provider = "databricks"
+    os.environ["F2EDI_LLM_PROVIDER"] = ai_provider
+
+    mapping = {
+        "host": "DATABRICKS_HOST",
+        "apiBaseUrl": "F2EDI_API_BASE",
+        "modelEndpoint": "DATABRICKS_MODEL_ENDPOINT",
+        "warehouseId": "DATABRICKS_WAREHOUSE_ID",
+        "catalog": "EDIFACT_CATALOG",
+        "schema": "EDIFACT_SCHEMA",
+        "configProfile": "DATABRICKS_CONFIG_PROFILE",
+    }
+    for key, env_name in mapping.items():
+        value = str(databricks.get(key) or "").strip()
+        if value:
+            os.environ[env_name] = value
+
+    openai_cfg = payload.get("openaiConfig")
+    if isinstance(openai_cfg, dict):
+        base_url = str(openai_cfg.get("baseUrl") or "").strip()
+        model = str(openai_cfg.get("model") or "").strip()
+        if base_url:
+            os.environ["OPENAI_BASE_URL"] = base_url
+        if model:
+            os.environ["OPENAI_MODEL"] = model
+
+    ollama_cfg = payload.get("ollamaConfig")
+    if isinstance(ollama_cfg, dict):
+        base_url = str(ollama_cfg.get("baseUrl") or "").strip()
+        model = str(ollama_cfg.get("model") or "").strip()
+        if base_url:
+            os.environ["OLLAMA_BASE_URL"] = base_url
+        if model:
+            os.environ["OLLAMA_MODEL"] = model
+
+    custom_cfg = payload.get("customAiConfig")
+    if isinstance(custom_cfg, dict):
+        cfg_map = {
+            "baseUrl": "CUSTOM_LLM_BASE_URL",
+            "model": "CUSTOM_LLM_MODEL",
+            "chatPath": "CUSTOM_LLM_CHAT_PATH",
+            "authHeader": "CUSTOM_LLM_AUTH_HEADER",
+            "authScheme": "CUSTOM_LLM_AUTH_SCHEME",
+            "customHeaders": "CUSTOM_LLM_EXTRA_HEADERS",
+        }
+        for key, env_name in cfg_map.items():
+            value = str(custom_cfg.get(key) or "").strip()
+            if value:
+                os.environ[env_name] = value
+
+    if "llmEnabled" in databricks:
+        enabled = databricks.get("llmEnabled")
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in {"1", "true", "yes", "on", "y"}
+        os.environ["F2EDI_LLM_ENABLED"] = "1" if enabled else "0"

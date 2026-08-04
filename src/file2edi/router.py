@@ -17,6 +17,12 @@ from .mapper import (
     engine_to_order_review,
 )
 from .store import get_store
+from .request_auth import ensure_admin, resolve_actor, resolve_role
+from src.ai_status import build_system_health_payload
+from src.health_probe import build_proxy_health
+from src.masterdata_runtime import allowed_soldtos_for_actor, payload_for_scope, stats as masterdata_stats
+from src.sftp_delivery import is_configured_from_env, test_connection_from_env
+
 
 DEMO_ORDER_ID = "ord-rexel-026545008"
 
@@ -230,9 +236,8 @@ def create_router() -> APIRouter:
 
         # No users in DB → dev/demo mode: fall back to server actor
         try:
-            import server as srv
-            actor = srv._resolve_actor(req)
-            role = srv._resolve_role(actor)
+            actor = resolve_actor(req)
+            role = resolve_role(actor)
             return {"actor": actor, "displayName": actor, "role": role or "admin", "authenticated": True}
         except Exception:
             return {"actor": "operator", "displayName": "Opérateur", "role": "admin", "authenticated": True}
@@ -328,10 +333,7 @@ def create_router() -> APIRouter:
     @router.get("/health/system")
     def health_system():
         try:
-            import server as srv
-            from src.ai_status import build_system_health_payload
-
-            return build_system_health_payload(srv.api_proxy_health())
+            return build_system_health_payload(build_proxy_health())
         except Exception:
             return {
                 "api": "disconnected",
@@ -344,25 +346,22 @@ def create_router() -> APIRouter:
     # ── Dashboard ───────────────────────────────────────────────────────────
     @router.get("/dashboard/metrics")
     def dashboard_metrics(req: Request):
-        import server as srv
-        actor = srv._resolve_actor(req)
-        role = srv._resolve_role(actor)
+        actor = resolve_actor(req)
+        role = resolve_role(actor)
         orders = _list_combined_orders(actor=actor, role=role)
         return dashboard_metrics_from_db(orders)
 
     @router.get("/orders")
     def list_orders(req: Request):
         """All converted orders for the Revue list page."""
-        import server as srv
-        actor = srv._resolve_actor(req)
-        role = srv._resolve_role(actor)
+        actor = resolve_actor(req)
+        role = resolve_role(actor)
         return [_order_list_item(o) for o in _list_combined_orders(actor=actor, role=role)]
 
     @router.get("/dashboard/review-queue")
     def review_queue(req: Request):
-        import server as srv
-        actor = srv._resolve_actor(req)
-        role = srv._resolve_role(actor)
+        actor = resolve_actor(req)
+        role = resolve_role(actor)
         items: list[dict] = []
         try:
             review_statuses = ("Revue requise", "À revoir", "À vérifier", "Bloqué")
@@ -396,9 +395,8 @@ def create_router() -> APIRouter:
 
     @router.get("/dashboard/recent-conversions")
     def recent_conversions(req: Request):
-        import server as srv
-        actor = srv._resolve_actor(req)
-        role = srv._resolve_role(actor)
+        actor = resolve_actor(req)
+        role = resolve_role(actor)
         out = []
         for o in _list_combined_orders(actor=actor, role=role)[:10]:
             out.append({
@@ -425,8 +423,7 @@ def create_router() -> APIRouter:
         upload_id = f"upl-{uuid.uuid4().hex[:12]}"
         dest = store.intake_dir / f"{upload_id}.pdf"
         dest.write_bytes(payload)
-        import server as srv
-        uploaded_by = srv._resolve_actor(req)
+        uploaded_by = resolve_actor(req)
         meta = store.save_upload_with_id(upload_id, pdf.filename, len(payload), str(dest), uploaded_by=uploaded_by)
         return {"uploadId": meta["uploadId"]}
 
@@ -487,8 +484,7 @@ def create_router() -> APIRouter:
         dest = store.intake_dir / f"{upload_id}.pdf"
         dest.write_bytes(payload)
 
-        import server as srv
-        uploaded_by = srv._resolve_actor(req)
+        uploaded_by = resolve_actor(req)
         meta = store.save_upload_with_id(upload_id, pdf.filename, len(payload), str(dest), uploaded_by=uploaded_by)
 
         result = srv._local_process_and_respond(payload, pdf.filename, actor=uploaded_by)
@@ -679,8 +675,7 @@ def create_router() -> APIRouter:
             fname = result.get("tst_filename") or f"ORDERS_{order_id}.tst"
             content = result.get("edifact_content") or ""
             try:
-                import server as _srv
-                _actor = _srv._resolve_actor(req)
+                _actor = resolve_actor(req)
             except Exception:
                 _actor = "operator"
             store.mark_edifact_generated(order_id, fname, content, actor=_actor)
@@ -692,6 +687,9 @@ def create_router() -> APIRouter:
     @router.post("/orders/{order_id}/send-sftp")
     @router.post("/orders/{order_id}/send-sap")
     async def send_to_sap(order_id: str, payload: dict = Body(default_factory=dict)):
+        import tempfile
+        from src.sftp_delivery import upload_tst
+
         store = get_store()
         export = store.get_edifact_export(order_id)
         if not export:
@@ -701,11 +699,14 @@ def create_router() -> APIRouter:
         _apply_runtime_sftp_config(store.load_app_settings())
 
         try:
-            import server as srv
-
             force_resend = bool((payload or {}).get("force"))
-            conv = srv.load_conversion(order_id) or {}
-            already_sent = str(conv.get("sftp_status") or "").upper() == "SFTP_DELIVERED"
+            already_sent = False
+            try:
+                review = store.load_order_review(order_id) or {}
+                status = str((review.get("order") or {}).get("status") or "").strip()
+                already_sent = status in {"Envoyé SAP", "SFTP_DELIVERED"}
+            except Exception:
+                already_sent = False
             if already_sent and not force_resend:
                 return {
                     "success": False,
@@ -714,32 +715,74 @@ def create_router() -> APIRouter:
                     "message": "Cette commande a déjà été envoyée vers SAP. Confirmez pour renvoyer.",
                 }
 
-            class _FakeRequest:
-                headers: dict[str, str] = {}
-                cookies: dict[str, str] = {}
-
-            res = srv.api_send_sftp(order_id, _FakeRequest())
-            if hasattr(res, "status_code"):
-                body = getattr(res, "body", b"") or b""
-                try:
-                    detail = json.loads(body).get("error", "Échec envoi SFTP")
-                except Exception:
-                    detail = "Échec envoi SFTP"
+            host = (os.environ.get("SFTP_HOST") or "").strip()
+            username = (os.environ.get("SFTP_USERNAME") or "").strip()
+            remote_dir = (os.environ.get("SFTP_REMOTE_DIR") or "").strip()
+            password = os.environ.get("SFTP_PASSWORD") or ""
+            private_key_path = os.environ.get("SFTP_PRIVATE_KEY_PATH") or ""
+            if not host or not username or not remote_dir or not (password or private_key_path):
+                missing = []
+                if not host:
+                    missing.append("SFTP_HOST")
+                if not username:
+                    missing.append("SFTP_USERNAME")
+                if not remote_dir:
+                    missing.append("SFTP_REMOTE_DIR")
+                if not (password or private_key_path):
+                    missing.append("SFTP_PASSWORD or SFTP_PRIVATE_KEY_PATH")
+                detail = f"Configuration SFTP incomplète: {', '.join(missing)}"
+                store.mark_sftp_delivery(order_id, False, detail)
                 return {"success": False, "message": detail}
 
-            if isinstance(res, dict) and res.get("ok"):
-                remote = str(res.get("remote_path") or "")
+            try:
+                port = int(os.environ.get("SFTP_PORT") or "22")
+            except Exception:
+                port = 22
+            try:
+                max_retries = int(os.environ.get("SFTP_MAX_RETRIES") or "3")
+            except Exception:
+                max_retries = 3
+
+            cfg = type("RuntimeSftpConfig", (), {
+                "enabled": True,
+                "host": host,
+                "port": max(1, min(65535, port)),
+                "username": username,
+                "password": password,
+                "private_key_path": private_key_path,
+                "private_key_passphrase": os.environ.get("SFTP_PRIVATE_KEY_PASSPHRASE") or "",
+                "remote_dir": remote_dir,
+                "upload_tmp_suffix": os.environ.get("SFTP_UPLOAD_TMP_SUFFIX") or ".uploading",
+                "verify_after_upload": (os.environ.get("SFTP_VERIFY_AFTER_UPLOAD") or "true").strip().lower()
+                not in {"0", "false", "no", "off"},
+                "max_retries": max(1, max_retries),
+                "keep_local_copy": True,
+            })()
+
+            filename = Path(str(export.get("fileName") or f"ORDERS_{order_id}.tst")).name
+            with tempfile.TemporaryDirectory(prefix="file2edi-sftp-") as tmp_dir:
+                local_path = Path(tmp_dir) / filename
+                local_path.write_text(str(export.get("content") or ""), encoding="utf-8", newline="")
+                result = upload_tst(local_path, filename, cfg)
+
+            if result.success:
+                store.mark_sftp_delivery(order_id, True, result.remote_path)
+                remote = str(result.remote_path or "")
                 return {
                     "success": True,
+                    "ok": True,
                     "alreadySent": already_sent,
                     "message": f"Fichier envoyé vers SAP (SFTP) {remote}".strip(),
+                    "remote_path": remote,
                 }
 
-            if isinstance(res, dict):
-                return {"success": False, "message": str(res.get("error") or "Échec envoi SFTP")}
-
-            return {"success": False, "message": "Échec envoi SFTP"}
+            store.mark_sftp_delivery(order_id, False, result.error_reason)
+            return {"success": False, "message": str(result.error_reason or "Échec envoi SFTP")}
         except Exception as exc:
+            try:
+                store.mark_sftp_delivery(order_id, False, str(exc))
+            except Exception:
+                pass
             return {"success": False, "message": f"Échec envoi SFTP: {exc}"}
 
     @router.get("/orders/{order_id}/edifact")
@@ -766,9 +809,8 @@ def create_router() -> APIRouter:
         page: int = 1,
         pageSize: int = 10,
     ):
-        import server as srv
-        actor = srv._resolve_actor(req)
-        role = srv._resolve_role(actor)
+        actor = resolve_actor(req)
+        role = resolve_role(actor)
         rows_raw = _list_combined_orders(actor=actor, role=role)
         rows = []
         for o in rows_raw:
@@ -816,8 +858,10 @@ def create_router() -> APIRouter:
         limit: int = 100,
     ):
         try:
-            import server as srv
-            return srv._masterdata_payload_for_request(req, type, search, limit)
+            actor = resolve_actor(req)
+            role = resolve_role(actor)
+            allowed = allowed_soldtos_for_actor(actor, role)
+            return payload_for_scope(allowed, type, search, limit)
         except Exception as exc:
             raise HTTPException(500, str(exc)) from exc
 
@@ -825,13 +869,12 @@ def create_router() -> APIRouter:
     @router.get("/settings")
     def get_settings():
         try:
-            import server as srv
-            s = srv.api_settings()
-            h = srv.api_proxy_health()
+            h = build_proxy_health()
             persisted = get_store().load_app_settings()
-            csv_rows = int(s.get("masterdata", {}).get("customers", {}).get("rows", 0) or 0)
+            md = masterdata_stats() or {}
+            csv_rows = int((md.get("customers") or {}).get("rows", 0) or 0)
             return {
-                "ediProfile": s.get("profile", {}).get("name", "ELM_STANDARD"),
+                "ediProfile": "ELM_STANDARD",
                 "standard": "UN/EDIFACT",
                 "version": "D.96A",
                 "defaultIncoterm": persisted.get("defaultIncoterm", "DAP - Delivered At Place"),
@@ -842,7 +885,7 @@ def create_router() -> APIRouter:
                     "apiExtraction": "connected" if h.get("api", {}).get("ok") else "disconnected",
                     "database": "connected" if h.get("database", {}).get("ok") else "disconnected",
                     "csvExport": "connected" if h.get("masterdata", {}).get("ok") and csv_rows > 0 else "disconnected",
-                    "sftp": "connected" if s.get("sftp", {}).get("configured") else "disconnected",
+                    "sftp": "connected" if is_configured_from_env() else "disconnected",
                 },
                 "connectorConfig": persisted.get("connectorConfig", _default_settings().get("connectorConfig", {})),
                 "aiProvider": persisted.get("aiProvider", _default_settings().get("aiProvider", "databricks")),
@@ -878,8 +921,7 @@ def create_router() -> APIRouter:
     @router.put("/settings")
     def put_settings(payload: dict, req: Request):
         try:
-            import server as srv
-            srv._ensure_admin(req)
+            ensure_admin(req)
         except HTTPException:
             raise
         except Exception:
@@ -887,8 +929,9 @@ def create_router() -> APIRouter:
 
         persisted = get_store().save_app_settings(payload or {})
         try:
-            import server as srv
-            srv._apply_runtime_databricks_config(persisted)
+            from src.ai_status import apply_runtime_ai_config
+
+            apply_runtime_ai_config(persisted)
         except Exception:
             pass
         _apply_runtime_sftp_config(persisted)
@@ -916,7 +959,6 @@ def create_router() -> APIRouter:
     @router.post("/settings/test-connector/{connector}")
     def test_connector(connector: str, payload: dict = Body(default_factory=dict)):
         try:
-            import server as srv
             if connector == "sftp":
                 persisted = get_store().load_app_settings()
                 merged_sftp = dict((persisted or {}).get("sftpConfig") or {})
@@ -924,7 +966,7 @@ def create_router() -> APIRouter:
                 if isinstance(incoming_sftp, dict):
                     merged_sftp.update(incoming_sftp)
                 _apply_runtime_sftp_config({"sftpConfig": merged_sftp})
-                ok, msg = srv._test_sftp()
+                ok, msg = test_connection_from_env()
                 return {"status": "connected" if ok else "disconnected", "message": msg}
             if connector == "apiExtraction":
                 configured_base = str(((payload or {}).get("connectorConfig") or {}).get("apiBaseUrl") or "").strip().rstrip("/")
@@ -948,14 +990,14 @@ def create_router() -> APIRouter:
                         "message": f"API extraction indisponible sur {configured_base}",
                     }
 
-                h = srv.api_proxy_health()
+                h = build_proxy_health()
                 ok = bool(h.get("api", {}).get("ok"))
                 return {
                     "status": "connected" if ok else "disconnected",
                     "message": "API extraction locale opérationnelle" if ok else "API extraction indisponible",
                 }
             if connector == "database":
-                h = srv.api_proxy_health()
+                h = build_proxy_health()
                 db = h.get("database", {}) if isinstance(h, dict) else {}
                 ok = bool(db.get("ok"))
                 backend = str(db.get("backend") or "unknown")
@@ -964,7 +1006,7 @@ def create_router() -> APIRouter:
                     "message": f"Backend: {backend}",
                 }
             if connector == "csvExport":
-                stats = srv._masterdata_stats()
+                stats = masterdata_stats()
                 if not isinstance(stats, dict) or not stats:
                     return {"status": "disconnected", "message": "Aucune source CSV chargée"}
                 missing_rows = [name for name, st in stats.items() if int((st or {}).get("rows") or 0) <= 0]
@@ -1118,8 +1160,7 @@ def create_router() -> APIRouter:
     @router.put("/settings/sftp-password")
     def put_sftp_password(payload: dict, req: Request):
         try:
-            import server as srv
-            srv._ensure_admin(req)
+            ensure_admin(req)
         except HTTPException:
             raise
         except Exception:
@@ -1135,8 +1176,7 @@ def create_router() -> APIRouter:
     @router.put("/settings/databricks-token")
     def put_databricks_token(payload: dict, req: Request):
         try:
-            import server as srv
-            srv._ensure_admin(req)
+            ensure_admin(req)
         except HTTPException:
             raise
         except Exception:
@@ -1152,8 +1192,7 @@ def create_router() -> APIRouter:
     @router.put("/settings/ai-token")
     def put_ai_token(payload: dict, req: Request):
         try:
-            import server as srv
-            srv._ensure_admin(req)
+            ensure_admin(req)
         except HTTPException:
             raise
         except Exception:

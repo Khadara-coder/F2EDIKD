@@ -144,70 +144,10 @@ def _runtime_databricks_config() -> dict[str, str]:
 
 
 def _apply_runtime_databricks_config(settings_payload: dict | None = None) -> None:
-    payload = settings_payload or _load_persisted_app_settings()
-    databricks = payload.get("databricksConfig") if isinstance(payload, dict) else None
-    if not isinstance(databricks, dict):
-        databricks = {}
+    from src.ai_status import apply_runtime_ai_config
 
-    ai_provider = str((payload or {}).get("aiProvider") or os.environ.get("F2EDI_LLM_PROVIDER") or "databricks").strip().lower()
-    if ai_provider not in {"databricks", "openai", "ollama", "custom"}:
-        ai_provider = "databricks"
-    os.environ["F2EDI_LLM_PROVIDER"] = ai_provider
-
-    mapping = {
-        "host": "DATABRICKS_HOST",
-        "apiBaseUrl": "F2EDI_API_BASE",
-        "modelEndpoint": "DATABRICKS_MODEL_ENDPOINT",
-        "warehouseId": "DATABRICKS_WAREHOUSE_ID",
-        "catalog": "EDIFACT_CATALOG",
-        "schema": "EDIFACT_SCHEMA",
-        "configProfile": "DATABRICKS_CONFIG_PROFILE",
-    }
-    for key, env_name in mapping.items():
-        value = str(databricks.get(key) or "").strip()
-        if value:
-            os.environ[env_name] = value
-
-    # Provider-specific non-secret runtime config.
-    openai_cfg = payload.get("openaiConfig") if isinstance(payload, dict) else None
-    if isinstance(openai_cfg, dict):
-        base_url = str(openai_cfg.get("baseUrl") or "").strip()
-        model = str(openai_cfg.get("model") or "").strip()
-        if base_url:
-            os.environ["OPENAI_BASE_URL"] = base_url
-        if model:
-            os.environ["OPENAI_MODEL"] = model
-
-    ollama_cfg = payload.get("ollamaConfig") if isinstance(payload, dict) else None
-    if isinstance(ollama_cfg, dict):
-        base_url = str(ollama_cfg.get("baseUrl") or "").strip()
-        model = str(ollama_cfg.get("model") or "").strip()
-        if base_url:
-            os.environ["OLLAMA_BASE_URL"] = base_url
-        if model:
-            os.environ["OLLAMA_MODEL"] = model
-
-    custom_cfg = payload.get("customAiConfig") if isinstance(payload, dict) else None
-    if isinstance(custom_cfg, dict):
-        cfg_map = {
-            "baseUrl": "CUSTOM_LLM_BASE_URL",
-            "model": "CUSTOM_LLM_MODEL",
-            "chatPath": "CUSTOM_LLM_CHAT_PATH",
-            "authHeader": "CUSTOM_LLM_AUTH_HEADER",
-            "authScheme": "CUSTOM_LLM_AUTH_SCHEME",
-            "customHeaders": "CUSTOM_LLM_EXTRA_HEADERS",
-        }
-        for key, env_name in cfg_map.items():
-            value = str(custom_cfg.get(key) or "").strip()
-            if value:
-                os.environ[env_name] = value
-
-    # LLM enable/disable toggle (independent of runtime environment).
-    if "llmEnabled" in databricks:
-        enabled = databricks.get("llmEnabled")
-        if isinstance(enabled, str):
-            enabled = enabled.strip().lower() in {"1", "true", "yes", "on", "y"}
-        os.environ["F2EDI_LLM_ENABLED"] = "1" if enabled else "0"
+    payload = settings_payload if settings_payload is not None else _load_persisted_app_settings()
+    apply_runtime_ai_config(payload)
 
 
 _apply_runtime_databricks_config()
@@ -272,9 +212,9 @@ def _auth_headers() -> dict:
 
 
 def _parse_csv_env(name: str) -> set[str]:
-    """Parse a comma-separated env var into a lowercase set."""
-    raw = os.environ.get(name, "")
-    return {x.strip().lower() for x in raw.split(",") if x.strip()}
+    from src.auth_identity import parse_csv_env
+
+    return parse_csv_env(name)
 
 
 def _parse_secret_env(name: str) -> list[str]:
@@ -291,38 +231,15 @@ def _parse_secret_env(name: str) -> list[str]:
 
 
 def _normalize_actor_identity(value: str | None) -> str:
-    """Normalize actor identifiers for role lookups and persistence."""
-    v = (value or "").strip().strip('"').strip("'")
-    if not v:
-        return ""
-    lower = v.lower()
-    if "@" in v:
-        return v.lower()
-    if "/" in v:
-        tail = v.replace("\\", "/").split("/")[-1].strip()
-        return tail.lower()
-    if lower.startswith("users:"):
-        return lower.split(":", 1)[1].strip()
-    if lower.startswith("user:"):
-        return lower.split(":", 1)[1].strip()
-    return lower
+    from src.auth_identity import normalize_actor_identity
+
+    return normalize_actor_identity(value)
 
 
 def _display_name_from_actor(actor: str) -> str:
-    """Derive a readable first/last name from an email-like actor identifier."""
-    normalized = _normalize_actor_identity(actor)
-    if not normalized:
-        return ""
-    local = normalized.split("@", 1)[0]
-    local = local.replace("users:", "").replace("user:", "")
-    parts = [part for part in re.split(r"[._\-]+", local) if part]
-    if not parts:
-        return normalized
+    from src.auth_identity import display_name_from_actor
 
-    def _titleize(part: str) -> str:
-        return part[:1].upper() + part[1:].lower() if part else ""
-
-    return " ".join(_titleize(part) for part in parts)
+    return display_name_from_actor(actor)
 
 
 def _db_role_override(actor: str) -> str | None:
@@ -536,33 +453,24 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
     return default_actor or "operator"
 
 
-def _actor_folder_name(actor: str | None) -> str:
-    """Normalize actor into a filesystem-safe folder name."""
-    raw = (actor or "").strip().lower()
-    if not raw:
-        return "operator"
-    raw = raw.replace("\\", "/").split("/")[-1]
-    safe = "".join(ch if (ch.isalnum() or ch in ("-", "_", ".")) else "_" for ch in raw)
-    safe = safe.strip("._-")
-    return safe[:80] or "operator"
-
-
 def _resolve_role(actor: str) -> str:
     """Resolve role with the 2-role model: admin or adv.
 
     Legacy vars APP_REVIEW_USERS / APP_READONLY_USERS are treated as adv.
     """
+    from src.auth_identity import resolve_role_from_env
+
     a = _normalize_actor_identity(actor)
     db_role = _db_role_override(a)
     if db_role:
         return db_role
-    if a in _parse_csv_env("APP_ADMIN_USERS"):
-        return "admin"
-    # Keep short-term backward compatibility for existing env configs.
-    legacy_adv = _parse_csv_env("APP_REVIEW_USERS") | _parse_csv_env("APP_READONLY_USERS")
-    if not a or a in legacy_adv:
-        return "adv"
-    return "adv"
+    return resolve_role_from_env(a)
+
+
+def _actor_folder_name(actor: str | None) -> str:
+    from src.auth_identity import actor_folder_name
+
+    return actor_folder_name(actor)
 
 
 def _resolve_role_for_request(actor: str, req: Request | None = None) -> str:
@@ -1326,57 +1234,13 @@ def _store_conversion_history(result: dict) -> None:
 @app.get("/api/proxy/health")
 def api_proxy_health():
     """Health check — fully local.  Always returns top-level ok/status (Issue 1 fix)."""
-    local_md  = _masterdata_stats()   # dict after masterdata refactoring
-    md_sync   = _masterdata_sync_freshness()
-    mc_status = {k: {"rows": v.get("rows",0), "loaded_at": v.get("loaded_at")}
-                 for k, v in MASTERDATA_CACHE.items()}
-    # Fix: iterate dict values, not dict keys (md_ok bug)
-    md_rows_ok   = all(v.get("rows", 0) > 0 for v in local_md.values()) if local_md else False
-    md_schema_ok = all(v.get("schema_valid", True) is not False
-                       for v in local_md.values()) if local_md else True
-    pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
-    db_backend = "postgres"
-    db_ok = False
-    if pg_url:
-        try:
-            import psycopg
-            from src.file2edi.store import _normalize_postgres_url
-            with psycopg.connect(_normalize_postgres_url(pg_url), connect_timeout=2) as _c:
-                _c.execute("SELECT 1").fetchone()
-            db_ok = True
-        except Exception:
-            db_ok = False
-    storage = get_storage_mode()
-    from src.sftp_delivery import is_configured_from_env
+    from src.health_probe import build_proxy_health
 
-    return {
-        # ── Top-level contract (required by frontend) ───────────────────────
-        "ok":     True,
-        "status": "ok",
-        # ── Structured sections ─────────────────────────────────────────────
-        "api":      {"ok": True, "status": "ok", "version": "2.1.0"},
-        "database": {"ok": db_ok, "status": "ok" if db_ok else "ERROR",
-                     "backend": db_backend if pg_url else storage.get("backend", "sqlite")},
-        "masterdata": {
-            "ok": md_rows_ok,
-            "schema_ok": md_schema_ok,
-            "sync": md_sync,
-        },
-        "profile": {
-            "name": "ELM_STANDARD", "syntax": "UNOC:3", "message": "ORDERS D.96A",
-            "sender_gln": UNB_SENDER_GLN, "receiver_gln": UNB_RECEIVER_GLN,
-            "locked": True,
-        },
-        "storage_mode": storage,
-        # ── Legacy flat fields (backward compat) ───────────────────────────
-        "local":           {"status": "ok", "profile": "ELM_STANDARD",
-                            "sender_gln": UNB_SENDER_GLN, "receiver_gln": UNB_RECEIVER_GLN},
-        "db_ok":           db_ok,
-        "sftp_configured": is_configured_from_env(),
-        "f2edi_base":      "local",
-        "mc_status":       mc_status,
-        "masterdata_sync": md_sync,
-    }
+    return build_proxy_health(
+        sender_gln=UNB_SENDER_GLN,
+        receiver_gln=UNB_RECEIVER_GLN,
+        storage_mode=get_storage_mode(),
+    )
 
 
 
