@@ -176,7 +176,7 @@ GenieCommande/
       delivery_address.py     # Résolution adresse livraison
   src/                    # Modules Python (config, SFTP, EDIFACT, matcher…)
     file2edi/
-      store.py            # Persistance SQLite file2edi_order_lines
+      store.py            # Persistance File2EDI (PostgreSQL prioritaire + fallback SQLite)
       mapper.py           # Mapping engine → React API contract
   frontend/               # Interface React + TypeScript + Tailwind
     dist/                 # Build React versionné (prêt à servir)
@@ -186,7 +186,7 @@ GenieCommande/
     masterdata/           # CSV non versionnés (voir data/masterdata/README.md)
     file2edi_schema.sql   # Schéma SQLite file2edi_order_lines
   lookups/                # Tables de correspondance CSV (EAN, fourre-tout…)
-  tests/                  # Suite pytest (265 tests, 28 fichiers)
+  tests/                  # Suite pytest (extraction, matching, EDIFACT, SFTP, RBAC)
   docs/                   # Documentation opérationnelle
   scripts/                # Scripts utilitaires
     migrate_add_fields.py # Migration DB Phase 3
@@ -203,7 +203,7 @@ GenieCommande/
 python -m pytest tests/ -v
 ```
 
-265 tests couvrant extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines.
+La suite couvre extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines.
 
 ```bash
 # Test extraction sur 50 PDFs aléatoires (RAG Purchase Orders)
@@ -229,7 +229,8 @@ Copier `.env.example` → `.env` et renseigner :
 
 | Variable | Rôle | Requis |
 |---|---|---|
-| `PG_DATABASE_URL` | PostgreSQL (si vide : fallback SQLite) | Staging/Prod |
+| `PG_DATABASE_URL` | PostgreSQL principal (fallback SQLite seulement si `FILE2EDI_POSTGRES_STRICT=false`) | Staging/Prod |
+| `FILE2EDI_POSTGRES_STRICT` | `true` = échec au démarrage si PostgreSQL indisponible (recommandé en staging/prod) | Staging/Prod |
 | `SFTP_HOST` / `SFTP_USERNAME` / `SFTP_PASSWORD` | Livraison SFTP | Prod |
 | `DATABRICKS_TOKEN` | Auth HTTP vers Databricks Model Serving | Prod |
 | `DATABRICKS_HOST` | Workspace Databricks qui heberge le LLM | Prod |

@@ -42,31 +42,20 @@
 **Files: `requirements-postgres.txt`, `.env.example`**
 - SQLAlchemy, asyncpg, alembic, psycopg
 
-### Phase 4: Integration (⚠️ Next Steps)
+### Phase 4: Integration (✅ Active)
 
-**What Still Needs Doing:**
+**Current status:**
 
-1. **Update `server.py`** to:
-   - Import `src.database_pg`
-   - Auto-detect `PG_DATABASE_URL` env var
-   - Initialize PostgreSQL schema on startup (if needed)
-   - Fall back gracefully to SQLite if PG unavailable
+1. `server.py` and `src/file2edi/store.py` auto-detect `PG_DATABASE_URL`.
+2. The File2EDI router is already wired to the store interface used by PostgreSQL mode.
+3. Runtime fallback to SQLite still exists for no-config local development.
+4. `FILE2EDI_POSTGRES_STRICT=true` forces fail-fast startup when PostgreSQL is unavailable.
 
-2. **Update `src/file2edi/router.py`** to:
-   - Accept PostgreSQL store interface
-   - Pass `actor`/`role` context to store methods
-   - RLS handles filtering transparently at DB level (zero Python RBAC logic)
+**Remaining hardening tasks (recommended):**
 
-3. **Create compatibility layer** in `src/file2edi/store.py` or new `src/file2edi/store_pg.py`:
-   - Detect if using SQLite or PostgreSQL
-   - Expose same interface to `router.py`
-   - SQLite → PostgreSQL gradual migration (no breaking changes)
-
-4. **Testing**:
-   - Spin up Docker PG locally
-   - Run migration script
-   - Verify RBAC: ADV user cannot see orders outside scope
-   - Verify admin: sees everything
+- Add/extend integration tests that exercise File2EDI endpoints in PostgreSQL mode.
+- Reduce legacy SQLite code paths still used by non-File2EDI areas in `server.py`.
+- Keep documentation aligned with the current dual-mode behavior until full PostgreSQL-only cutover.
 
 ---
 

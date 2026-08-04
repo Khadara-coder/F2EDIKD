@@ -1056,7 +1056,9 @@ class ProfileLoginPayload(BaseModel):
 
 
 def _profile_login_password() -> str:
-    return (os.environ.get("APP_PROFILE_LOGIN_PASSWORD") or "admin123").strip()
+    # Security hardening: no implicit default password.
+    # Local/dev operators must set APP_PROFILE_LOGIN_PASSWORD explicitly.
+    return (os.environ.get("APP_PROFILE_LOGIN_PASSWORD") or "").strip()
 
 
 def _configured_profile_login_role(actor: str) -> str:
@@ -1072,9 +1074,11 @@ def _configured_profile_login_role(actor: str) -> str:
 @app.get("/api/auth/modes")
 def api_auth_modes():
     """Expose available login mechanisms for the login page."""
+    profile_password_configured = bool(_profile_login_password())
     return {
         "api_key_enabled": bool(_api_key_values()),
-        "profile_login_enabled": ENABLE_PROFILE_LOGIN,
+        "profile_login_enabled": ENABLE_PROFILE_LOGIN and profile_password_configured,
+        "profile_login_configured": profile_password_configured,
         "workspace_sso_available": True,
         "allowed_roles": ["admin", "adv"],
     }
@@ -1109,8 +1113,14 @@ async def api_auth_login(req: Request):
     except Exception as _e:
         log.debug("api_auth_login: PG auth failed: %s", _e)
 
-    configured_role = _configured_profile_login_role(username)
     expected_password = _profile_login_password()
+    if ENABLE_PROFILE_LOGIN and not expected_password:
+        raise HTTPException(
+            status_code=503,
+            detail="Connexion profil indisponible: APP_PROFILE_LOGIN_PASSWORD non configuré",
+        )
+
+    configured_role = _configured_profile_login_role(username)
     if ENABLE_PROFILE_LOGIN and configured_role and expected_password and hmac.compare_digest(password, expected_password):
         try:
             from src.file2edi.store import get_store as _gs
@@ -1548,11 +1558,15 @@ def api_health_alias():
     Format: {api, database, csv, sftp} avec valeurs 'connected'|'disconnected'.
     """
     h = api_proxy_health()
+    db_backend = _get_db_backend()
+    pg_strict = os.environ.get("FILE2EDI_POSTGRES_STRICT", "false").strip().lower() in {"1", "true", "yes", "on"}
     return {
         "api":      "connected" if h.get("api", {}).get("ok") else "disconnected",
         "database": "connected" if h.get("database", {}).get("ok") else "disconnected",
         "csv":      "connected" if h.get("masterdata", {}).get("ok") else "disconnected",
         "sftp":     "connected" if h.get("sftp_configured") else "disconnected",
+        "databaseBackend": db_backend,
+        "postgresStrict": pg_strict,
     }
 
 
