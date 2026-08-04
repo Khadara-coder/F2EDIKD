@@ -40,6 +40,9 @@ logs/
 
 # Large master data (bundled/downloaded at deploy)
 data/masterdata/*.csv
+data/masterdata/.masterdata_sync_metadata.json
+data/masterdata.previous/
+data/.masterdata_repo_cache/
 
 # Sample / uploaded PDFs
 *.pdf
