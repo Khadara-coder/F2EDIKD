@@ -205,7 +205,7 @@ def _detect_databricks_runtime() -> bool:
                 "DATABRICKS_RUNTIME_VERSION", "DB_IS_DRIVER"):
         if os.environ.get(var):
             return True
-    # Databricks Apps mount code under /Workspace or expose FUSE volumes
+    # Legacy Databricks runtimes may mount code under /Workspace and expose FUSE volumes.
     return os.path.isdir("/Volumes") and os.path.isdir("/databricks")
 
 
@@ -214,7 +214,8 @@ IS_LOCAL = not IS_DATABRICKS
 # Optional dev identity so local runs mirror the Databricks SSO actor/role flow
 # (respects APP_ADMIN_USERS / APP_REVIEW_USERS RBAC instead of bypassing it).
 DEV_ACTOR = (os.environ.get("DEV_ACTOR") or "").strip().lower()
-_profile_login_default = "false" if IS_DATABRICKS else "true"
+# Shared-password profile login is legacy and insecure; keep disabled by default.
+_profile_login_default = "false"
 ENABLE_PROFILE_LOGIN = os.environ.get("ENABLE_PROFILE_LOGIN", _profile_login_default).strip().lower() in {
     "1", "true", "yes", "on"
 }
@@ -222,6 +223,9 @@ SESSION_COOKIE_NAME = "f2edi_profile_session"
 LOCAL_LOGOUT_COOKIE_NAME = "f2edi_force_login"
 SESSION_TTL_SECONDS = int(os.environ.get("PROFILE_SESSION_TTL_SECONDS", "28800") or "28800")
 _PROFILE_SESSIONS: dict[str, dict] = {}
+_ALLOW_SHARED_PASSWORD_LOGIN = os.environ.get("ALLOW_SHARED_PASSWORD_LOGIN", "false").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 log.info("environment: %s (databricks=%s dev_actor=%s)",
          "DATABRICKS" if IS_DATABRICKS else "LOCAL", IS_DATABRICKS, DEV_ACTOR or "-")
 
@@ -464,12 +468,28 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
     if actor_session:
         return actor_session
 
+    # Primary auth session from PostgreSQL-backed user login.
+    try:
+        if req is not None:
+            db_session_id = (req.cookies.get("f2edi_session") or "").strip()
+            if db_session_id:
+                from src.file2edi.store import get_store as _gs
+                db_user = _gs().get_session_user(db_session_id)
+                if db_user and db_user.get("username"):
+                    return _normalize_actor_identity(str(db_user.get("username") or ""))
+    except Exception:
+        pass
+
     actor_hdr = _extract_actor_from_request(req)
     if actor_hdr:
         return actor_hdr
 
     if _api_key_authenticated(req):
         return _api_key_actor()
+
+    # If auth is enforced, do not allow implicit identity fallback.
+    if _APP_REQUIRE_AUTH:
+        return ""
 
     # Local explicit logout: do not silently re-authenticate via DEV_ACTOR.
     if _local_logout_forced(req):
@@ -481,8 +501,6 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
         return DEV_ACTOR
 
     default_actor = _normalize_actor_identity(os.environ.get("DEFAULT_APP_ACTOR", "operator"))
-    if _APP_REQUIRE_AUTH:
-        return ""
     return default_actor or "operator"
 
 
@@ -744,7 +762,7 @@ def _apply_masterdata_sync_metadata_to_cache_state() -> None:
 def _download_workspace_file(ws_path: str, dst_path: Path) -> None:
     """Download a single workspace file via the Databricks REST API.
 
-    Inside Databricks Apps containers the /Workspace FUSE mount is not
+    Inside legacy Databricks-hosted containers the /Workspace FUSE mount is not
     available, so we fall back to the HTTP export endpoint which works
     on every platform as long as the app SP has CAN_READ on the file.
 
@@ -983,9 +1001,9 @@ def _get_db_backend() -> str:
         pass
     return "sqlite"
 
-# Auth defaults to ON in Databricks (SSO proxy present) and OFF locally unless
-# a DEV_ACTOR is provided, so `uvicorn server:app` just works on a dev machine.
-_auth_default = "true" if (IS_DATABRICKS or DEV_ACTOR) else "false"
+# Auth defaults to ON everywhere. Set APP_REQUIRE_AUTH=false explicitly only for
+# local troubleshooting sessions.
+_auth_default = "true"
 _APP_REQUIRE_AUTH = os.environ.get("APP_REQUIRE_AUTH", _auth_default).strip().lower() in {"1", "true", "yes", "on"}
 _PUBLIC_API_PATHS = {
     "/api/health",
@@ -1063,8 +1081,8 @@ async def api_auth_login(req: Request):
     except Exception as _e:
         log.debug("api_auth_login: PG auth failed: %s", _e)
 
-    # Fallback: legacy profile login (single shared password)
-    if not ENABLE_PROFILE_LOGIN:
+    # Fallback: legacy shared-password login (opt-in only)
+    if not (ENABLE_PROFILE_LOGIN and _ALLOW_SHARED_PASSWORD_LOGIN):
         raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect")
     expected_password = _profile_login_password()
     if expected_password and hmac.compare_digest(password, expected_password):

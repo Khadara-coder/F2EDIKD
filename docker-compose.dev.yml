@@ -33,8 +33,9 @@ services:
       - .env.local
     environment:
       MOCK_MODE: "true"
-      ENABLE_PROFILE_LOGIN: "true"
-      APP_REQUIRE_AUTH: "false"
+      ENABLE_PROFILE_LOGIN: "false"
+      ALLOW_SHARED_PASSWORD_LOGIN: "false"
+      APP_REQUIRE_AUTH: "true"
       TESSERACT_LANG: "fra+eng"
       PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
       MASTERDATA_SOURCE_DIR: /app/data/masterdata
