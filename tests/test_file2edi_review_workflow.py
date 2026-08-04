@@ -103,6 +103,33 @@ def test_engine_review_flags_invalid_line_delivery_date():
     )
 
 
+def test_global_confidence_is_capped_by_line_quality():
+    result = {
+        "status": "OK",
+        "filename": "order.pdf",
+        "pdf_hash": "hash-weak-line",
+        "order": {"po_number": "PO-123", "order_date": "2026-08-04"},
+        "customer": {"soldto": "15019903", "shipto": "15019903", "name": "Client Test", "confidence": 100},
+        "lines": {
+            "items": [
+                {
+                    "code_article": "7735500779",
+                    "description": "BALLON ECS",
+                    "quantite": 1,
+                    "prix_unitaire_ht": "",
+                    "montant_ligne_ht": "",
+                }
+            ]
+        },
+    }
+
+    review = engine_to_order_review("hash-weak-line", "upl-1", result)
+
+    assert review["order"]["globalConfidence"] == 70
+    assert review["order"]["status"] == "Revue requise"
+    assert review["lines"][0]["confidence"] == 70
+
+
 def test_manual_line_update_invalidates_generated_edifact_and_tracks_corrections(tmp_path):
     store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
     order_id = "ord-workflow"
