@@ -551,7 +551,8 @@ def test_prolians_guided_pipeline_detects_50180_without_shipto_match():
     assert validated["Statut"] == "Validee master data"
     assert validated.get("Strategie matching") == "adresse_soldto_facturation"
     assert validated.get("Livraison egale facturation SOLDTO") == "oui"
-    assert not validated.get("SHIPTO")
+    assert validated["SOLDTO"] == "15014088"
+    assert validated["SHIPTO"] == "15014088"
 
 
 def test_extract_delivery_address_spaced_postal(monkeypatch, tmp_path):

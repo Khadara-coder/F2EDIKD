@@ -1126,6 +1126,19 @@ def _check_password(plain: str, hashed: str) -> bool:
         return False
 
 
+def _row_value(row: Any, key: str, default: Any = None) -> Any:
+    if row is None:
+        return default
+    if isinstance(row, dict):
+        return row.get(key, default)
+    try:
+        if key in row.keys():
+            return row[key]
+    except Exception:
+        pass
+    return default
+
+
 class PostgresFile2EdiStore(File2EdiStore):
     """PostgreSQL-backed implementation of the File2EDI store contract."""
 
@@ -1411,7 +1424,8 @@ def _users_mixin(cls):
                     email: str = "", sap_id: str = "", role: str = "adv") -> dict:
         user_id = f"usr-{uuid.uuid4().hex[:12]}"
         pw_hash = _hash_password(password)
-        role = role.strip().lower() if role in ("adv", "admin") else "adv"
+        role = role.strip().lower()
+        role = role if role in ("adv", "admin") else "adv"
         conn = self._conn()
         sap_norm = sap_id.strip()
         if sap_norm:
@@ -1438,7 +1452,7 @@ def _users_mixin(cls):
     def verify_credentials(self, username: str, password: str) -> dict | None:
         conn = self._conn()
         row = conn.execute(
-            "SELECT user_id,username,display_name,password_hash FROM file2edi_users "
+            "SELECT user_id,username,display_name,email,sap_id,role,password_hash FROM file2edi_users "
             "WHERE username=? AND is_active=1",
             [username.strip().lower()],
         ).fetchone()
@@ -1449,9 +1463,9 @@ def _users_mixin(cls):
             return None
         return {"userId": row["user_id"], "username": row["username"],
                 "displayName": row["display_name"],
-                "email": row.get("email") or "",
-                "sapId": row.get("sap_id") or "",
-                "role": row.get("role") or "adv"}
+                "email": _row_value(row, "email", "") or "",
+                "sapId": _row_value(row, "sap_id", "") or "",
+                "role": _row_value(row, "role", "adv") or "adv"}
 
     def create_session(self, user_id: str, ip: str | None = None) -> str:
         import secrets
@@ -1483,7 +1497,7 @@ def _users_mixin(cls):
             return None  # expired
         return {"userId": row["user_id"], "username": row["username"],
                 "displayName": row["display_name"],
-                "role": row.get("role") or "adv"}
+                "role": _row_value(row, "role", "adv") or "adv"}
 
     def invalidate_session(self, session_id: str) -> None:
         conn = self._conn()
@@ -1499,9 +1513,9 @@ def _users_mixin(cls):
         conn.close()
         return [{"userId": r["user_id"], "username": r["username"],
                  "displayName": r["display_name"],
-                 "email": r.get("email") or "",
-                 "sapId": r.get("sap_id") or "",
-                 "role": r.get("role") or "adv",
+                 "email": _row_value(r, "email", "") or "",
+                 "sapId": _row_value(r, "sap_id", "") or "",
+                 "role": _row_value(r, "role", "adv") or "adv",
                  "createdAt": r["created_at"]} for r in rows]
 
     def delete_user(self, user_id: str) -> bool:
@@ -1560,9 +1574,9 @@ def _users_mixin(cls):
             return None
         return {"userId": row["user_id"], "username": row["username"],
                 "displayName": row["display_name"],
-                "email": row.get("email") or "",
-                "sapId": row.get("sap_id") or "",
-                "role": row.get("role") or "adv",
+                "email": _row_value(row, "email", "") or "",
+                "sapId": _row_value(row, "sap_id", "") or "",
+                "role": _row_value(row, "role", "adv") or "adv",
                 "createdAt": row["created_at"]}
 
     def hold_order(self, order_id: str, reason: str, actor: str) -> dict | None:
@@ -1623,7 +1637,7 @@ def _users_mixin(cls):
     return cls
 
 
-# Apply user management methods to PostgresFile2EdiStore
+# Apply user management methods to the PostgreSQL-backed store.
 _users_mixin(PostgresFile2EdiStore)
 
 
@@ -1635,21 +1649,8 @@ def get_store() -> File2EdiStore:
         app_root = Path(__file__).resolve().parents[2]
         pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
         intake = os.environ.get("INTAKE_DIR", str(app_root / "data" / "intake"))
-        if pg_url:
-            try:
-                _store = PostgresFile2EdiStore(pg_url, intake)
-                _log.info("File2EDI store backend: PostgreSQL")
-                return _store
-            except Exception as exc:
-                if os.environ.get("FILE2EDI_POSTGRES_STRICT", "false").strip().lower() in {"1", "true", "yes", "on"}:
-                    raise
-                _log.warning("PostgreSQL store unavailable, falling back to SQLite: %s", exc)
-        db = os.environ.get(
-            "FILE2EDI_DB_PATH",
-            os.environ.get("DB_PATH", str(app_root / "data" / "file2edi.db")),
-        )
-        if db.endswith("edifact_standalone.db"):
-            db = str(app_root / "data" / "file2edi.db")
-        _store = File2EdiStore(db, intake)
-        _log.info("File2EDI store backend: SQLite at %s", db)
+        if not pg_url:
+            raise RuntimeError("PG_DATABASE_URL is required; SQLite fallback is disabled")
+        _store = PostgresFile2EdiStore(pg_url, intake)
+        _log.info("File2EDI store backend: PostgreSQL")
     return _store

@@ -1,39 +1,36 @@
-# GenieCommande — Build & Deploy
+# GenieCommande - Build & Deploy
 
-## Workflow de branches
+## Workflow
 
+```text
+dev  ->  staging  ->  main
+ |         |          |
+local     VM Azure   VM Azure
+          pre-prod   prod
 ```
-dev  ──PR──▶  staging  ──PR──▶  main
- │               │                │
-local          VM Azure        Databricks Apps
-               (ce serveur)    (production)
-```
 
----
+Databricks n'heberge plus l'application. La VM Azure execute l'application avec
+Docker Compose et PostgreSQL. Databricks reste un fournisseur externe pour:
 
-## 1. Développement local
+- Model Serving LLM, appele en HTTP par l'API;
+- la source amont des masterdata, si la synchronisation CSV utilise le repo
+  masterdata gere cote Databricks/GitHub.
 
-### Avec Docker Compose (recommandé)
+## Local
 
 ```bash
 git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git
 cd GenieCommande
 git checkout dev
-cp .env.example .env    # renseigner les valeurs
+cp .env.example .env
 docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-- UI : http://localhost:8080
-- API health : http://localhost:8080/api/health/system
-- PostgreSQL tourne dans le même compose (`edifact-postgres:5432`)
-- `MOCK_MODE=true` → aucun envoi SFTP réel
+- UI: http://localhost:8080
+- API health: http://localhost:8080/api/health/system
+- PostgreSQL tourne dans le compose.
 
-Arrêter :
-```bash
-docker compose -f docker-compose.file2edi.yml down
-```
-
-### Sans Docker (Python natif)
+Sans Docker:
 
 ```bash
 pip install -r requirements.txt -r requirements-postgres.txt
@@ -41,162 +38,96 @@ cd frontend && npm install && npm run build && cd ..
 uvicorn server:app --host 0.0.0.0 --port 8000
 ```
 
-### Dev hot-reload frontend
+## Staging VM
 
 ```bash
-# Terminal 1
-uvicorn server:app --reload --port 8000
-
-# Terminal 2
-cd frontend && npm run dev
-```
-
-Frontend dev server proxy `/api` → :8000 — accès sur http://localhost:5173
-
----
-
-## 2. Staging (VM Azure)
-
-La VM Azure est le serveur de validation pré-prod. On y déploie la branche `staging`.
-
-### Premier déploiement
-
-```bash
-# Sur la VM
-git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git /root/GenieCommande
 cd /root/GenieCommande
+git fetch origin
 git checkout staging
-cp .env.example .env
-# Renseigner .env avec les vraies valeurs staging
+git pull origin staging
 docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-### Mise à jour staging (après merge PR dev → staging)
-
-```bash
-git -C /root/GenieCommande fetch origin
-git -C /root/GenieCommande checkout staging
-git -C /root/GenieCommande pull origin staging
-docker compose -f docker-compose.file2edi.yml up --build -d
-```
-
-### Vérifier l'état
+Verification:
 
 ```bash
 docker compose -f docker-compose.file2edi.yml ps
 docker compose -f docker-compose.file2edi.yml logs file2edi --tail 50
+curl http://127.0.0.1:8080/api/health/system
 ```
 
----
+## Production VM
 
-## 3. Production — Databricks Apps
-
-### Architecture
-
-```
-React SPA (frontend/dist)
-    ↓  servi par server.py
-FastAPI server.py :8000
-    ├── /api/*           → src/file2edi/router.py
-    ├── /api/proxy/*     → moteur extraction local
-    ├── /api/conversions → workflow revue / SFTP / email
-    └── persistence      → PostgreSQL (RLS) ▶ SQLite (fallback)
-```
-
-### Déploiement
-
-Après merge PR `staging → main` sur GitHub :
-
-1. Dans le workspace Databricks, ouvrir un terminal sur l'app `file2edi` :
+Apres merge `staging -> main`:
 
 ```bash
+cd /root/GenieCommande
+git fetch origin
+git checkout main
 git pull origin main
+docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-2. Redémarrer l'app depuis l'interface Databricks Apps (ou via CLI) :
+Verification:
 
 ```bash
-databricks apps restart file2edi
+curl http://127.0.0.1:8080/api/health/system
+curl http://127.0.0.1:8080/api/proxy/health
 ```
 
-3. Vérifier le healthcheck :
+## Variables Requises
 
-```bash
-curl https://file2edi-5555213114570927.7.azure.databricksapps.com/api/health/system
+```env
+PG_DATABASE_URL=postgresql+psycopg://edifact:<password>@postgres:5432/edifact
+FILE2EDI_POSTGRES_STRICT=true
+
+F2EDI_LLM_PROVIDER=databricks
+F2EDI_LLM_ENABLED=1
+DATABRICKS_HOST=https://<workspace>.azuredatabricks.net
+DATABRICKS_MODEL_ENDPOINT=<serving-endpoint>
+DATABRICKS_TOKEN=<token-service>
+
+APP_REQUIRE_AUTH=true
+APP_API_KEYS=<secret-n8n>
+APP_API_ACTOR=n8n
+APP_API_ROLE=adv
+
+SFTP_ENABLED=true
+SFTP_HOST=<host>
+SFTP_USERNAME=<user>
+SFTP_PASSWORD=<secret>
+SFTP_REMOTE_DIR=<remote-dir>
 ```
 
-### Chemins Unity Catalog requis en production
+Le fallback `DATABRICKS_CONFIG_PROFILE` est reserve au developpement local
+quand aucun token n'est fourni. En VM, preferer un secret `DATABRICKS_TOKEN`.
 
-| Variable | Chemin |
-|---|---|
-| Masterdata source | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/` |
-| PDF storage | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf/` |
-| SQLite fallback | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db` |
-| Outbox | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox/` |
-| Logs | `/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs/` |
+## Sync Masterdata
 
-### Grants UC requis
-
-```sql
-GRANT CREATE, USAGE ON SCHEMA hive_metastore.file2edi TO `<service-principal-app>`;
-```
-
-### Sync masterdata quotidienne (job Databricks)
+Exemple de job quotidien sur la VM:
 
 ```bash
 python scripts/sync_masterdata_repo.py \
-    --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
-    --branch main \
-    --target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
-    --notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync \
-    --notify-api-key "$APP_API_KEY"
+  --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
+  --branch main \
+  --target-dir /root/GenieCommande/data/masterdata/ \
+  --notify-api-url http://127.0.0.1:8080/api/masterdata/sync \
+  --notify-api-key "$APP_API_KEY"
 ```
 
----
-
-## 4. Tiers de persistance
-
-| Tier | Variable | Durabilité |
-|------|----------|------------|
-| 1 — PostgreSQL + RLS | `PG_DATABASE_URL` | Production / Staging |
-| 2 — SQLite | `DB_PATH` sur UC Volume | Fallback automatique si PG absent |
-
-Si `PG_DATABASE_URL` est vide ou inaccessible, l'app bascule silencieusement sur SQLite.
-
----
-
-## 5. Build frontend seul
-
-Nécessaire uniquement si tu modifies le frontend avant de builder l'image Docker :
+Verifier ensuite:
 
 ```bash
-cd frontend
-npm install
-npm run build
-# frontend/dist/ est versionné → commiter le résultat
+curl http://127.0.0.1:8080/api/masterdata/stats
+curl http://127.0.0.1:8080/api/health/system
 ```
 
----
+## Persistence
 
-## 6. Endpoints API
+| Tier | Variable | Usage |
+|---|---|---|
+| PostgreSQL | `PG_DATABASE_URL` | Staging/production |
+| SQLite | `DB_PATH` | Debug local uniquement |
 
-| Appel frontend | Route backend |
-|---|---|
-| `getSystemHealth()` | `GET /api/health/system` |
-| `getDashboardMetrics()` | `GET /api/dashboard/metrics` |
-| `uploadPdf()` | `POST /api/upload` |
-| `launchExtractionJob()` | `POST /api/upload/{id}/extract` |
-| `getOrderReview()` | `GET /api/orders/{id}/review` |
-| `generateEdifact()` | `POST /api/orders/{id}/generate-edifact` |
-| `getHistory()` | `GET /api/conversions/history` |
-| `getMasterData()` | `GET /api/master-data` |
-| `getSettings()` | `GET /api/settings` |
-
----
-
-## 7. Règles métier
-
-- Confiance globale < 90 % → `review_required = true`
-- Anomalie bloquante ouverte → génération bloquée
-- Génération appelle `api_generate()` → `src/edifact_builder.py`
-- Profil UNB verrouillé : ELM_STANDARD uniquement
+En production, garder `FILE2EDI_POSTGRES_STRICT=true` pour eviter de demarrer
+silencieusement en SQLite si Postgres est indisponible.

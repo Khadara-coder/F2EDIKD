@@ -117,6 +117,40 @@ def _parse_custom_headers(raw: str) -> dict[str, str]:
     return headers
 
 
+def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
+    """Apply SFTP settings to runtime env used by legacy send/test helpers."""
+    if not isinstance(settings_payload, dict):
+        return
+    sftp = settings_payload.get("sftpConfig")
+    if not isinstance(sftp, dict):
+        return
+
+    host = str(sftp.get("host") or "").strip()
+    username = str(sftp.get("username") or "").strip()
+    remote = str(sftp.get("remotePath") or "").strip()
+
+    if host:
+        os.environ["SFTP_HOST"] = host
+    else:
+        os.environ.pop("SFTP_HOST", None)
+
+    if username:
+        os.environ["SFTP_USERNAME"] = username
+    else:
+        os.environ.pop("SFTP_USERNAME", None)
+
+    if remote:
+        os.environ["SFTP_REMOTE_DIR"] = remote
+    else:
+        os.environ.pop("SFTP_REMOTE_DIR", None)
+
+    try:
+        port = int(sftp.get("port") or 22)
+    except (TypeError, ValueError):
+        port = 22
+    os.environ["SFTP_PORT"] = str(max(1, min(65535, port)))
+
+
 def create_router() -> APIRouter:
     router = APIRouter(tags=["file2edi"])
 
@@ -289,37 +323,6 @@ def create_router() -> APIRouter:
         if not result:
             raise HTTPException(404)
         return {"ok": True, "status": "Transféré", "to": to_username}
-
-        if not isinstance(settings_payload, dict):
-            return
-        sftp = settings_payload.get("sftpConfig")
-        if not isinstance(sftp, dict):
-            return
-
-        host = str(sftp.get("host") or "").strip()
-        user = str(sftp.get("username") or "").strip()
-        remote = str(sftp.get("remotePath") or "").strip()
-
-        if host:
-            os.environ["SFTP_HOST"] = host
-        else:
-            os.environ.pop("SFTP_HOST", None)
-
-        if user:
-            os.environ["SFTP_USERNAME"] = user
-        else:
-            os.environ.pop("SFTP_USERNAME", None)
-
-        if remote:
-            os.environ["SFTP_REMOTE_DIR"] = remote
-        else:
-            os.environ.pop("SFTP_REMOTE_DIR", None)
-
-        try:
-            port = int(sftp.get("port") or 22)
-        except (TypeError, ValueError):
-            port = 22
-        os.environ["SFTP_PORT"] = str(max(1, min(65535, port)))
 
     # ── Health (React Header badges) ─────────────────────────────────────────
     @router.get("/health/system")
@@ -986,7 +989,10 @@ def create_router() -> APIRouter:
 
         try:
             if provider == "databricks":
-                host = str((payload or {}).get("host") or _os.environ.get("DATABRICKS_HOST", "")).strip().rstrip("/")
+                if isinstance(payload, dict) and "host" in payload:
+                    host = str(payload.get("host") or "").strip().rstrip("/")
+                else:
+                    host = str(_os.environ.get("DATABRICKS_HOST", "")).strip().rstrip("/")
                 target = host
                 token = str((payload or {}).get("token") or _os.environ.get("DATABRICKS_TOKEN", "")).strip()
                 endpoint = str(

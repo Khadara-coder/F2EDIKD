@@ -31,6 +31,10 @@ DATABRICKS_TOKEN=dapi...
 DATABRICKS_MODEL_ENDPOINT=databricks-gpt-oss-120b
 ```
 
+En VM/staging/prod, preferer `DATABRICKS_TOKEN`. Le fallback
+`DATABRICKS_CONFIG_PROFILE` via `databricks-sdk` est reserve au developpement
+local quand un profil CLI Databricks est deja authentifie.
+
 ### Interface admin
 
 Aller dans **Paramètres → Intelligence artificielle** pour :
@@ -44,7 +48,7 @@ POST {DATABRICKS_HOST}/serving-endpoints/{MODEL_ENDPOINT}/invocations
 Authorization: Bearer {DATABRICKS_TOKEN}
 ```
 
-Aucune dépendance `mlflow` n'est requise.
+Aucune dependance `mlflow` n'est requise.
 
 ---
 

@@ -16,26 +16,38 @@ pytest.importorskip("fastapi", reason="fastapi not installed")
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from src.file2edi.router import create_router
+import src.file2edi.router as router_mod
+
+
+class FakeSettingsStore:
+    def __init__(self):
+        self.settings: dict = {}
+
+    def load_app_settings(self) -> dict:
+        return dict(self.settings)
+
+    def save_app_settings(self, payload: dict) -> dict:
+        self.settings.update(payload or {})
+        return dict(self.settings)
 
 
 # ── App fixture ───────────────────────────────────────────────────────────────
 
 @pytest.fixture(scope="module")
 def app(tmp_path_factory):
-    import os
-    tmp = tmp_path_factory.mktemp("db")
-    os.environ["FILE2EDI_DB_PATH"] = str(tmp / "test_settings.db")
+    tmp_path_factory.mktemp("settings")
 
     # Provide a minimal server stub so the router's `import server as srv`
     # resolves without loading the real server.py (which needs Databricks env).
     stub = ModuleType("server")
     stub._ensure_admin = MagicMock(return_value=("test-admin@bosch.com", "admin"))
     stub._apply_runtime_databricks_config = MagicMock()
-    sys.modules.setdefault("server", stub)
+    stub._test_sftp = MagicMock(return_value=(True, "ok"))
+    sys.modules["server"] = stub
+    router_mod.get_store = lambda: FakeSettingsStore()
 
     application = FastAPI()
-    application.include_router(create_router(), prefix="/api")
+    application.include_router(router_mod.create_router(), prefix="/api")
     return application
 
 
@@ -174,6 +186,65 @@ class TestDatabricksToken:
     def test_whitespace_only_rejected(self, client):
         resp = client.put("/api/settings/databricks-token", json={"token": "   "})
         assert resp.status_code == 400
+
+
+class TestSftpSettings:
+    def test_put_settings_applies_sftp_runtime_env(self, client, monkeypatch):
+        import os
+
+        for key in ("SFTP_HOST", "SFTP_USERNAME", "SFTP_REMOTE_DIR", "SFTP_PORT"):
+            monkeypatch.delenv(key, raising=False)
+
+        resp = client.put("/api/settings", json={
+            "sftpConfig": {
+                "host": "sftp.example.test",
+                "port": 2222,
+                "username": "sap-user",
+                "remotePath": "/inbox/edi",
+            }
+        })
+
+        assert resp.status_code == 200
+        assert os.environ.get("SFTP_HOST") == "sftp.example.test"
+        assert os.environ.get("SFTP_USERNAME") == "sap-user"
+        assert os.environ.get("SFTP_REMOTE_DIR") == "/inbox/edi"
+        assert os.environ.get("SFTP_PORT") == "2222"
+
+    def test_sftp_connector_test_applies_incoming_config_before_test(self, client, monkeypatch):
+        import os
+
+        captured = {}
+
+        def fake_test_sftp():
+            captured.update({
+                "host": os.environ.get("SFTP_HOST"),
+                "username": os.environ.get("SFTP_USERNAME"),
+                "remote": os.environ.get("SFTP_REMOTE_DIR"),
+                "port": os.environ.get("SFTP_PORT"),
+            })
+            return True, "ok"
+
+        sys.modules["server"]._test_sftp = fake_test_sftp
+        for key in ("SFTP_HOST", "SFTP_USERNAME", "SFTP_REMOTE_DIR", "SFTP_PORT"):
+            monkeypatch.delenv(key, raising=False)
+
+        resp = client.post("/api/settings/test-connector/sftp", json={
+            "sftpConfig": {
+                "host": "sftp.preview.test",
+                "port": "2201",
+                "username": "preview-user",
+                "remotePath": "/preview",
+            }
+        })
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "connected"
+        assert captured == {
+            "host": "sftp.preview.test",
+            "username": "preview-user",
+            "remote": "/preview",
+            "port": "2201",
+        }
 
 
 def test_postgres_url_normalization_accepts_sqlalchemy_driver():

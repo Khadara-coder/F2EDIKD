@@ -38,8 +38,9 @@ export function Sidebar() {
   });
   const reviewCount = queue?.length ?? 0;
   const role = me?.role ?? "adv";
+  const displayName = me?.displayName || me?.username || me?.actor || "Utilisateur";
   const visibleNavItems = navItems.filter((item) => hasAtLeastRole(role, item.minRole));
-  const initials = (me?.actor || "OP")
+  const initials = displayName
     .split(/[\s@._-]+/)
     .filter(Boolean)
     .slice(0, 2)
@@ -123,7 +124,7 @@ export function Sidebar() {
             {initials}
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-white">{me?.actor || "adv"}</p>
+            <p className="truncate text-sm font-medium text-white">{displayName}</p>
             <p className="text-xs text-slate-400">{role.toUpperCase()} · Genie Commande</p>
           </div>
           <button

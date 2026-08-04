@@ -27,8 +27,10 @@ env:
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/outbox"
   - name: LOG_DIR
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/logs"
-  - name: DB_PATH
-    value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/database/edifact_standalone.db"
+  - name: PG_DATABASE_URL
+    value: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
+  - name: FILE2EDI_POSTGRES_STRICT
+    value: "true"
   - name: INTAKE_DIR
     value: "/Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/pdf"
   - name: PDF_STORAGE_DIR

@@ -95,10 +95,16 @@ L'etat actuel du code est le suivant:
 Variables a definir dans `.env.vm`:
 
 ```env
+PG_DATABASE_URL=postgresql+psycopg://edifact:<password>@postgres:5432/edifact
+FILE2EDI_POSTGRES_STRICT=true
 APP_REQUIRE_AUTH=true
 APP_API_KEYS=change-me-in-vm
 APP_API_ACTOR=n8n
 APP_API_ROLE=adv
+F2EDI_LLM_PROVIDER=databricks
+DATABRICKS_HOST=https://<workspace>.azuredatabricks.net
+DATABRICKS_MODEL_ENDPOINT=<serving-endpoint>
+DATABRICKS_TOKEN=<token-service>
 ```
 
 Comportement:

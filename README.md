@@ -11,15 +11,15 @@ Application **File2EDI** (React + FastAPI) et moteur Python de génération EDIF
 ```
 dev  ──PR──▶  staging  ──PR──▶  main
  │               │                │
-local          VM Azure        Databricks Apps
-               (ce serveur)    (production)
+local          VM Azure        VM Azure
+               (pre-prod)      (prod)
 ```
 
 | Branche | Rôle | Déploiement |
 |---------|------|-------------|
 | `dev` | Développement quotidien | Local (`docker compose`) |
 | `staging` | Validation pré-prod | VM Azure (`docker compose`) |
-| `main` | Production | Databricks Apps |
+| `main` | Production | VM Azure (`docker compose`) |
 
 ### Cloner et démarrer en local
 
@@ -52,11 +52,11 @@ git -C /root/GenieCommande checkout staging
 docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-### Passer en production (Databricks Apps)
+### Passer en production (VM Azure)
 
 ```bash
 # PR staging → main sur GitHub, merger
-# Databricks : git pull origin main, puis redéployer l'app
+# Sur la VM prod : git pull origin main, puis relancer docker compose
 ```
 
 ---
@@ -192,7 +192,7 @@ GenieCommande/
     migrate_add_fields.py # Migration DB Phase 3
     backfill_new_fields.py # Backfill historique Phase 3
     test_random_pdfs.py   # Test extraction sur N PDFs aléatoires
-  databricks/             # Configuration déploiement Databricks Apps
+  databricks/             # Role Databricks: Model Serving + masterdata
 ```
 
 ---
@@ -231,8 +231,9 @@ Copier `.env.example` → `.env` et renseigner :
 |---|---|---|
 | `PG_DATABASE_URL` | PostgreSQL (si vide : fallback SQLite) | Staging/Prod |
 | `SFTP_HOST` / `SFTP_USERNAME` / `SFTP_PASSWORD` | Livraison SFTP | Prod |
-| `DATABRICKS_TOKEN` | Auth Databricks Apps | Prod |
-| `DATABRICKS_SERVER_HOSTNAME` | Workspace Databricks | Prod |
+| `DATABRICKS_TOKEN` | Auth HTTP vers Databricks Model Serving | Prod |
+| `DATABRICKS_HOST` | Workspace Databricks qui heberge le LLM | Prod |
+| `DATABRICKS_MODEL_ENDPOINT` | Endpoint Model Serving utilise pour l'extraction | Prod |
 | `APP_ADMIN_USERS` | Emails admins séparés par virgule | Tous |
 | `MOCK_MODE` | `true` = pas d'envoi SFTP réel | Dev/Staging |
 
@@ -293,14 +294,14 @@ docker compose exec api python scripts/backfill_new_fields.py
 
 | Doc | Contenu |
 |-----|---------|
-| [docs/FILE2EDI_DEPLOYMENT.md](docs/FILE2EDI_DEPLOYMENT.md) | Build, Docker, Databricks Apps |
+| [docs/FILE2EDI_DEPLOYMENT.md](docs/FILE2EDI_DEPLOYMENT.md) | Build, Docker, VM Azure |
 | [docs/RUN_ME.md](docs/RUN_ME.md) | Référence CLI moteur batch |
 | [docs/N8N_API_INTEGRATION.md](docs/N8N_API_INTEGRATION.md) | Runbook VM Azure + n8n |
 | [docs/SFTP_DELIVERY.md](docs/SFTP_DELIVERY.md) | Livraison SFTP détaillée |
 | [docs/POSTGRES_QUICKSTART.md](docs/POSTGRES_QUICKSTART.md) | PostgreSQL local + RBAC |
 | [docs/SUPPORT_GUIDE.md](docs/SUPPORT_GUIDE.md) | Opérations quotidiennes + codes erreur |
 | [docs/UAT_CHECKLIST.md](docs/UAT_CHECKLIST.md) | Checklist recette fonctionnelle |
-| [databricks/README.md](databricks/README.md) | Déploiement Databricks Apps |
+| [databricks/README.md](databricks/README.md) | Role Databricks: Model Serving + masterdata |
 
 ---
 

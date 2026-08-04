@@ -1,7 +1,7 @@
 """AI-powered order line extraction.
 
 Ported from FILE2EDI app/engines/llm_orderlines.py; uses src.llm_client
-instead of a local mlflow.deployments init.
+for direct HTTP calls to the configured LLM provider.
 
 Business rules (from Esker documentation):
 - Article numbers are Bosch seller codes, e.g. 7736901359, EL 7716010683

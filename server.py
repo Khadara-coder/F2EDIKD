@@ -348,6 +348,25 @@ def _profile_session_role(req: Request | None) -> str:
     return role if role in {"admin", "adv"} else ""
 
 
+def _db_session_user(req: Request | None) -> dict | None:
+    """Return the PostgreSQL-backed File2EDI session user, if valid."""
+    if req is None:
+        return None
+    session_id = (req.cookies.get("f2edi_session") or "").strip()
+    if not session_id:
+        return None
+    try:
+        from src.file2edi.store import get_store as _gs
+
+        return _gs().get_session_user(session_id)
+    except Exception:
+        return None
+
+
+def _db_session_cookie_present(req: Request | None) -> bool:
+    return bool(req is not None and (req.cookies.get("f2edi_session") or "").strip())
+
+
 def _local_logout_forced(req: Request | None) -> bool:
     """True when user explicitly logged out from local profile UI.
 
@@ -469,16 +488,11 @@ def _resolve_actor(req: Request | None = None, payload: dict | None = None) -> s
         return actor_session
 
     # Primary auth session from PostgreSQL-backed user login.
-    try:
-        if req is not None:
-            db_session_id = (req.cookies.get("f2edi_session") or "").strip()
-            if db_session_id:
-                from src.file2edi.store import get_store as _gs
-                db_user = _gs().get_session_user(db_session_id)
-                if db_user and db_user.get("username"):
-                    return _normalize_actor_identity(str(db_user.get("username") or ""))
-    except Exception:
-        pass
+    db_user = _db_session_user(req)
+    if db_user and db_user.get("username"):
+        return _normalize_actor_identity(str(db_user.get("username") or ""))
+    if _db_session_cookie_present(req):
+        return ""
 
     actor_hdr = _extract_actor_from_request(req)
     if actor_hdr:
@@ -538,6 +552,10 @@ def _resolve_role_for_request(actor: str, req: Request | None = None) -> str:
     session_role = _profile_session_role(req)
     if session_role:
         return session_role
+    db_user = _db_session_user(req)
+    if db_user:
+        db_role = str(db_user.get("role") or "adv").strip().lower()
+        return db_role if db_role in {"admin", "adv"} else "adv"
     if _api_key_authenticated(req):
         return _api_key_role()
     return _resolve_role(actor)
@@ -945,21 +963,20 @@ def _test_sftp() -> tuple[bool, str]:
 
 # ── PostgreSQL initialization (if available) ──────────────────────────────────
 async def _init_postgres_db() -> None:
-    """Initialize PostgreSQL database on startup if PG_DATABASE_URL is set."""
+    """Initialize PostgreSQL database on startup."""
     pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
     if not pg_url:
-        log.info("PostgreSQL not configured (PG_DATABASE_URL not set) — using SQLite")
-        return
-    
+        raise RuntimeError("PG_DATABASE_URL is required; SQLite fallback is disabled")
+
     try:
         from database_pg import get_db
         db = get_db()
         await db.init_db()
         log.info("✅ PostgreSQL database initialized with RLS policies")
     except ImportError:
-        log.warning("PostgreSQL support not installed (sqlalchemy not available) — using SQLite")
+        raise RuntimeError("PostgreSQL support not installed; install requirements-postgres.txt")
     except Exception as e:
-        log.error(f"Failed to initialize PostgreSQL: {e} — falling back to SQLite")
+        raise RuntimeError(f"Failed to initialize PostgreSQL: {e}") from e
 
 
 # ── FastAPI app ────────────────────────────────────────────────────────────────
@@ -1042,6 +1059,16 @@ def _profile_login_password() -> str:
     return (os.environ.get("APP_PROFILE_LOGIN_PASSWORD") or "admin123").strip()
 
 
+def _configured_profile_login_role(actor: str) -> str:
+    normalized = _normalize_actor_identity(actor)
+    if normalized in _parse_csv_env("APP_ADMIN_USERS"):
+        return "admin"
+    legacy_adv = _parse_csv_env("APP_REVIEW_USERS") | _parse_csv_env("APP_READONLY_USERS")
+    if normalized in legacy_adv:
+        return "adv"
+    return ""
+
+
 @app.get("/api/auth/modes")
 def api_auth_modes():
     """Expose available login mechanisms for the login page."""
@@ -1070,9 +1097,10 @@ async def api_auth_login(req: Request):
     # Try PostgreSQL user store first
     try:
         from src.file2edi.store import get_store as _gs
-        user = _gs().verify_credentials(username, password)
+        store = _gs()
+        user = store.verify_credentials(username, password)
         if user:
-            session_id = _gs().create_session(user["userId"], ip=req.client.host if req.client else None)
+            session_id = store.create_session(user["userId"], ip=req.client.host if req.client else None)
             resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"],
                                  "role": user.get("role", "adv"), "email": user.get("email", ""),
                                  "sapId": user.get("sapId", "")})
@@ -1081,14 +1109,55 @@ async def api_auth_login(req: Request):
     except Exception as _e:
         log.debug("api_auth_login: PG auth failed: %s", _e)
 
-    # Fallback: legacy shared-password login (opt-in only)
-    if not (ENABLE_PROFILE_LOGIN and _ALLOW_SHARED_PASSWORD_LOGIN):
-        raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect")
+    configured_role = _configured_profile_login_role(username)
     expected_password = _profile_login_password()
-    if expected_password and hmac.compare_digest(password, expected_password):
+    if ENABLE_PROFILE_LOGIN and configured_role and expected_password and hmac.compare_digest(password, expected_password):
+        try:
+            from src.file2edi.store import get_store as _gs
+
+            store = _gs()
+            try:
+                user = store.create_user(
+                    username=username,
+                    display_name=_display_name_from_actor(username) or username,
+                    password=password,
+                    email=username if "@" in username else "",
+                    role=configured_role,
+                )
+            except Exception:
+                normalized_username = _normalize_actor_identity(username)
+                existing = next(
+                    (
+                        item for item in store.list_users()
+                        if _normalize_actor_identity(str(item.get("username") or "")) == normalized_username
+                    ),
+                    None,
+                )
+                if not existing:
+                    raise
+                store.change_password(existing["userId"], password)
+                if existing.get("role") != configured_role:
+                    updated = store.update_user(existing["userId"], role=configured_role)
+                    if updated:
+                        existing = updated
+                user = existing
+            session_id = store.create_session(user["userId"], ip=req.client.host if req.client else None)
+            resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"],
+                                 "role": user.get("role", "adv"), "email": user.get("email", ""),
+                                 "sapId": user.get("sapId", "")})
+            resp.set_cookie("f2edi_session", session_id, httponly=True, samesite="lax", max_age=43200, path="/")
+            return resp
+        except Exception as _e:
+            log.debug("api_auth_login: PG bootstrap failed: %s", _e)
+
+    # Fallback: legacy shared-password login for arbitrary actors remains opt-in only.
+    if not (ENABLE_PROFILE_LOGIN and (configured_role or _ALLOW_SHARED_PASSWORD_LOGIN)):
+        raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect")
+    if _ALLOW_SHARED_PASSWORD_LOGIN and expected_password and hmac.compare_digest(password, expected_password):
         token = uuid.uuid4().hex
         now_ts = int(datetime.now(timezone.utc).timestamp())
         role = (body.get("role") or "admin").strip().lower()
+        role = role if role in {"admin", "adv"} else "adv"
         _PROFILE_SESSIONS[token] = {"actor": username, "role": role, "exp": now_ts + SESSION_TTL_SECONDS}
         resp = JSONResponse({"ok": True, "actor": username, "displayName": username, "role": role})
         resp.set_cookie(key=SESSION_COOKIE_NAME, value=token, max_age=SESSION_TTL_SECONDS,
@@ -1103,8 +1172,17 @@ def api_auth_logout(req: Request):
     token = (req.cookies.get(SESSION_COOKIE_NAME) or "").strip()
     if token:
         _PROFILE_SESSIONS.pop(token, None)
+    db_session_id = (req.cookies.get("f2edi_session") or "").strip()
+    if db_session_id:
+        try:
+            from src.file2edi.store import get_store as _gs
+
+            _gs().invalidate_session(db_session_id)
+        except Exception:
+            pass
     resp = JSONResponse({"ok": True})
     resp.delete_cookie(SESSION_COOKIE_NAME, path="/")
+    resp.delete_cookie("f2edi_session", path="/")
     # Local explicit logout marker to block DEV_ACTOR fallback until next login.
     resp.set_cookie(
         key=LOCAL_LOGOUT_COOKIE_NAME,
@@ -1374,22 +1452,15 @@ def api_proxy_health():
     md_schema_ok = all(v.get("schema_valid", True) is not False
                        for v in local_md.values()) if local_md else True
     pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
-    db_backend = "postgres" if pg_url else "sqlite"
-    db_ok = True
+    db_backend = "postgres"
+    db_ok = False
     if pg_url:
         try:
             import psycopg
             from src.file2edi.store import _normalize_postgres_url
             with psycopg.connect(_normalize_postgres_url(pg_url), connect_timeout=2) as _c:
                 _c.execute("SELECT 1").fetchone()
-        except Exception:
-            db_ok = False
-    else:
-        try:
-            import sqlite3 as _sq2
-            _c = _sq2.connect(DB_PATH, timeout=1)
-            _c.execute("SELECT 1").fetchone()
-            _c.close()
+            db_ok = True
         except Exception:
             db_ok = False
     storage = get_storage_mode()
@@ -1488,10 +1559,31 @@ def api_health_alias():
 @app.get("/api/me")
 def api_me(req: Request):
     """Return resolved actor + role for profile-aware UI routing."""
+    db_cookie_present = _db_session_cookie_present(req)
+    db_user = _db_session_user(req)
+    if db_user:
+        role = str(db_user.get("role") or "adv").strip().lower()
+        if role not in {"admin", "adv"}:
+            role = "adv"
+        username = str(db_user.get("username") or "").strip().lower()
+        display_name = str(db_user.get("displayName") or db_user.get("display_name") or username).strip()
+        return {
+            "actor": username,
+            "username": username,
+            "displayName": display_name,
+            "role": role,
+            "authenticated": True,
+        }
+    if db_cookie_present:
+        return {"actor": "", "username": "", "displayName": "", "role": "adv", "authenticated": False}
+
     actor = _resolve_actor(req)
     authenticated = (not _APP_REQUIRE_AUTH) or bool(actor)
+    username = actor.split("@", 1)[0] if actor else ""
     return {
         "actor": actor,
+        "username": username,
+        "displayName": _display_name_from_actor(actor) if actor else "",
         "role": _resolve_role_for_request(actor, req),
         "authenticated": authenticated,
     }

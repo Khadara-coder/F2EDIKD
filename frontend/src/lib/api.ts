@@ -39,11 +39,12 @@ export class ApiError extends Error {
 
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    credentials: options?.credentials ?? "include",
     headers: {
       "Content-Type": "application/json",
       ...options?.headers,
     },
-    ...options,
   });
   if (!res.ok) {
     const text = await res.text();
@@ -159,7 +160,11 @@ export const api = {
   uploadPdf: async (file: File) => {
     const form = new FormData();
     form.append("pdf", file);
-    const res = await fetch(`${API_BASE}/upload`, { method: "POST", body: form });
+    const res = await fetch(`${API_BASE}/upload`, {
+      method: "POST",
+      body: form,
+      credentials: "include",
+    });
     if (!res.ok) {
       const body = await res.json().catch(() => ({}));
       const detail = body.detail ?? body.message;
@@ -199,12 +204,16 @@ export const api = {
     }),
 
   searchCustomers: (q: string, limit = 20) =>
-    fetch(`${MD_API_BASE}/customers/search?q=${encodeURIComponent(q)}&limit=${limit}`).then(
+    fetch(`${MD_API_BASE}/customers/search?q=${encodeURIComponent(q)}&limit=${limit}`, {
+      credentials: "include",
+    }).then(
       (res) => res.json() as Promise<{ results: MasterDataCustomerRow[] }>,
     ),
 
   searchPartners: (q: string, limit = 20) =>
-    fetch(`${MD_API_BASE}/partners/search?q=${encodeURIComponent(q)}&limit=${limit}`).then(
+    fetch(`${MD_API_BASE}/partners/search?q=${encodeURIComponent(q)}&limit=${limit}`, {
+      credentials: "include",
+    }).then(
       (res) => res.json() as Promise<{ results: MasterDataPartnerRow[] }>,
     ),
 

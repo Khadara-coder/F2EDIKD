@@ -44,6 +44,7 @@ services:
       LOG_DIR: /app/data/logs
       INTAKE_DIR: /app/data/intake
       PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
+      FILE2EDI_POSTGRES_STRICT: "true"
       # Databricks (production — set in .env)
       DATABRICKS_SERVER_HOSTNAME: ${DATABRICKS_SERVER_HOSTNAME:-}
       DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
