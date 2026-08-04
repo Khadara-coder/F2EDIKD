@@ -78,6 +78,24 @@ try:
     )
 except Exception:
     MASTERDATA_STALE_HOURS = 25
+
+# Bind masterdata runtime paths (extracted module)
+from src import masterdata_runtime as _mdr
+_mdr.configure(
+    runtime_dir=MASTER_DATA_RUNTIME,
+    source_dir=MASTER_DATA_SRC,
+    metadata_path=MASTERDATA_SYNC_METADATA_PATH,
+    metadata_filename=MASTERDATA_SYNC_METADATA_FILENAME,
+    stale_hours=MASTERDATA_STALE_HOURS,
+)
+MASTERDATA_CACHE = _mdr.CACHE
+_MD_FILES = _mdr.MD_FILES
+_MD_SEARCH_COLS = _mdr.MD_SEARCH_COLS
+_MD_REQUIRED_COLS = _mdr.MD_REQUIRED_COLS
+_MD_SOURCE = _mdr.MD_SOURCE
+_MD_LAST_SYNC = _mdr.MD_LAST_SYNC
+_MASTER_FILES = _mdr.MASTER_FILES
+
 OUTBOX_DIR = _ensure_dir(
     os.environ.get("OUTBOX_DIR", str(APP_ROOT / "data" / "outbox")),
     "outbox",
@@ -698,83 +716,21 @@ def _load_history() -> list[list]:
 
 
 # ── Master data helpers ────────────────────────────────────────────────────────
-_MASTER_FILES = [
-    "10564_Customers.csv", "10564_Partners.csv",
-    "10564_Materials.csv", "DB_Salesorder.csv",
-]
-
 
 def _read_masterdata_sync_metadata() -> dict:
-    """Read sync metadata from runtime/source locations if available."""
-    candidates = [
-        Path(MASTERDATA_SYNC_METADATA_PATH),
-        Path(MASTER_DATA_RUNTIME) / MASTERDATA_SYNC_METADATA_FILENAME,
-        Path(MASTER_DATA_SRC) / MASTERDATA_SYNC_METADATA_FILENAME,
-    ]
-    seen: set[str] = set()
-    for p in candidates:
-        k = str(p)
-        if k in seen:
-            continue
-        seen.add(k)
-        if not p.exists() or not p.is_file():
-            continue
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(data, dict):
-                data["_metadata_path"] = str(p)
-                return data
-        except Exception as exc:
-            log.warning("masterdata sync metadata parse failed (%s): %s", p, exc)
-    return {}
+    return _mdr.read_sync_metadata()
 
 
 def _masterdata_sync_freshness() -> dict:
-    """Return metadata + freshness state for production daily sync visibility."""
-    meta = _read_masterdata_sync_metadata()
-    sync_at = str(meta.get("synced_at_utc") or meta.get("synced_at") or "").strip()
-    age_hours: float | None = None
-    stale = None
-    if sync_at:
-        try:
-            sync_dt = datetime.fromisoformat(sync_at.replace("Z", "+00:00"))
-            age_hours = round(
-                (datetime.now(timezone.utc) - sync_dt.astimezone(timezone.utc)).total_seconds() / 3600,
-                2,
-            )
-            stale = age_hours > float(MASTERDATA_STALE_HOURS)
-        except Exception:
-            stale = None
-    if not sync_at:
-        status = "unknown"
-    elif stale is True:
-        status = "stale"
-    elif stale is False:
-        status = "fresh"
-    else:
-        status = "unknown"
-    return {
-        "status": status,
-        "stale": stale,
-        "stale_after_hours": MASTERDATA_STALE_HOURS,
-        "synced_at_utc": sync_at or None,
-        "age_hours": age_hours,
-        "repo_url": meta.get("repo_url"),
-        "branch": meta.get("branch"),
-        "commit": meta.get("commit"),
-        "files": meta.get("files") if isinstance(meta.get("files"), dict) else {},
-        "metadata_path": meta.get("_metadata_path"),
-    }
+    return _mdr.sync_freshness()
 
 
 def _apply_masterdata_sync_metadata_to_cache_state() -> None:
-    """Mark cache source as workspace-synced when metadata exists."""
-    meta = _read_masterdata_sync_metadata()
-    sync_at = str(meta.get("synced_at_utc") or meta.get("synced_at") or "").strip()
-    if not sync_at:
-        return
-    for key in _MD_FILES:
-        _MD_LAST_SYNC.setdefault(key, sync_at)
+    _mdr.apply_sync_metadata_to_cache_state()
+
+
+def _masterdata_stats() -> dict:
+    return _mdr.stats()
 
 
 def _download_workspace_file(ws_path: str, dst_path: Path) -> None:
@@ -803,73 +759,6 @@ def _download_workspace_file(ws_path: str, dst_path: Path) -> None:
     with open(dst_path, "wb") as fh:
         for chunk in resp.iter_content(chunk_size=65_536):
             fh.write(chunk)
-
-
-def _masterdata_stats() -> dict:
-    """Return rich per-file status dict using in-memory cache (Req 3).
-    Falls back to a quick disk check if cache is empty (startup race condition).
-    """
-    result: dict[str, dict] = {}
-    for key, fname in _MD_FILES.items():
-        entry = MASTERDATA_CACHE.get(key)
-        if entry and (entry.get("rows", 0) > 0 or entry.get("error")):
-            # Status derivation from cache
-            if entry.get("error") and not entry.get("rows", 0):
-                status = "ERROR"
-            elif entry.get("rows", 0) == 0:
-                status = "EMPTY"
-            elif entry.get("schema_valid") is False:
-                status = "SCHEMA_INVALID"
-            else:
-                status = "OK"
-            result[key] = {
-                "file":             fname,
-                "status":           status,
-                "rows":             entry.get("rows", 0),
-                "required_columns": entry.get("required_columns", _MD_REQUIRED_COLS.get(key, [])),
-                "present_columns":  entry.get("present_columns", []),
-                "missing_columns":  entry.get("missing_columns", []),
-                "source":           entry.get("source", "bundled"),
-                "loaded_at":        entry.get("loaded_at"),
-                "file_size_kb":     entry.get("file_size_kb", 0.0),
-                "schema_valid":     entry.get("schema_valid"),
-                "warnings":         entry.get("warnings", []),
-            }
-        else:
-            # Disk fallback (cache not yet loaded)
-            fp = Path(MASTER_DATA_RUNTIME) / fname
-            if not fp.exists():
-                result[key] = {
-                    "file": fname, "status": "MISSING", "rows": 0,
-                    "required_columns": _MD_REQUIRED_COLS.get(key, []),
-                    "present_columns": [], "missing_columns": _MD_REQUIRED_COLS.get(key, []),
-                    "source": "error", "loaded_at": None, "file_size_kb": 0.0,
-                    "schema_valid": False,
-                    "warnings": [f"Fichier introuvable: {fp}"],
-                }
-            else:
-                try:
-                    with open(fp, encoding="utf-8-sig", errors="replace") as fh:
-                        n = sum(1 for _ in fh) - 1
-                    result[key] = {
-                        "file": fname, "status": "OK" if n > 0 else "EMPTY",
-                        "rows": max(0, n),
-                        "required_columns": _MD_REQUIRED_COLS.get(key, []),
-                        "present_columns": [], "missing_columns": [],
-                        "source": "bundled", "loaded_at": None,
-                        "file_size_kb": round(fp.stat().st_size / 1024, 1),
-                        "schema_valid": None,
-                        "warnings": ["Cache non chargé — rechargement recommandé."],
-                    }
-                except Exception as exc:
-                    result[key] = {
-                        "file": fname, "status": "ERROR", "rows": 0,
-                        "required_columns": _MD_REQUIRED_COLS.get(key, []),
-                        "present_columns": [], "missing_columns": [],
-                        "source": "error", "loaded_at": None, "file_size_kb": 0.0,
-                        "schema_valid": False, "warnings": [str(exc)],
-                    }
-    return result
 
 
 def _sync_masterdata() -> list[list]:
@@ -1237,6 +1126,41 @@ def _f2edi_build_raw_address(addr: dict) -> str:
     return ", ".join(parts)
 
 
+def _f2edi_line_confidence(lignes: dict, montants: dict | None = None) -> int:
+    items = lignes.get("lignes") or []
+    if not items:
+        return 0
+    scores: list[int] = []
+    for item in items:
+        score = 100
+        if not (item.get("code_article") or item.get("Article Bosch")):
+            score -= 45
+        if not item.get("quantite"):
+            score -= 25
+        if not item.get("prix_unitaire_ht"):
+            score -= 20
+        if not item.get("montant_ligne_ht"):
+            score -= 10
+        if not (item.get("description") or item.get("Designation")):
+            score -= 5
+        scores.append(max(0, score))
+    line_score = int(round(sum(scores) / len(scores)))
+
+    total_lignes = lignes.get("total_lignes_ht")
+    total_doc = (montants or {}).get("Total HT") if isinstance(montants, dict) else None
+    try:
+        from src.edifact_builder import format_decimal
+        line_total = float(format_decimal(total_lignes) or 0)
+        doc_total = float(format_decimal(total_doc) or 0)
+    except Exception:
+        line_total = doc_total = 0
+    if line_total > 0 and doc_total > 0:
+        delta = abs(line_total - doc_total)
+        if delta > max(1.0, doc_total * 0.02):
+            line_score = min(line_score, 75)
+    return max(0, min(100, line_score))
+
+
 def _f2edi_build_response(structured: dict, filename: str,
                            pdf_hash: str, elapsed: float,
                            cached: bool = False) -> dict:
@@ -1247,12 +1171,18 @@ def _f2edi_build_response(structured: dict, filename: str,
     rej    = structured.get("rejets", {})
     edi    = structured.get("edifact", {})
     lignes = structured.get("lignes_commande", {})
+    montants = structured.get("montants", {})
+    customer_confidence = int(adr.get("Confiance", 0) or 0)
+    line_confidence = _f2edi_line_confidence(lignes, montants)
+    global_confidence = min(customer_confidence, line_confidence if line_confidence > 0 else 0)
     return {
         "status": "OK",
         "filename": filename,
         "pdf_hash": pdf_hash,
         "cached": cached,
         "processing_time_s": round(elapsed, 1),
+        "confidence": global_confidence,
+        "line_confidence": line_confidence,
         "order": {
             "po_number":     doc.get("Numero de commande"),
             "order_date":    doc.get("Date commande LLM"),
@@ -1262,10 +1192,10 @@ def _f2edi_build_response(structured: dict, filename: str,
             "soldto":    adr.get("SOLDTO"),
             "shipto":    adr.get("SHIPTO"),
             "name":      adr.get("Nom"),
-            "confidence": adr.get("Confiance", 0),
+            "confidence": customer_confidence,
             "soldto_confidence": 90 if adr.get("SOLDTO") != adr.get("SHIPTO")
-                                    else adr.get("Confiance", 0),
-            "shipto_confidence": adr.get("Confiance", 0),
+                                    else customer_confidence,
+            "shipto_confidence": customer_confidence,
             "shipto_score":      adr.get("shipto_score", 0),
             "scoring_decision":  adr.get("scoring_decision", ""),
             "disambiguation":    adr.get("Disambiguation", ""),
@@ -1291,6 +1221,7 @@ def _f2edi_build_response(structured: dict, filename: str,
         },
         "lines": {
             "count": lignes.get("nb_lignes", 0),
+            "confidence": line_confidence,
             "items": lignes.get("lignes", []),
         },
         "rejection": {
@@ -3628,568 +3559,97 @@ REJECT_LABELS = {
 
 
 def _csv_search(csv_name: str, q: str, cols: list[str], limit: int = 50) -> list[dict]:
-    """Full-text search across specified columns in a bundled masterdata CSV."""
-    q_lo = q.strip().lower()
-    results = []
-    try:
-        fpath = os.path.join(MASTER_DATA_RUNTIME, csv_name)
-        with open(fpath, encoding="utf-8", newline="") as f:
-            reader = _csv.DictReader(f, delimiter=";")
-            for row in reader:
-                haystack = " ".join(str(row.get(c,"")) for c in cols).lower()
-                if not q_lo or q_lo in haystack:
-                    results.append(dict(row))
-                    if len(results) >= limit:
-                        break
-    except Exception as e:
-        log.warning("_csv_search(%s): %s", csv_name, e)
-    return results
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  MASTERDATA IN-MEMORY CACHE  (pandas DataFrames — loaded once at startup)
-#  Priority 2 fix: replaces CSV-file-per-call with in-memory search
-# ══════════════════════════════════════════════════════════════════════════════
-import threading as _threading
-
-# {name: {"df": DataFrame | None, "rows": int, "loaded_at": str, "error": str|None}}
-MASTERDATA_CACHE: dict = {}
-_MC_LOCK = _threading.Lock()
-
-_MD_FILES = {
-    "customers":   "10564_Customers.csv",
-    "partners":    "10564_Partners.csv",
-    "materials":   "10564_Materials.csv",
-    "salesorders": "DB_Salesorder.csv",
-}
-
-_MD_SEARCH_COLS = {
-    "customers":   ["SOLDTO","NAME","ORT01","PSTLZ","STRAS","LAND1","VAT_NR"],
-    "partners":    ["SOLDTO","SHIPTO","NAME","ORT01","PSTLZ","STRAS","PARVW"],
-    "materials":   ["MATNR","MAKTX"],
-    "salesorders": ["BSTNK","VBELN","KUNNR","ERDAT","BSTDK","ERNAM"],
-}
-
-# Required columns for schema validation per file (Req 3+6)
-_MD_REQUIRED_COLS: dict[str, list[str]] = {
-    "customers":   ["SOLDTO","NAME","ORT01","PSTLZ","STRAS","LAND1","VAT_NR"],
-    "partners":    ["SOLDTO","SHIPTO","LAND1","NAME","ORT01","PSTLZ","STRAS","PARVW"],
-    "materials":   ["MATNR","MAKTX"],
-    "salesorders": ["VBELN","ERDAT","ERNAM","BSTNK","BSTDK","KUNNR"],
-}
-
-# Source type per key — updated by _load_masterdata_cache (Req 5)
-_MD_SOURCE: dict[str, str] = {}     # "bundled" | "workspace" | "fallback" | "error"
-_MD_LAST_SYNC: dict[str, str] = {}  # key → ISO timestamp of last successful workspace sync
+    return _mdr.csv_search(csv_name, q, cols, limit)
 
 
 def _load_masterdata_cache() -> dict:
-    """Load all masterdata CSVs into DataFrames with schema validation and source tracking.
-
-    Source priority per Req 5:
-      Tier A — workspace-synced (same path; _MD_LAST_SYNC records the sync timestamp)
-      Tier B — bundled CSV present at MASTER_DATA_RUNTIME
-      Tier C — previous in-memory entry kept when reload fails
-      Tier D — error entry, never fake success
-    """
-    import datetime as _dt
-    try:
-        import pandas as _pd
-    except ImportError:
-        log.warning("pandas not available — masterdata cache disabled")
-        return {"error": "pandas not available"}
-
-    with _MC_LOCK:
-        for key, fname in _MD_FILES.items():
-            fpath      = Path(MASTER_DATA_RUNTIME) / fname
-            src_type   = "workspace" if key in _MD_LAST_SYNC else "bundled"
-            prev_entry = MASTERDATA_CACHE.get(key)          # Tier C candidate
-            try:
-                df = _pd.read_csv(
-                    str(fpath), sep=";", dtype=str,
-                    keep_default_na=False, on_bad_lines="skip",
-                    encoding="utf-8", encoding_errors="replace",
-                )
-                df.columns = [c.strip() for c in df.columns]
-                schema_info = _validate_md_schema(key, df)
-                try:
-                    fsize_kb = round(fpath.stat().st_size / 1024, 1)
-                except Exception:
-                    fsize_kb = 0.0
-                warnings: list[str] = []
-                if not schema_info["schema_valid"]:
-                    warnings.append(
-                        f"Colonnes manquantes: {', '.join(schema_info['missing_columns'])}"
-                    )
-                if len(df) == 0:
-                    warnings.append("Fichier vide")
-                MASTERDATA_CACHE[key] = {
-                    "df":               df,
-                    "rows":             len(df),
-                    "loaded_at":        _dt.datetime.now().isoformat(timespec="seconds"),
-                    "error":            None,
-                    "fname":            fname,
-                    "source":           src_type,
-                    "source_path":      str(fpath),
-                    "file_size_kb":     fsize_kb,
-                    "schema_valid":     schema_info["schema_valid"],
-                    "required_columns": schema_info["required_columns"],
-                    "present_columns":  schema_info["present_columns"],
-                    "missing_columns":  schema_info["missing_columns"],
-                    "warnings":         warnings,
-                }
-                _MD_SOURCE[key] = src_type
-                log.info("MD cache: %s — %d rows  schema_valid=%s  source=%s",
-                         fname, len(df), schema_info["schema_valid"], src_type)
-
-            except FileNotFoundError:
-                if prev_entry and prev_entry.get("df") is not None:
-                    fallback = dict(prev_entry)
-                    fallback["source"] = "fallback"
-                    fallback["warnings"] = list(prev_entry.get("warnings", [])) + [
-                        f"Fichier introuvable: {fpath} — données précédentes conservées."
-                    ]
-                    MASTERDATA_CACHE[key] = fallback
-                    _MD_SOURCE[key] = "fallback"
-                    log.warning("MD cache: %s MISSING — Tier C fallback active", fname)
-                else:
-                    MASTERDATA_CACHE[key] = {
-                        "df": None, "rows": 0, "loaded_at": None,
-                        "error": f"Fichier introuvable: {fpath}",
-                        "fname": fname, "source": "error",
-                        "schema_valid": False,
-                        "required_columns": _MD_REQUIRED_COLS.get(key, []),
-                        "present_columns": [], "missing_columns": [], "warnings": [],
-                    }
-                    _MD_SOURCE[key] = "error"
-                    log.warning("MD cache load failed (%s): file not found", fname)
-
-            except Exception as exc:
-                if prev_entry and prev_entry.get("df") is not None:
-                    fallback = dict(prev_entry)
-                    fallback["source"] = "fallback"
-                    fallback["warnings"] = list(prev_entry.get("warnings", [])) + [
-                        f"Erreur rechargement: {exc} — données précédentes conservées."
-                    ]
-                    MASTERDATA_CACHE[key] = fallback
-                    _MD_SOURCE[key] = "fallback"
-                    log.warning("MD cache: %s ERROR — Tier C fallback: %s", fname, exc)
-                else:
-                    MASTERDATA_CACHE[key] = {
-                        "df": None, "rows": 0, "loaded_at": None, "error": str(exc),
-                        "fname": fname, "source": "error",
-                        "schema_valid": False,
-                        "required_columns": _MD_REQUIRED_COLS.get(key, []),
-                        "present_columns": [], "missing_columns": [], "warnings": [],
-                    }
-                    _MD_SOURCE[key] = "error"
-                    log.warning("MD cache load failed (%s): %s", fname, exc)
-
-    return {k: {"rows": v["rows"], "loaded_at": v["loaded_at"], "error": v.get("error")}
-            for k, v in MASTERDATA_CACHE.items()}
+    return _mdr.load_cache()
 
 
 def _refresh_masterdata_cache() -> None:
-    """Reload the cache (called after masterdata sync)."""
-    _load_masterdata_cache()
+    _mdr.refresh_cache()
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Masterdata normalize helpers (Req 1)
-# ─────────────────────────────────────────────────────────────────────────────
 
 def _normalize_masterdata_value(s: str) -> str:
-    """Strip, upper-case, collapse whitespace."""
-    return " ".join(str(s).strip().upper().split())
+    return _mdr.normalize_value(s)
 
 
 def _normalize_vat(vat: str) -> str:
-    """Normalize VAT number: strip spaces, upper-case, keep alphanumeric."""
-    return "".join(c for c in str(vat).upper() if c.isalnum())
+    return _mdr.normalize_vat(vat)
 
 
 def _normalize_postal(postal: str) -> str:
-    """Normalize postal code: strip, keep alphanumeric only."""
-    return "".join(c for c in str(postal).strip() if c.isalnum()).upper()
+    return _mdr.normalize_postal(postal)
 
 
 def _normalize_city(city: str) -> str:
-    """Normalize city: strip, upper-case, Unicode-safe."""
-    import unicodedata
-    s = unicodedata.normalize("NFKD", str(city).strip().upper())
-    return " ".join(s.split())
+    return _mdr.normalize_city(city)
 
 
 def _normalize_article_code(art: str) -> str:
-    """Normalize article / MATNR code: strip, upper-case, strip leading zeros for numeric."""
-    s = str(art).strip().upper()
-    if s.isdigit():
-        s = str(int(s))
-    return s
+    return _mdr.normalize_article_code(art)
 
 
 def _validate_md_schema(key: str, df) -> dict:
-    """Validate DataFrame columns against _MD_REQUIRED_COLS.  Returns validation dict."""
-    required = _MD_REQUIRED_COLS.get(key, [])
-    present  = list(df.columns) if df is not None else []
-    missing  = [c for c in required if c not in present]
-    return {
-        "required_columns": required,
-        "present_columns":  present,
-        "missing_columns":  missing,
-        "schema_valid":     len(missing) == 0,
-    }
-
-
-def _csv_search_cached(key: str, q: str, limit: int = 50) -> list[dict]:
-    """Search in-memory cache for a masterdata table.  Falls back to file scan.
-
-    Limit is clamped to 200 (Req 7).  Columns not present in the DataFrame are
-    skipped so searches never raise KeyError on schema-mismatched files (Req 3).
-    """
-    limit     = min(int(limit or 50), 200)
-    entry     = MASTERDATA_CACHE.get(key, {})
-    df        = entry.get("df")
-    cols      = _MD_SEARCH_COLS.get(key, [])
-    if df is None:
-        return _csv_search(_MD_FILES.get(key, ""), q, cols, limit)
-    q_lo = q.strip().lower()
-    if not q_lo:
-        return df.head(limit).to_dict("records")
-    # Only search columns that exist in this DataFrame (schema-safe)
-    safe_cols = [c for c in cols if c in df.columns]
-    if not safe_cols:
-        return df.head(limit).to_dict("records")
-    mask = df[safe_cols].apply(
-        lambda c: c.str.lower().str.contains(q_lo, na=False)
-    ).any(axis=1)
-    return df[mask].head(limit).to_dict("records")
+    return _mdr.validate_schema(key, df)
 
 
 def _masterdata_table_records(key: str) -> list[dict]:
-    """Return master data rows as plain dicts, regardless of cache backend."""
-    entry = MASTERDATA_CACHE.get(key, {})
-    df = entry.get("df")
-    if df is not None:
-        try:
-            return [dict(row) for row in df.to_dict("records")]
-        except Exception:
-            pass
-
-    fname = _MD_FILES.get(key, "")
-    if not fname:
-        return []
-    path = Path(MASTER_DATA_RUNTIME) / fname
-    if not path.exists():
-        return []
-
-    try:
-        import csv
-
-        with path.open(encoding="utf-8-sig", newline="") as fh:
-            return [dict(row) for row in csv.DictReader(fh, delimiter=";")]
-    except Exception:
-        return []
+    return _mdr.table_records(key)
 
 
 def _masterdata_row_value(row: dict, *names: str) -> str:
-    """Read a value from a row using case-insensitive column lookup."""
-    lowered = {str(k).strip().lower(): v for k, v in row.items()}
-    for name in names:
-        value = lowered.get(str(name).strip().lower())
-        if value is not None:
-            return str(value).strip()
-    return ""
+    return _mdr.row_value(row, *names)
 
 
 def _masterdata_match_keys(value: str) -> set[str]:
-    """Build comparison keys for actor and partner identity matching."""
-    raw = (value or "").strip()
-    if not raw:
-        return set()
-
-    variants = {raw}
-    local = raw.split("@", 1)[0]
-    variants.add(local)
-    variants.add(re.sub(r"[._-]+", " ", local))
-    variants.add(_display_name_from_actor(raw))
-
-    keys: set[str] = set()
-    for variant in variants:
-        cleaned = (variant or "").strip()
-        if not cleaned:
-            continue
-        norm = _normalize_masterdata_value(cleaned)
-        keys.add(norm)
-        keys.add(norm.replace(" ", ""))
-        parts = [part for part in re.split(r"[^A-Z0-9]+", norm) if part]
-        if parts:
-            keys.add(" ".join(sorted(parts)))
-    return {key for key in keys if key}
+    return _mdr.match_keys(value)
 
 
 def _masterdata_row_matches_actor(row: dict, actor_keys: set[str]) -> bool:
-    """True when a partner row is linked to the current actor identity."""
-    if not actor_keys:
-        return False
-
-    for field in (
-        "adv_team1_email",
-        "adv_team2_email",
-        "email",
-        "gestionaire_adv",
-        "Gestionaire ADV",
-    ):
-        raw = _masterdata_row_value(row, field)
-        if not raw:
-            continue
-        for chunk in re.split(r"[;,|/]+", raw):
-            if _masterdata_match_keys(chunk) & actor_keys:
-                return True
-    return False
+    return _mdr.row_matches_actor(row, actor_keys)
 
 
 def _masterdata_allowed_soldtos(req: Request | None) -> set[str] | None:
-    """Return the sold-to scope for the current user.
-
-    None means unrestricted access. An empty set means ADV access with no
-    linked sold-to found.
-    """
     actor = _resolve_actor(req)
     role = _resolve_role_for_request(actor, req)
-    if role != "adv":
-        return None
-    if not actor:
-        return set()
-
-    actor_keys = _masterdata_match_keys(actor)
-    allowed: set[str] = set()
-    for row in _masterdata_table_records("partners"):
-        if not _masterdata_row_matches_actor(row, actor_keys):
-            continue
-        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
-        if soldto:
-            allowed.add(soldto)
-    return allowed
+    return _mdr.allowed_soldtos_for_actor(actor, role)
 
 
 def _masterdata_visible_records(key: str, req: Request | None) -> list[dict]:
-    """Return all visible rows for a master data table under the current scope."""
-    rows = _masterdata_table_records(key)
-    allowed_soldtos = _masterdata_allowed_soldtos(req)
-    if allowed_soldtos is None or key not in {"customers", "partners"}:
-        return rows
-    if not allowed_soldtos:
-        return []
-
-    visible: list[dict] = []
-    for row in rows:
-        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
-        if soldto in allowed_soldtos:
-            visible.append(row)
-    return visible
+    return _mdr.visible_records(key, _masterdata_allowed_soldtos(req))
 
 
 def _csv_search_cached(key: str, q: str, limit: int = 50, req: Request | None = None) -> list[dict]:
-    """Search in-memory cache for a masterdata table.  Falls back to file scan.
-
-    Limit is clamped to 200 (Req 7).  Columns not present in the DataFrame are
-    skipped so searches never raise KeyError on schema-mismatched files (Req 3).
-    """
-    limit = min(int(limit or 50), 200)
-    entry = MASTERDATA_CACHE.get(key, {})
-    df = entry.get("df")
-    cols = _MD_SEARCH_COLS.get(key, [])
-    allowed_soldtos = _masterdata_allowed_soldtos(req)
-    q_lo = q.strip().lower()
-
-    if df is None:
-        rows = _csv_search(_MD_FILES.get(key, ""), q, cols, limit)
-        if allowed_soldtos is None or key not in {"customers", "partners"}:
-            return rows
-        if not allowed_soldtos:
-            return []
-        filtered_rows = []
-        for row in rows:
-            soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
-            if soldto in allowed_soldtos:
-                filtered_rows.append(row)
-        return filtered_rows[:limit]
-
-    if allowed_soldtos is not None and key in {"customers", "partners"}:
-        if not allowed_soldtos:
-            return []
-        soldto_col = next((c for c in df.columns if str(c).strip().lower() == "soldto"), None)
-        if soldto_col is not None:
-            df = df[df[soldto_col].astype(str).str.strip().isin(allowed_soldtos)]
-
-    if not q_lo:
-        return df.head(limit).to_dict("records")
-
-    safe_cols = [c for c in cols if c in df.columns]
-    if not safe_cols:
-        return df.head(limit).to_dict("records")
-
-    mask = df[safe_cols].apply(
-        lambda c: c.str.lower().str.contains(q_lo, na=False)
-    ).any(axis=1)
-    return df[mask].head(limit).to_dict("records")
+    return _mdr.csv_search_cached(key, q, limit, _masterdata_allowed_soldtos(req))
 
 
 def _masterdata_clients_for_request(req: Request | None, search: str = "", limit: int = 50) -> list[dict]:
-    """Return master-data client rows, filtered by the active user's scope."""
-    rows = _csv_search_cached("customers", search, limit, req=req)
-    sync_at = (
-        _masterdata_sync_freshness().get("synced_at_utc")
-        or _MD_LAST_SYNC.get("customers")
-        or ""
-    )
-    clients: list[dict] = []
-    for i, row in enumerate(rows):
-        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
-        name = _masterdata_row_value(row, "NAME", "name")
-        clients.append({
-            "clientId": soldto or f"cli-{i}",
-            "name": name,
-            "soldto": soldto,
-            "vat": _masterdata_row_value(row, "VAT_NR", "vat"),
-            "channel": _masterdata_row_value(row, "VTWEG", "channel") or "—",
-            "division": _masterdata_row_value(row, "SPART", "division") or "—",
-            "status": "Actif",
-            "updatedAt": sync_at,
-            "country": _masterdata_row_value(row, "LAND1", "country"),
-            "city": _masterdata_row_value(row, "ORT01", "city"),
-            "postalCode": _masterdata_row_value(row, "PSTLZ", "postal", "postalCode"),
-            "address": _masterdata_row_value(row, "STRAS", "address", "street"),
-            "currency": "EUR",
-            "fields": {str(k): str(v) if v is not None else "" for k, v in row.items()},
-        })
-    return clients
+    allowed = _masterdata_allowed_soldtos(req)
+    sync_at = _masterdata_sync_freshness().get("synced_at_utc") or _MD_LAST_SYNC.get("customers") or ""
+    rows = _mdr.csv_search_cached("customers", search, limit, allowed)
+    return _mdr.format_clients(rows, sync_at)
 
 
 def _masterdata_partners_for_request(req: Request | None, search: str = "", limit: int = 50) -> list[dict]:
-    """Return ship-to / partner rows for the master-data UI."""
-    rows = _csv_search_cached("partners", search, limit, req=req)
-    sync_at = (
-        _masterdata_sync_freshness().get("synced_at_utc")
-        or _MD_LAST_SYNC.get("partners")
-        or ""
-    )
-    out: list[dict] = []
-    for i, row in enumerate(rows):
-        shipto = _masterdata_row_value(row, "SHIPTO", "shipto")
-        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
-        out.append({
-            "id": f"{soldto}:{shipto}" if soldto or shipto else f"st-{i}",
-            "shipto": shipto,
-            "soldto": soldto,
-            "name": _masterdata_row_value(row, "NAME", "name"),
-            "country": _masterdata_row_value(row, "LAND1", "country"),
-            "city": _masterdata_row_value(row, "ORT01", "city"),
-            "postalCode": _masterdata_row_value(row, "PSTLZ", "postal", "postalCode"),
-            "address": _masterdata_row_value(row, "STRAS", "address", "street"),
-            "partnerFunction": _masterdata_row_value(row, "PARVW", "partnerFunction"),
-            "advManager": _masterdata_row_value(
-                row, "Gestionaire ADV", "Gestionnaire ADV", "advManager", "ADV"
-            ),
-            "updatedAt": sync_at,
-            "fields": {str(k): str(v) if v is not None else "" for k, v in row.items()},
-        })
-    return out
+    allowed = _masterdata_allowed_soldtos(req)
+    sync_at = _masterdata_sync_freshness().get("synced_at_utc") or _MD_LAST_SYNC.get("partners") or ""
+    rows = _mdr.csv_search_cached("partners", search, limit, allowed)
+    return _mdr.format_partners(rows, sync_at)
 
 
 def _masterdata_materials_for_request(search: str = "", limit: int = 50) -> list[dict]:
-    """Return Bosch material rows for the master-data UI."""
-    rows = _csv_search_cached("materials", search, limit)
-    sync_at = (
-        _masterdata_sync_freshness().get("synced_at_utc")
-        or _MD_LAST_SYNC.get("materials")
-        or ""
-    )
-    out: list[dict] = []
-    for i, row in enumerate(rows):
-        matnr = _masterdata_row_value(row, "MATNR", "matnr", "material")
-        out.append({
-            "id": matnr or f"mat-{i}",
-            "materialId": matnr,
-            "description": _masterdata_row_value(row, "MAKTX", "maktx", "description"),
-            "updatedAt": sync_at,
-            "fields": {str(k): str(v) if v is not None else "" for k, v in row.items()},
-        })
-    return out
+    sync_at = _masterdata_sync_freshness().get("synced_at_utc") or _MD_LAST_SYNC.get("materials") or ""
+    rows = _mdr.csv_search_cached("materials", search, limit)
+    return _mdr.format_materials(rows, sync_at)
 
 
 def _masterdata_rules_for_request(search: str = "") -> list[dict]:
-    """Return validation / rejection rules from the canonical catalog."""
-    from src.rejection_catalog import REJECTION_CATALOG
-
-    q = (search or "").strip().lower()
-    out: list[dict] = []
-    for code, entry in REJECTION_CATALOG.items():
-        message = str(entry.get("message_fr") or "")
-        severity = str(entry.get("severity") or "")
-        if q and q not in code.lower() and q not in message.lower() and q not in severity.lower():
-            continue
-        out.append({
-            "id": code,
-            "code": code,
-            "severity": severity,
-            "businessStatus": entry.get("business_status") or "",
-            "message": message,
-            "retryAllowed": bool(entry.get("retry_allowed")),
-            "manualReview": bool(entry.get("manual_review_required")),
-            "fields": {
-                "code": code,
-                "severity": severity,
-                "business_status": str(entry.get("business_status") or ""),
-                "message_fr": message,
-                "message_en": str(entry.get("message_en") or ""),
-                "retry_allowed": str(bool(entry.get("retry_allowed"))),
-                "manual_review_required": str(bool(entry.get("manual_review_required"))),
-            },
-        })
-    return out
+    return _mdr.format_rules(search)
 
 
 def _masterdata_summary_for_request(req: Request | None) -> dict:
-    """Return summary counts scoped to the active user when applicable."""
-    from src.rejection_catalog import REJECTION_CATALOG
-
-    stats = _masterdata_stats()
-    md_sync = _masterdata_sync_freshness()
-    last_sync = (
-        md_sync.get("synced_at_utc")
-        or (max(_MD_LAST_SYNC.values()) if _MD_LAST_SYNC else "")
-        or ""
-    )
-    rules_count = len(REJECTION_CATALOG)
-    growth = {"clients": 0, "shipto": 0, "articles": 0, "rules": 0}
-
-    allowed_soldtos = _masterdata_allowed_soldtos(req)
-    if allowed_soldtos is None:
-        return {
-            "activeClients": stats.get("customers", {}).get("rows", 0),
-            "shiptoCount": stats.get("partners", {}).get("rows", 0),
-            "articlesCount": stats.get("materials", {}).get("rows", 0),
-            "rulesCount": rules_count,
-            "lastSync": last_sync,
-            "syncStatus": md_sync.get("status"),
-            "syncCommit": md_sync.get("commit"),
-            "monthlyGrowth": growth,
-        }
-
-    clients = _masterdata_visible_records("customers", req)
-    partner_rows = _masterdata_visible_records("partners", req)
-    return {
-        "activeClients": len(clients),
-        "shiptoCount": len(partner_rows),
-        "articlesCount": stats.get("materials", {}).get("rows", 0),
-        "rulesCount": rules_count,
-        "lastSync": last_sync,
-        "syncStatus": md_sync.get("status"),
-        "syncCommit": md_sync.get("commit"),
-        "monthlyGrowth": growth,
-    }
+    return _mdr.summary_for_scope(_masterdata_allowed_soldtos(req))
 
 
 def _masterdata_payload_for_request(
@@ -4198,115 +3658,23 @@ def _masterdata_payload_for_request(
     search: str = "",
     limit: int = 100,
 ) -> dict:
-    """Build the SPA `/master-data` payload for the requested tab."""
-    kind = (type_name or "clients").strip().lower()
-    limit = min(max(int(limit or 100), 1), 200)
-    summary = _masterdata_summary_for_request(req)
-
-    if kind in {"shipto", "partners", "ship-to"}:
-        rows = _masterdata_partners_for_request(req, search, limit)
-        return {"summary": summary, "type": "shipto", "clients": [], "rows": rows}
-    if kind in {"articles", "materials", "articles-bosch"}:
-        rows = _masterdata_materials_for_request(search, limit)
-        return {"summary": summary, "type": "articles", "clients": [], "rows": rows}
-    if kind in {"rules", "regles", "validation"}:
-        rows = _masterdata_rules_for_request(search)
-        return {"summary": summary, "type": "rules", "clients": [], "rows": rows}
-
-    clients = _masterdata_clients_for_request(req, search, limit)
-    return {"summary": summary, "type": "clients", "clients": clients, "rows": clients}
+    return _mdr.payload_for_scope(_masterdata_allowed_soldtos(req), type_name, search, limit)
 
 
 def _masterdata_kind_key(kind: str) -> str:
-    mapping = {
-        "clients": "customers",
-        "customers": "customers",
-        "shipto": "partners",
-        "partners": "partners",
-        "articles": "materials",
-        "materials": "materials",
-    }
-    key = mapping.get((kind or "").strip().lower())
-    if not key:
-        raise ValueError(f"Type masterdata inconnu: {kind}")
-    return key
+    return _mdr.kind_key(kind)
 
 
 def _masterdata_write_csv(key: str, df) -> None:
-    """Persist a masterdata DataFrame to the runtime CSV and reload cache."""
-    import datetime as _dt
-
-    fname = _MD_FILES[key]
-    path = Path(MASTER_DATA_RUNTIME) / fname
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    df.to_csv(tmp, sep=";", index=False, encoding="utf-8")
-    tmp.replace(path)
-    _MD_LAST_SYNC[key] = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
-    _load_masterdata_cache()
+    _mdr.write_csv(key, df)
 
 
 def _masterdata_import_dataframe(key: str, raw: bytes) -> dict:
-    """Validate and replace a runtime masterdata CSV from uploaded bytes."""
-    import pandas as _pd
-
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1")
-
-    from io import StringIO
-
-    df = _pd.read_csv(
-        StringIO(text),
-        sep=";",
-        dtype=str,
-        keep_default_na=False,
-        on_bad_lines="skip",
-        encoding_errors="replace",
-    )
-    df.columns = [str(c).strip() for c in df.columns]
-    schema = _validate_md_schema(key, df)
-    if not schema["schema_valid"]:
-        missing = ", ".join(schema["missing_columns"])
-        raise ValueError(f"Colonnes manquantes pour {key}: {missing}")
-    if len(df) == 0:
-        raise ValueError("Fichier CSV vide")
-    _masterdata_write_csv(key, df)
-    return {"kind": key, "rows": int(len(df)), "file": _MD_FILES[key]}
+    return _mdr.import_dataframe(key, raw)
 
 
 def _masterdata_append_row(key: str, fields: dict) -> dict:
-    """Append one row to a runtime masterdata CSV."""
-    import pandas as _pd
-
-    required = _MD_REQUIRED_COLS.get(key, [])
-    normalized = {str(k).strip(): str(v).strip() if v is not None else "" for k, v in (fields or {}).items()}
-    # Accept lowercase aliases for required columns.
-    lowered = {k.lower(): v for k, v in normalized.items()}
-    for col in required:
-        if col not in normalized and col.lower() in lowered:
-            normalized[col] = lowered[col.lower()]
-    missing = [c for c in required if not normalized.get(c)]
-    if missing:
-        raise ValueError(f"Champs obligatoires manquants: {', '.join(missing)}")
-
-    entry = MASTERDATA_CACHE.get(key, {})
-    df = entry.get("df")
-    if df is None:
-        # Ensure cache is loaded before append.
-        _load_masterdata_cache()
-        df = MASTERDATA_CACHE.get(key, {}).get("df")
-    if df is None:
-        df = _pd.DataFrame(columns=required)
-
-    row = {col: normalized.get(col, "") for col in df.columns}
-    for col, val in normalized.items():
-        if col not in row:
-            row[col] = val
-    df = _pd.concat([df, _pd.DataFrame([row])], ignore_index=True)
-    _masterdata_write_csv(key, df)
-    return {"kind": key, "rows": int(len(df)), "added": row}
+    return _mdr.append_row(key, fields)
 
 
 def _resolve_processing_actor(uploaded_by: str, result: dict | None = None) -> str:
