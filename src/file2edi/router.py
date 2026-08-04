@@ -18,6 +18,7 @@ from .mapper import (
 )
 from .store import get_store
 from .request_auth import ensure_admin, resolve_actor, resolve_role
+from . import engine_bridge
 from src.ai_status import build_system_health_payload
 from src.health_probe import build_proxy_health
 from src.masterdata_runtime import allowed_soldtos_for_actor, payload_for_scope, stats as masterdata_stats
@@ -375,7 +376,7 @@ def create_router() -> APIRouter:
 
         if not items:
             try:
-                for c in srv.list_conversions(status="REVIEW_REQUIRED", limit=20):
+                for c in engine_bridge.list_conversions(status="REVIEW_REQUIRED", limit=20):
                     try:
                         conf = int(float(c.get("confidence") or 0))
                     except Exception:
@@ -436,9 +437,8 @@ def create_router() -> APIRouter:
         upload_meta = store.get_upload_meta(upload_id) or {}
         uploaded_by = str(upload_meta.get("uploaded_by") or "operator")
         payload = pdf_path.read_bytes()
-        import server as srv
-        result = srv._local_process_and_respond(payload, pdf_path.name, actor=uploaded_by)
-        assigned_actor = srv._resolve_processing_actor(uploaded_by, result)
+        result = engine_bridge.process_pdf(payload, pdf_path.name, actor=uploaded_by)
+        assigned_actor = engine_bridge.resolve_processing_actor(uploaded_by, result)
         order_id = result.get("pdf_hash") or f"ord-{uuid.uuid4().hex[:12]}"
         page_count = 3
         try:
@@ -464,13 +464,16 @@ def create_router() -> APIRouter:
                 review["order"]["assignedTo"] = adv_username
         store.save_order_review(review)
         try:
-            srv._init_db()
-            srv._upsert_conversion(_conversion_from_engine(order_id, upload_id, result, operator=assigned_actor))
+            engine_bridge.init_db()
+            engine_bridge.upsert_conversion(_conversion_from_engine(order_id, upload_id, result, operator=assigned_actor))
         except Exception:
             pass
         return engine_to_extraction_preview(
             upload_id, order_id, result, len(payload), page_count=page_count,
         )
+
+    @router.post("/extract")
+    @router.post("/upload/extract")
     async def extract_pdf_direct(req: Request, pdf: UploadFile = File(...)):
         """One-shot local extraction API: upload + extract in a single call."""
         if not pdf.filename or not pdf.filename.lower().endswith(".pdf"):
@@ -487,8 +490,8 @@ def create_router() -> APIRouter:
         uploaded_by = resolve_actor(req)
         meta = store.save_upload_with_id(upload_id, pdf.filename, len(payload), str(dest), uploaded_by=uploaded_by)
 
-        result = srv._local_process_and_respond(payload, pdf.filename, actor=uploaded_by)
-        assigned_actor = srv._resolve_processing_actor(uploaded_by, result)
+        result = engine_bridge.process_pdf(payload, pdf.filename, actor=uploaded_by)
+        assigned_actor = engine_bridge.resolve_processing_actor(uploaded_by, result)
         order_id = result.get("pdf_hash") or f"ord-{uuid.uuid4().hex[:12]}"
 
         page_count = 3
@@ -517,8 +520,8 @@ def create_router() -> APIRouter:
         store.save_order_review(review)
 
         try:
-            srv._init_db()
-            srv._upsert_conversion(_conversion_from_engine(order_id, upload_id, result, operator=assigned_actor))
+            engine_bridge.init_db()
+            engine_bridge.upsert_conversion(_conversion_from_engine(order_id, upload_id, result, operator=assigned_actor))
         except Exception:
             pass
 
@@ -547,8 +550,7 @@ def create_router() -> APIRouter:
         review = store.load_order_review(order_id)
         if not review:
             try:
-                import server as srv
-                conv = srv.load_conversion(order_id)
+                conv = engine_bridge.load_conversion(order_id)
                 if conv:
                     ext = json.loads(conv.get("extraction_json") or "{}")
                     if ext:
@@ -652,10 +654,6 @@ def create_router() -> APIRouter:
 
         _ensure_conversion_for_generate(order_id, review)
 
-        import server as srv
-        from starlette.requests import Request
-        from starlette.datastructures import Headers
-
         class _FakeRequest:
             headers: dict[str, str] = {}
             cookies: dict[str, str] = {}
@@ -663,7 +661,7 @@ def create_router() -> APIRouter:
             async def json(self):
                 return {"corrections": _corrections_from_review(review)}
 
-        result = await srv.api_generate(order_id, _FakeRequest())
+        result = await engine_bridge.generate_edifact(order_id, _FakeRequest())
         if hasattr(result, "status_code"):
             body = getattr(result, "body", b"") or b""
             try:
@@ -1345,8 +1343,7 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None) -> 
         if str(row.get("order_id") or "")
     }
     try:
-        import server as srv
-        for conv in srv.list_conversions(limit=200):
+        for conv in engine_bridge.list_conversions(limit=200):
             conv_id = str(conv.get("id") or conv.get("pdf_hash") or "")
             if not conv_id:
                 continue
@@ -1575,10 +1572,8 @@ def _corrections_from_review(review: dict) -> dict:
 
 def _ensure_conversion_for_generate(order_id: str, review: dict) -> None:
     """Create a conversions row when missing (legacy/demo orders)."""
-    import server as srv
-
-    srv._init_db()
-    if srv.load_conversion(order_id):
+    engine_bridge.init_db()
+    if engine_bridge.load_conversion(order_id):
         return
 
     o = review["order"]
@@ -1629,7 +1624,7 @@ def _ensure_conversion_for_generate(order_id: str, review: dict) -> None:
     ext.setdefault("rejection", {"decision": "REVIEW_REQUIRED"})
     ext.setdefault("edifact", {"generated": False})
 
-    srv._upsert_conversion(ext)
+    engine_bridge.upsert_conversion(ext)
 
 
 def _extract_generate_errors(result: dict) -> list[str]:
