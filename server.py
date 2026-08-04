@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -1749,6 +1749,42 @@ async def _startup_sync_masterdata() -> None:
     except Exception as exc:
         log.warning("startup masterdata sync failed (non-fatal): %s", exc)
 
+    # ── Masterdata automatic repo sync (optional) ─────────────────────────
+    try:
+        from src.masterdata_autosync import auto_sync_enabled, auto_sync_interval_hours
+
+        if auto_sync_enabled():
+            import asyncio
+
+            async def _masterdata_autosync_loop() -> None:
+                from src.masterdata_autosync import run_repo_sync
+
+                interval_h = auto_sync_interval_hours()
+                # Short initial delay so boot completes first.
+                await asyncio.sleep(20)
+                while True:
+                    try:
+                        await asyncio.to_thread(
+                            run_repo_sync,
+                            target_dir=MASTER_DATA_RUNTIME,
+                            notify_api_url="",  # already in-process: reload below
+                        )
+                        _apply_masterdata_sync_metadata_to_cache_state()
+                        _load_masterdata_cache()
+                    except Exception as sync_exc:
+                        log.warning("masterdata autosync loop error: %s", sync_exc)
+                    await asyncio.sleep(interval_h * 3600)
+
+            asyncio.create_task(_masterdata_autosync_loop())
+            log.info(
+                "startup masterdata: AUTO_SYNC enabled (every %.1fh from repo)",
+                auto_sync_interval_hours(),
+            )
+        else:
+            log.info("startup masterdata: AUTO_SYNC disabled (set MASTERDATA_AUTO_SYNC=true to enable)")
+    except Exception as exc:
+        log.warning("startup masterdata autosync wiring failed: %s", exc)
+
     # ── Persistence backend (always runs — no early return above) ─────────
     try:
         _detect_and_init_backend()
@@ -2035,11 +2071,70 @@ def api_md_stats():
 
 
 @app.post("/api/masterdata/sync")
-def api_md_sync():
-    """Sync masterdata from workspace source.
-    Writes audit events.  On failure keeps current cache (Req 4+8).
+def api_md_sync(from_repo: bool = Query(False)):
+    """Sync masterdata into runtime cache.
+
+    - from_repo=false (default): copy from MASTERDATA_SOURCE_DIR (workspace / notify path).
+    - from_repo=true: pull Git snapshot repo then reload cache (manual UI button / on-demand).
+    Auto-sync does not disable this endpoint — manual sync always remains available.
     """
     import datetime as _dt
+
+    if from_repo:
+        from src.masterdata_autosync import run_repo_sync
+
+        save_audit_event(
+            "__masterdata__",
+            "masterdata_sync_attempted",
+            "system",
+            {"source": "git_repo", "manual": True},
+        )
+        try:
+            repo_payload = run_repo_sync(
+                target_dir=MASTER_DATA_RUNTIME,
+                notify_api_url="",
+            )
+        except Exception as exc:
+            save_audit_event(
+                "__masterdata__",
+                "masterdata_sync_failed",
+                "system",
+                {"source": "git_repo", "error": str(exc)[:300]},
+            )
+            raise HTTPException(status_code=502, detail=f"Sync repo échouée: {exc}") from exc
+
+        now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        for key in _MD_FILES:
+            _MD_LAST_SYNC[key] = now_iso
+        _apply_masterdata_sync_metadata_to_cache_state()
+        _load_masterdata_cache()
+        save_audit_event(
+            "__masterdata__",
+            "masterdata_sync_succeeded",
+            "system",
+            {"source": "git_repo", "commit": repo_payload.get("commit")},
+        )
+        commit = repo_payload.get("commit") or "?"
+        files = repo_payload.get("files") or {}
+        log.info("masterdata sync (repo) succeeded: commit=%s files=%s", commit, list(files.keys()))
+        return {
+            "synced": len(files) if isinstance(files, dict) else 0,
+            "failed": 0,
+            "files": [
+                {
+                    "file": name,
+                    "status": "OK",
+                    "detail": f"{info.get('rows', '?')} lignes" if isinstance(info, dict) else "",
+                }
+                for name, info in (files.items() if isinstance(files, dict) else [])
+            ],
+            "cache_reloaded": True,
+            "from_repo": True,
+            "commit": commit,
+            "repo": repo_payload,
+            "message": f"Synchronisation repo OK (commit {str(commit)[:12]})",
+        }
+
     save_audit_event("__masterdata__", "masterdata_sync_attempted", "system",
                      {"source": MASTER_DATA_SRC})
     rows = _sync_masterdata()
@@ -2069,6 +2164,7 @@ def api_md_sync():
                              "detail": r[1] if len(r) > 1 else ""}
                             for r in rows],
         "cache_reloaded": bool(ok_files),
+        "from_repo": False,
         "message": (
             f"{len(ok_files)}/{len(rows)} fichiers synchronisés"
             + (f" — {len(err_files)} erreur(s)" if err_files else "")
@@ -2083,6 +2179,71 @@ def api_md_delta():
         return {"results": [[s.name, "OK" if s.success else "FAIL", s.message] for s in statuses]}
     except Exception as exc:
         return {"results": [["—", "ERROR", str(exc)]]}
+
+
+class MasterdataRowPayload(BaseModel):
+    kind: str
+    fields: dict[str, str]
+
+
+@app.post("/api/masterdata/import")
+async def api_md_import(
+    kind: str = Form(...),
+    file: UploadFile = File(...),
+):
+    """Replace a runtime masterdata CSV from an uploaded `;`-separated file."""
+    try:
+        key = _masterdata_kind_key(kind)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    if not file.filename or not str(file.filename).lower().endswith(".csv"):
+        raise HTTPException(400, "Un fichier .csv est requis")
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Fichier vide")
+    try:
+        result = _masterdata_import_dataframe(key, raw)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"Import échoué: {exc}") from exc
+    save_audit_event(
+        "__masterdata__",
+        "masterdata_import_succeeded",
+        "system",
+        {"kind": key, "rows": result.get("rows"), "file": file.filename},
+    )
+    return {
+        "ok": True,
+        "message": f"Import OK — {result.get('rows')} lignes ({result.get('file')})",
+        **result,
+    }
+
+
+@app.post("/api/masterdata/rows")
+def api_md_add_row(payload: MasterdataRowPayload):
+    """Append one row to a runtime masterdata CSV (clients / ship-to / articles)."""
+    try:
+        key = _masterdata_kind_key(payload.kind)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    try:
+        result = _masterdata_append_row(key, payload.fields or {})
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except Exception as exc:
+        raise HTTPException(500, f"Ajout échoué: {exc}") from exc
+    save_audit_event(
+        "__masterdata__",
+        "masterdata_row_added",
+        "system",
+        {"kind": key, "fields": list((payload.fields or {}).keys())},
+    )
+    return {
+        "ok": True,
+        "message": f"Ligne ajoutée — {result.get('rows')} lignes au total",
+        **result,
+    }
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -3854,6 +4015,11 @@ def _csv_search_cached(key: str, q: str, limit: int = 50, req: Request | None = 
 def _masterdata_clients_for_request(req: Request | None, search: str = "", limit: int = 50) -> list[dict]:
     """Return master-data client rows, filtered by the active user's scope."""
     rows = _csv_search_cached("customers", search, limit, req=req)
+    sync_at = (
+        _masterdata_sync_freshness().get("synced_at_utc")
+        or _MD_LAST_SYNC.get("customers")
+        or ""
+    )
     clients: list[dict] = []
     for i, row in enumerate(rows):
         soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
@@ -3863,26 +4029,129 @@ def _masterdata_clients_for_request(req: Request | None, search: str = "", limit
             "name": name,
             "soldto": soldto,
             "vat": _masterdata_row_value(row, "VAT_NR", "vat"),
-            "channel": "Distribution",
-            "division": "Thermique",
+            "channel": _masterdata_row_value(row, "VTWEG", "channel") or "—",
+            "division": _masterdata_row_value(row, "SPART", "division") or "—",
             "status": "Actif",
-            "updatedAt": "",
+            "updatedAt": sync_at,
+            "country": _masterdata_row_value(row, "LAND1", "country"),
+            "city": _masterdata_row_value(row, "ORT01", "city"),
+            "postalCode": _masterdata_row_value(row, "PSTLZ", "postal", "postalCode"),
+            "address": _masterdata_row_value(row, "STRAS", "address", "street"),
+            "currency": "EUR",
+            "fields": {str(k): str(v) if v is not None else "" for k, v in row.items()},
         })
     return clients
 
 
+def _masterdata_partners_for_request(req: Request | None, search: str = "", limit: int = 50) -> list[dict]:
+    """Return ship-to / partner rows for the master-data UI."""
+    rows = _csv_search_cached("partners", search, limit, req=req)
+    sync_at = (
+        _masterdata_sync_freshness().get("synced_at_utc")
+        or _MD_LAST_SYNC.get("partners")
+        or ""
+    )
+    out: list[dict] = []
+    for i, row in enumerate(rows):
+        shipto = _masterdata_row_value(row, "SHIPTO", "shipto")
+        soldto = _masterdata_row_value(row, "SOLDTO", "soldto")
+        out.append({
+            "id": f"{soldto}:{shipto}" if soldto or shipto else f"st-{i}",
+            "shipto": shipto,
+            "soldto": soldto,
+            "name": _masterdata_row_value(row, "NAME", "name"),
+            "country": _masterdata_row_value(row, "LAND1", "country"),
+            "city": _masterdata_row_value(row, "ORT01", "city"),
+            "postalCode": _masterdata_row_value(row, "PSTLZ", "postal", "postalCode"),
+            "address": _masterdata_row_value(row, "STRAS", "address", "street"),
+            "partnerFunction": _masterdata_row_value(row, "PARVW", "partnerFunction"),
+            "advManager": _masterdata_row_value(
+                row, "Gestionaire ADV", "Gestionnaire ADV", "advManager", "ADV"
+            ),
+            "updatedAt": sync_at,
+            "fields": {str(k): str(v) if v is not None else "" for k, v in row.items()},
+        })
+    return out
+
+
+def _masterdata_materials_for_request(search: str = "", limit: int = 50) -> list[dict]:
+    """Return Bosch material rows for the master-data UI."""
+    rows = _csv_search_cached("materials", search, limit)
+    sync_at = (
+        _masterdata_sync_freshness().get("synced_at_utc")
+        or _MD_LAST_SYNC.get("materials")
+        or ""
+    )
+    out: list[dict] = []
+    for i, row in enumerate(rows):
+        matnr = _masterdata_row_value(row, "MATNR", "matnr", "material")
+        out.append({
+            "id": matnr or f"mat-{i}",
+            "materialId": matnr,
+            "description": _masterdata_row_value(row, "MAKTX", "maktx", "description"),
+            "updatedAt": sync_at,
+            "fields": {str(k): str(v) if v is not None else "" for k, v in row.items()},
+        })
+    return out
+
+
+def _masterdata_rules_for_request(search: str = "") -> list[dict]:
+    """Return validation / rejection rules from the canonical catalog."""
+    from src.rejection_catalog import REJECTION_CATALOG
+
+    q = (search or "").strip().lower()
+    out: list[dict] = []
+    for code, entry in REJECTION_CATALOG.items():
+        message = str(entry.get("message_fr") or "")
+        severity = str(entry.get("severity") or "")
+        if q and q not in code.lower() and q not in message.lower() and q not in severity.lower():
+            continue
+        out.append({
+            "id": code,
+            "code": code,
+            "severity": severity,
+            "businessStatus": entry.get("business_status") or "",
+            "message": message,
+            "retryAllowed": bool(entry.get("retry_allowed")),
+            "manualReview": bool(entry.get("manual_review_required")),
+            "fields": {
+                "code": code,
+                "severity": severity,
+                "business_status": str(entry.get("business_status") or ""),
+                "message_fr": message,
+                "message_en": str(entry.get("message_en") or ""),
+                "retry_allowed": str(bool(entry.get("retry_allowed"))),
+                "manual_review_required": str(bool(entry.get("manual_review_required"))),
+            },
+        })
+    return out
+
+
 def _masterdata_summary_for_request(req: Request | None) -> dict:
     """Return summary counts scoped to the active user when applicable."""
+    from src.rejection_catalog import REJECTION_CATALOG
+
     stats = _masterdata_stats()
+    md_sync = _masterdata_sync_freshness()
+    last_sync = (
+        md_sync.get("synced_at_utc")
+        or (max(_MD_LAST_SYNC.values()) if _MD_LAST_SYNC else "")
+        or ""
+    )
+    rules_count = len(REJECTION_CATALOG)
+    growth = {"clients": 0, "shipto": 0, "articles": 0, "rules": 0}
+
     allowed_soldtos = _masterdata_allowed_soldtos(req)
     if allowed_soldtos is None:
         return {
             "activeClients": stats.get("customers", {}).get("rows", 0),
             "shiptoCount": stats.get("partners", {}).get("rows", 0),
             "articlesCount": stats.get("materials", {}).get("rows", 0),
-            "rulesCount": 18,
-            "lastSync": "",
-            "monthlyGrowth": {"clients": 8, "shipto": 37, "articles": 215, "rules": 1},
+            "rulesCount": rules_count,
+            "lastSync": last_sync,
+            "syncStatus": md_sync.get("status"),
+            "syncCommit": md_sync.get("commit"),
+            "monthlyGrowth": growth,
         }
 
     clients = _masterdata_visible_records("customers", req)
@@ -3891,10 +4160,129 @@ def _masterdata_summary_for_request(req: Request | None) -> dict:
         "activeClients": len(clients),
         "shiptoCount": len(partner_rows),
         "articlesCount": stats.get("materials", {}).get("rows", 0),
-        "rulesCount": 18,
-        "lastSync": "",
-        "monthlyGrowth": {"clients": 8, "shipto": 37, "articles": 215, "rules": 1},
+        "rulesCount": rules_count,
+        "lastSync": last_sync,
+        "syncStatus": md_sync.get("status"),
+        "syncCommit": md_sync.get("commit"),
+        "monthlyGrowth": growth,
     }
+
+
+def _masterdata_payload_for_request(
+    req: Request | None,
+    type_name: str = "clients",
+    search: str = "",
+    limit: int = 100,
+) -> dict:
+    """Build the SPA `/master-data` payload for the requested tab."""
+    kind = (type_name or "clients").strip().lower()
+    limit = min(max(int(limit or 100), 1), 200)
+    summary = _masterdata_summary_for_request(req)
+
+    if kind in {"shipto", "partners", "ship-to"}:
+        rows = _masterdata_partners_for_request(req, search, limit)
+        return {"summary": summary, "type": "shipto", "clients": [], "rows": rows}
+    if kind in {"articles", "materials", "articles-bosch"}:
+        rows = _masterdata_materials_for_request(search, limit)
+        return {"summary": summary, "type": "articles", "clients": [], "rows": rows}
+    if kind in {"rules", "regles", "validation"}:
+        rows = _masterdata_rules_for_request(search)
+        return {"summary": summary, "type": "rules", "clients": [], "rows": rows}
+
+    clients = _masterdata_clients_for_request(req, search, limit)
+    return {"summary": summary, "type": "clients", "clients": clients, "rows": clients}
+
+
+def _masterdata_kind_key(kind: str) -> str:
+    mapping = {
+        "clients": "customers",
+        "customers": "customers",
+        "shipto": "partners",
+        "partners": "partners",
+        "articles": "materials",
+        "materials": "materials",
+    }
+    key = mapping.get((kind or "").strip().lower())
+    if not key:
+        raise ValueError(f"Type masterdata inconnu: {kind}")
+    return key
+
+
+def _masterdata_write_csv(key: str, df) -> None:
+    """Persist a masterdata DataFrame to the runtime CSV and reload cache."""
+    import datetime as _dt
+
+    fname = _MD_FILES[key]
+    path = Path(MASTER_DATA_RUNTIME) / fname
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    df.to_csv(tmp, sep=";", index=False, encoding="utf-8")
+    tmp.replace(path)
+    _MD_LAST_SYNC[key] = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    _load_masterdata_cache()
+
+
+def _masterdata_import_dataframe(key: str, raw: bytes) -> dict:
+    """Validate and replace a runtime masterdata CSV from uploaded bytes."""
+    import pandas as _pd
+
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+
+    from io import StringIO
+
+    df = _pd.read_csv(
+        StringIO(text),
+        sep=";",
+        dtype=str,
+        keep_default_na=False,
+        on_bad_lines="skip",
+        encoding_errors="replace",
+    )
+    df.columns = [str(c).strip() for c in df.columns]
+    schema = _validate_md_schema(key, df)
+    if not schema["schema_valid"]:
+        missing = ", ".join(schema["missing_columns"])
+        raise ValueError(f"Colonnes manquantes pour {key}: {missing}")
+    if len(df) == 0:
+        raise ValueError("Fichier CSV vide")
+    _masterdata_write_csv(key, df)
+    return {"kind": key, "rows": int(len(df)), "file": _MD_FILES[key]}
+
+
+def _masterdata_append_row(key: str, fields: dict) -> dict:
+    """Append one row to a runtime masterdata CSV."""
+    import pandas as _pd
+
+    required = _MD_REQUIRED_COLS.get(key, [])
+    normalized = {str(k).strip(): str(v).strip() if v is not None else "" for k, v in (fields or {}).items()}
+    # Accept lowercase aliases for required columns.
+    lowered = {k.lower(): v for k, v in normalized.items()}
+    for col in required:
+        if col not in normalized and col.lower() in lowered:
+            normalized[col] = lowered[col.lower()]
+    missing = [c for c in required if not normalized.get(c)]
+    if missing:
+        raise ValueError(f"Champs obligatoires manquants: {', '.join(missing)}")
+
+    entry = MASTERDATA_CACHE.get(key, {})
+    df = entry.get("df")
+    if df is None:
+        # Ensure cache is loaded before append.
+        _load_masterdata_cache()
+        df = MASTERDATA_CACHE.get(key, {}).get("df")
+    if df is None:
+        df = _pd.DataFrame(columns=required)
+
+    row = {col: normalized.get(col, "") for col in df.columns}
+    for col, val in normalized.items():
+        if col not in row:
+            row[col] = val
+    df = _pd.concat([df, _pd.DataFrame([row])], ignore_index=True)
+    _masterdata_write_csv(key, df)
+    return {"kind": key, "rows": int(len(df)), "added": row}
 
 
 def _resolve_processing_actor(uploaded_by: str, result: dict | None = None) -> str:

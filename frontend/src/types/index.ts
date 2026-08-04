@@ -287,6 +287,8 @@ export interface MasterDataSummary {
   articlesCount: number;
   rulesCount: number;
   lastSync: string;
+  syncStatus?: string;
+  syncCommit?: string;
   monthlyGrowth: { clients: number; shipto: number; articles: number; rules: number };
 }
 
@@ -301,8 +303,12 @@ export interface MasterDataClient {
   updatedAt: string;
   currency?: string;
   country?: string;
+  city?: string;
+  postalCode?: string;
+  address?: string;
   language?: string;
   gln?: string;
+  fields?: Record<string, string>;
   ediMappings?: {
     unb?: string;
     nadBy?: string;
@@ -310,6 +316,47 @@ export interface MasterDataClient {
     duns?: string;
     gln?: string;
   };
+}
+
+export interface MasterDataShipToRow {
+  id: string;
+  shipto: string;
+  soldto: string;
+  name: string;
+  country?: string;
+  city?: string;
+  postalCode?: string;
+  address?: string;
+  partnerFunction?: string;
+  advManager?: string;
+  updatedAt?: string;
+  fields?: Record<string, string>;
+}
+
+export interface MasterDataArticleRow {
+  id: string;
+  materialId: string;
+  description: string;
+  updatedAt?: string;
+  fields?: Record<string, string>;
+}
+
+export interface MasterDataRuleRow {
+  id: string;
+  code: string;
+  severity: string;
+  businessStatus: string;
+  message: string;
+  retryAllowed: boolean;
+  manualReview: boolean;
+  fields?: Record<string, string>;
+}
+
+export interface MasterDataResponse {
+  summary: MasterDataSummary;
+  type: string;
+  clients: MasterDataClient[];
+  rows: Array<MasterDataClient | MasterDataShipToRow | MasterDataArticleRow | MasterDataRuleRow>;
 }
 
 export interface AppSettings {

@@ -8,10 +8,9 @@ import type {
   GenerateEdifactResult,
   HistoryFilters,
   HistoryResponse,
-  MasterDataClient,
   MasterDataCustomerRow,
   MasterDataPartnerRow,
-  MasterDataSummary,
+  MasterDataResponse,
   OrderReview,
   PartnerEditSource,
   PartnerFieldKey,
@@ -266,12 +265,57 @@ export const api = {
   },
 
   getMasterData: (type: string, search?: string) => {
-    const params = new URLSearchParams({ type });
+    const params = new URLSearchParams({ type, limit: "200" });
     if (search) params.set("search", search);
-    return request<{ summary: MasterDataSummary; clients: MasterDataClient[] }>(
-      `/master-data?${params}`,
-    );
+    return request<MasterDataResponse>(`/master-data?${params}`);
   },
+
+  /** Manual masterdata sync (Git repo → runtime cache). Works even when auto-sync is on. */
+  syncMasterData: (opts?: { fromRepo?: boolean }) => {
+    const fromRepo = opts?.fromRepo !== false;
+    const params = new URLSearchParams({ from_repo: fromRepo ? "true" : "false" });
+    return request<{
+      synced: number;
+      failed: number;
+      cache_reloaded: boolean;
+      from_repo?: boolean;
+      commit?: string;
+      message: string;
+    }>(`/masterdata/sync?${params}`, { method: "POST" });
+  },
+
+  importMasterDataCsv: async (kind: string, file: File) => {
+    const body = new FormData();
+    body.append("kind", kind);
+    body.append("file", file);
+    const res = await fetch(`${API_BASE}/masterdata/import`, {
+      method: "POST",
+      credentials: "include",
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let detail: unknown;
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        detail = parsed.detail ?? parsed.message ?? text;
+      } catch {
+        detail = text;
+      }
+      throw new ApiError(
+        typeof detail === "string" ? detail : `HTTP ${res.status}`,
+        res.status,
+        detail,
+      );
+    }
+    return res.json() as Promise<{ ok: boolean; message: string; rows?: number; kind?: string }>;
+  },
+
+  addMasterDataRow: (kind: string, fields: Record<string, string>) =>
+    request<{ ok: boolean; message: string; rows?: number }>(`/masterdata/rows`, {
+      method: "POST",
+      body: JSON.stringify({ kind, fields }),
+    }),
 
   getSettings: async () => {
     const raw = await request<unknown>("/settings");

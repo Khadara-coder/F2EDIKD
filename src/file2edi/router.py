@@ -806,14 +806,15 @@ def create_router() -> APIRouter:
 
     # ── Master data ─────────────────────────────────────────────────────────
     @router.get("/master-data")
-    def master_data(req: Request, type: str = "clients", search: str = ""):
+    def master_data(
+        req: Request,
+        type: str = "clients",
+        search: str = "",
+        limit: int = 100,
+    ):
         try:
             import server as srv
-            customers = srv._masterdata_clients_for_request(req, search, limit=50)
-            return {
-                "summary": srv._masterdata_summary_for_request(req),
-                "clients": customers,
-            }
+            return srv._masterdata_payload_for_request(req, type, search, limit)
         except Exception as exc:
             raise HTTPException(500, str(exc)) from exc
 
