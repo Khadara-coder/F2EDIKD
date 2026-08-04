@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
-from src.sftp_delivery import is_configured_from_env, status_from_env, test_connection_from_env
+from src.sftp_delivery import (
+    is_configured_from_env,
+    status_from_env,
+    test_connection_from_env as probe_sftp_connection,
+)
 
 
 def test_is_configured_from_env(monkeypatch):
@@ -24,8 +28,8 @@ def test_status_from_env_masks_no_secrets(monkeypatch):
     assert status["auth_mode"] == "password"
 
 
-def test_connection_without_host(monkeypatch):
+def test_probe_without_host(monkeypatch):
     monkeypatch.delenv("SFTP_HOST", raising=False)
-    ok, msg = test_connection_from_env()
+    ok, msg = probe_sftp_connection()
     assert ok is False
     assert "SFTP_HOST" in msg
