@@ -1824,7 +1824,7 @@ def api_md_stats():
 
 
 @app.post("/api/masterdata/sync")
-def api_md_sync(from_repo: bool = Query(False), req: Request | None = None):
+def api_md_sync(req: Request, from_repo: bool = Query(False)):
     """Sync masterdata into runtime cache.
 
     Preferred path: trigger the admin-configured n8n webhook (GitHub -> files -> reload-cache).

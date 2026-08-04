@@ -81,8 +81,11 @@ function AppContent() {
         <div className="max-w-lg text-center">
           <h1 className="text-xl font-semibold">Impossible de charger la session</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Vérifie la connectivité Databricks puis recharge la page.
+            L&apos;API File2EDI ne répond pas. Vérifie que le conteneur API tourne, puis recharge la page.
           </p>
+          {meQuery.error instanceof Error && (
+            <p className="mt-3 break-all text-xs text-muted-foreground/80">{meQuery.error.message}</p>
+          )}
         </div>
       </div>
     );
