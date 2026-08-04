@@ -1009,14 +1009,9 @@ async def _shutdown_event() -> None:
 
 def _get_db_backend() -> str:
     """Detect current database backend: 'postgres' or 'sqlite'."""
-    pg_url = (os.environ.get("PG_DATABASE_URL") or "").strip()
-    try:
-        from sqlalchemy import text
-        if pg_url:
-            return "postgres"
-    except ImportError:
-        pass
-    return "sqlite"
+    from src.runtime_status import get_db_backend
+
+    return get_db_backend()
 
 # Auth defaults to ON everywhere. Set APP_REQUIRE_AUTH=false explicitly only for
 # local troubleshooting sessions.
@@ -1557,16 +1552,16 @@ def api_health_alias():
     """Health check — retourne le format normalisé attendu par le frontend React.
     Format: {api, database, csv, sftp} avec valeurs 'connected'|'disconnected'.
     """
+    from src.runtime_status import get_db_backend, is_postgres_strict
+
     h = api_proxy_health()
-    db_backend = _get_db_backend()
-    pg_strict = os.environ.get("FILE2EDI_POSTGRES_STRICT", "false").strip().lower() in {"1", "true", "yes", "on"}
     return {
         "api":      "connected" if h.get("api", {}).get("ok") else "disconnected",
         "database": "connected" if h.get("database", {}).get("ok") else "disconnected",
         "csv":      "connected" if h.get("masterdata", {}).get("ok") else "disconnected",
         "sftp":     "connected" if h.get("sftp_configured") else "disconnected",
-        "databaseBackend": db_backend,
-        "postgresStrict": pg_strict,
+        "databaseBackend": get_db_backend(),
+        "postgresStrict": is_postgres_strict(),
     }
 
 

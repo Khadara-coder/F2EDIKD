@@ -205,6 +205,14 @@ python -m pytest tests/ -v
 
 La suite couvre extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines.
 
+Smoke API locale (serveur démarré) :
+
+```bash
+python scripts/smoke_file2edi_api.py
+# Endpoints protégés (optionnel) :
+python scripts/smoke_file2edi_api.py --actor <user> --password <password>
+```
+
 ```bash
 # Test extraction sur 50 PDFs aléatoires (RAG Purchase Orders)
 python scripts/test_random_pdfs.py --source "RAG Purchase Orders" --n 50 --seed 42
