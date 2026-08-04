@@ -207,6 +207,23 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
     return cleaned
 
 
+def _merge_order_line_candidates(primary: list[dict], secondary: list[dict]) -> list[dict]:
+    """Keep LLM lines, then add deterministic lines whose Bosch article is missing."""
+    merged = list(primary or [])
+    seen = {
+        compact_text(line.get("code_article") or line.get("article") or "")
+        for line in merged
+        if compact_text(line.get("code_article") or line.get("article") or "")
+    }
+    for line in secondary or []:
+        article = compact_text(line.get("code_article") or line.get("article") or "")
+        if not article or article in seen:
+            continue
+        merged.append(line)
+        seen.add(article)
+    return merged
+
+
 def _finalize_document_totals(totals: dict[str, str | None], order_lines: list[dict]) -> tuple[dict[str, str | None], float | None]:
     merged = dict(totals or {})
     total_lignes_ht = round(sum(l.get("montant_ligne_ht") or 0 for l in order_lines), 2) if order_lines else None
@@ -603,32 +620,34 @@ def extract_structured_fields(
     # Use LLM order number as primary, regex as fallback
     final_order_number = llm_order_number or order_number
 
-    # --- ORDER LINES: LLM first, deterministic engine fallback ---
+    # --- ORDER LINES: LLM first, deterministic engine as complement/fallback ---
     order_lines = []
     try:
         order_lines = llm_extract_orderlines(text)
     except Exception:
         pass  # Non-blocking
 
-    if not order_lines:
-        try:
-            engine_lines = OrderLinesEngine().extract(text, layout=layout).get("lines", [])
-            for idx, ln in enumerate(engine_lines, start=1):
-                article = (ln.get("article") or "").strip()
-                if not article:
-                    continue
-                order_lines.append({
-                    "numero_ligne": idx * 10,
-                    "code_article": article,
-                    "code_article_raw": article,
-                    "description": (ln.get("designation") or "").strip(),
-                    "quantite": _to_float(ln.get("quantity")),
-                    "prix_unitaire_ht": _to_float(ln.get("unit_price")),
-                    "montant_ligne_ht": _to_float(ln.get("amount")),
-                    "date_livraison": ln.get("delivery_date"),
-                })
-        except Exception:
-            pass
+    deterministic_lines = []
+    try:
+        engine_lines = OrderLinesEngine().extract(text, layout=layout).get("lines", [])
+        for idx, ln in enumerate(engine_lines, start=1):
+            article = (ln.get("article") or "").strip()
+            if not article:
+                continue
+            deterministic_lines.append({
+                "numero_ligne": idx * 10,
+                "code_article": article,
+                "code_article_raw": article,
+                "description": (ln.get("designation") or "").strip(),
+                "quantite": _to_float(ln.get("quantity")),
+                "prix_unitaire_ht": _to_float(ln.get("unit_price")),
+                "montant_ligne_ht": _to_float(ln.get("amount")),
+                "date_livraison": ln.get("delivery_date"),
+            })
+    except Exception:
+        pass
+
+    order_lines = _merge_order_line_candidates(order_lines, deterministic_lines)
 
     order_lines = _sanitize_order_lines(order_lines)
 

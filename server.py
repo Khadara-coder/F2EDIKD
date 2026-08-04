@@ -1126,41 +1126,6 @@ def _f2edi_build_raw_address(addr: dict) -> str:
     return ", ".join(parts)
 
 
-def _f2edi_line_confidence(lignes: dict, montants: dict | None = None) -> int:
-    items = lignes.get("lignes") or []
-    if not items:
-        return 0
-    scores: list[int] = []
-    for item in items:
-        score = 100
-        if not (item.get("code_article") or item.get("Article Bosch")):
-            score -= 45
-        if not item.get("quantite"):
-            score -= 25
-        if not item.get("prix_unitaire_ht"):
-            score -= 20
-        if not item.get("montant_ligne_ht"):
-            score -= 10
-        if not (item.get("description") or item.get("Designation")):
-            score -= 5
-        scores.append(max(0, score))
-    line_score = int(round(sum(scores) / len(scores)))
-
-    total_lignes = lignes.get("total_lignes_ht")
-    total_doc = (montants or {}).get("Total HT") if isinstance(montants, dict) else None
-    try:
-        from src.edifact_builder import format_decimal
-        line_total = float(format_decimal(total_lignes) or 0)
-        doc_total = float(format_decimal(total_doc) or 0)
-    except Exception:
-        line_total = doc_total = 0
-    if line_total > 0 and doc_total > 0:
-        delta = abs(line_total - doc_total)
-        if delta > max(1.0, doc_total * 0.02):
-            line_score = min(line_score, 75)
-    return max(0, min(100, line_score))
-
-
 def _f2edi_build_response(structured: dict, filename: str,
                            pdf_hash: str, elapsed: float,
                            cached: bool = False) -> dict:
@@ -1171,18 +1136,12 @@ def _f2edi_build_response(structured: dict, filename: str,
     rej    = structured.get("rejets", {})
     edi    = structured.get("edifact", {})
     lignes = structured.get("lignes_commande", {})
-    montants = structured.get("montants", {})
-    customer_confidence = int(adr.get("Confiance", 0) or 0)
-    line_confidence = _f2edi_line_confidence(lignes, montants)
-    global_confidence = min(customer_confidence, line_confidence if line_confidence > 0 else 0)
     return {
         "status": "OK",
         "filename": filename,
         "pdf_hash": pdf_hash,
         "cached": cached,
         "processing_time_s": round(elapsed, 1),
-        "confidence": global_confidence,
-        "line_confidence": line_confidence,
         "order": {
             "po_number":     doc.get("Numero de commande"),
             "order_date":    doc.get("Date commande LLM"),
@@ -1192,10 +1151,10 @@ def _f2edi_build_response(structured: dict, filename: str,
             "soldto":    adr.get("SOLDTO"),
             "shipto":    adr.get("SHIPTO"),
             "name":      adr.get("Nom"),
-            "confidence": customer_confidence,
+            "confidence": adr.get("Confiance", 0),
             "soldto_confidence": 90 if adr.get("SOLDTO") != adr.get("SHIPTO")
-                                    else customer_confidence,
-            "shipto_confidence": customer_confidence,
+                                    else adr.get("Confiance", 0),
+            "shipto_confidence": adr.get("Confiance", 0),
             "shipto_score":      adr.get("shipto_score", 0),
             "scoring_decision":  adr.get("scoring_decision", ""),
             "disambiguation":    adr.get("Disambiguation", ""),
@@ -1221,7 +1180,6 @@ def _f2edi_build_response(structured: dict, filename: str,
         },
         "lines": {
             "count": lignes.get("nb_lignes", 0),
-            "confidence": line_confidence,
             "items": lignes.get("lignes", []),
         },
         "rejection": {

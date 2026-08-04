@@ -16,6 +16,13 @@ def enrich_line_items_with_materials(rows: list[dict], materials_by_id: dict[str
     return rows
 
 
+def _prefer_masterdata_rows(rows: list[dict], materials_by_id: dict[str, str]) -> list[dict]:
+    if not rows or not materials_by_id:
+        return rows
+    known = [row for row in rows if re.sub(r"\s+", "", row.get("article", "")) in materials_by_id]
+    return known or rows
+
+
 def _amount_pattern() -> str:
     return r"(?:(?:\d{1,3}(?:[ .]\d{3})*|\d+)[,.]\d{2}\s?(?:€|EUR|E|euros?)?)"
 
@@ -228,10 +235,12 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
         if article in seen:
             continue
 
-        win_start = max(0, anchor_idx - 1)
+        win_start = max(0, anchor_idx - 8)
         win_end = min(len(lines), anchor_idx + 8)
         window_lines = [compact_text(x) for x in lines[win_start:win_end] if compact_text(x)]
         window_text = " | ".join(window_lines)
+        before_lines = [compact_text(x) for x in lines[win_start:anchor_idx] if compact_text(x)]
+        before_text = " | ".join(before_lines)
 
         qty = ""
         unit = ""
@@ -244,11 +253,15 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
             if qty:
                 break
 
-        amounts = _extract_amount_tokens(window_text)
+        amounts_before = _extract_amount_tokens(before_text)
+        amounts = amounts_before or _extract_amount_tokens(window_text)
         unit_price = ""
         amount = ""
         if amounts:
-            if len(amounts) == 1:
+            if amounts_before and len(amounts_before) >= 2:
+                unit_price = amounts_before[-2]
+                amount = amounts_before[-1]
+            elif len(amounts) == 1:
                 unit_price = amounts[0]
             else:
                 unit_price = amounts[0]
@@ -265,10 +278,17 @@ def extract_line_items_from_multiline_lines(lines: list[str]) -> list[dict]:
 
         # Pull a short designation text around article, excluding strong numeric lines.
         designation = ""
-        if idx > 0:
-            prev = compact_text(lines[idx - 1])
-            if prev and not re.search(r"\d{5,}|\bPCE\b|\bPIECE\b|\bPCS\b", prev, re.I):
+        for prev_raw in reversed(lines[max(0, anchor_idx - 8):anchor_idx]):
+            prev = compact_text(prev_raw)
+            if not prev:
+                continue
+            if re.search(r"\d{5,}|\bPCE\b|\bPIECE\b|\bPCS\b|\bFRAIS\b|\bECO\b", prev, re.I):
+                continue
+            if re.fullmatch(r"\d{1,4}(?:[,.]\d{1,3})?|\d{1,2}/\d{2,4}", prev):
+                continue
+            if re.search(r"[A-ZÀ-ÖØ-Þ]{3,}", prev, re.I):
                 designation = prev
+                break
         if not designation and idx + 1 < len(lines):
             nxt = compact_text(lines[idx + 1])
             if nxt and not re.search(r"\d{5,}|\bPCE\b|\bPIECE\b|\bPCS\b", nxt, re.I):
@@ -597,7 +617,7 @@ def extract_line_items_from_text(text: str, materials_by_id: dict[str, str] | No
 
     line_rows = extract_line_items_from_lines(text.splitlines())
     if line_rows:
-        return enrich_line_items_with_materials(line_rows, materials_by_id)
+        return enrich_line_items_with_materials(_prefer_masterdata_rows(line_rows, materials_by_id), materials_by_id)
 
     compact = compact_text(text)
     article_region_match = re.search(r"(?:Code article|Article).*", compact, flags=re.IGNORECASE)

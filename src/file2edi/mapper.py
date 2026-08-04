@@ -42,10 +42,34 @@ def _looks_like_valid_date(value: object) -> bool:
         return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", text))
 
 
+def _line_quality_confidence(items: list[dict]) -> int:
+    if not items:
+        return 0
+    scores: list[int] = []
+    for item in items:
+        score = 100
+        if not (item.get("Article Bosch") or item.get("code_article") or item.get("bosch_article") or item.get("matnr")):
+            score -= 45
+        if not (item.get("Quantite") or item.get("quantite") or item.get("quantity") or item.get("qty")):
+            score -= 25
+        if not (item.get("Prix unitaire") or item.get("prix_unitaire_ht") or item.get("unit_price") or item.get("price")):
+            score -= 20
+        if not (item.get("Montant") or item.get("montant_ligne_ht") or item.get("amount")):
+            score -= 10
+        if not (item.get("Designation") or item.get("description")):
+            score -= 5
+        scores.append(max(0, score))
+    return max(0, min(100, int(round(sum(scores) / len(scores)))))
+
+
 def _status_from_engine(result: dict) -> str:
     rej = result.get("rejection") or {}
     decision = (rej.get("decision") or "").upper()
-    conf = int(result.get("customer", {}).get("confidence") or 0)
+    lines_data = result.get("lines") or {}
+    line_items = lines_data.get("lignes") or lines_data.get("items") or []
+    line_conf = int((lines_data.get("confidence") if isinstance(lines_data, dict) else None) or _line_quality_confidence(line_items))
+    customer_conf = int(result.get("customer", {}).get("confidence") or 0)
+    conf = int(result.get("confidence") if result.get("confidence") is not None else min(customer_conf, line_conf))
     if decision == "REJECTED":
         return "Rejeté"
     if decision == "REVIEW_REQUIRED" or conf < 90:
@@ -65,12 +89,15 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
     addr = cust.get("delivery_address") or {}
     det = cust.get("detected_address") or {}
 
-    conf = int(cust.get("confidence") or 0)
+    line_items = lines_data.get("lignes") or lines_data.get("items") or []
+    line_quality_conf = int((lines_data.get("confidence") if isinstance(lines_data, dict) else None) or _line_quality_confidence(line_items))
+    customer_conf = int(cust.get("confidence") or 0)
+    conf = int(result.get("confidence") if result.get("confidence") is not None else min(customer_conf, line_quality_conf))
+    default_line_conf = line_quality_conf or 90
     status = _status_from_engine(result)
     order_date = order.get("order_date")
     invalid_date = not order_date or str(order_date).lower() in ("invalid date", "none", "")
 
-    line_items = lines_data.get("lignes") or lines_data.get("items") or []
     parsed_lines = []
     total = 0.0
     for i, ln in enumerate(line_items, start=1):
@@ -120,7 +147,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 or ""
             )
             line_status = "OK"
-            line_conf = int(ln.get("Confiance") or ln.get("confidence") or 90)
+            line_conf = int(ln.get("Confiance") or ln.get("confidence") or default_line_conf)
             if "?" in art or line_conf < 80:
                 line_status = "À vérifier"
             delivery_date = str(ln.get("date_livraison") or "")
