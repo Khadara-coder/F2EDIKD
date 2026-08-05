@@ -814,9 +814,10 @@ def create_router() -> APIRouter:
         page: int = 1,
         pageSize: int = 10,
     ):
-        actor = resolve_actor(req)
-        role = resolve_role(actor)
-        rows_raw = _list_combined_orders(actor=actor, role=role)
+        import server as srv
+        actor = srv._resolve_actor(req)
+        role = srv._resolve_role(actor)
+        rows_raw = _list_combined_orders(actor=actor, role=role, include_done=True)
         rows = []
         for o in rows_raw:
             if search and search.lower() not in (o.get("file_name") or "").lower() and search.lower() not in (o.get("client_name") or "").lower():
@@ -1373,7 +1374,7 @@ def _map_platform_status(status: str | None) -> str:
     return m.get(status or "", "À revoir")
 
 
-def _list_combined_orders(actor: str | None = None, role: str | None = None) -> list[dict]:
+def _list_combined_orders(actor: str | None = None, role: str | None = None, include_done: bool = False) -> list[dict]:
     """List all orders with optional actor/role context (for future RBAC filtering).
     
     Args:
@@ -1389,7 +1390,7 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None) -> 
     #     # Filter to orders assigned to this ADV or in their scope
     #     ...
     
-    rows = list(store.list_orders_summary())
+    rows = list(store.list_all_orders_summary() if include_done else store.list_orders_summary())
     rows_by_id = {
         str(row.get("order_id") or ""): row
         for row in rows
@@ -1420,7 +1421,7 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None) -> 
     except Exception:
         pass
     _DONE_STATUSES = {"Généré", "Transféré", "Envoyé SAP"}
-    rows = [r for r in rows_by_id.values() if r.get("status") not in _DONE_STATUSES]
+    rows = list(rows_by_id.values()) if include_done else [r for r in rows_by_id.values() if r.get("status") not in _DONE_STATUSES]
     rows.sort(key=_row_sort_timestamp, reverse=True)
     return rows[:200]
 

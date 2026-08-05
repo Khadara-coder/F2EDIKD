@@ -1027,6 +1027,26 @@ class File2EdiStore:
         conn.close()
         return [dict(r) for r in rows]
 
+    def list_all_orders_summary(self) -> list[dict]:
+        conn = self._conn()
+        rows = conn.execute(
+            """SELECT o.order_id,
+                      COALESCE(u.file_name, o.file_name) AS file_name,
+                      o.client_name, o.global_confidence, o.status,
+                      o.source, o.assigned_to, o.uploaded_by,
+                      o.hold_reason, o.hold_by,
+                      o.transferred_from, o.transferred_to, o.transfer_note,
+                      o.created_at, o.updated_at, o.sap_sent_at,
+                      h.processed_at, h.processed_by
+               FROM file2edi_orders o
+               LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
+               LEFT JOIN file2edi_conversion_history h ON h.order_id = o.order_id
+               ORDER BY o.created_at DESC
+               LIMIT 500"""
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
     def update_order_header(self, order_id: str, payload: dict) -> dict | None:
         if not self.load_order_review(order_id):
             return None
