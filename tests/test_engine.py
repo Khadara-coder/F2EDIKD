@@ -13,7 +13,7 @@ from app.runtime import configure_runtime
 def runtime_env(monkeypatch, tmp_path):
     master = tmp_path / "masterdata"
     master.mkdir()
-    for name in ("10564_Customers.csv", "10564_Partners.csv", "10564_Materials.csv", "DB_Salesorder.csv"):
+    for name in ("10564_Customers.csv", "10564_Partners.csv", "DB_Materials.csv", "DB_Salesorder.csv"):
         src = Path(__file__).resolve().parents[1] / "data" / "masterdata" / name
         if src.exists():
             (master / name).write_bytes(src.read_bytes())

@@ -131,7 +131,7 @@ Repo source quotidien (job sync prod) : `https://github.boschdevcloud.com/RSR1DY
 |---|---|
 | `10564_Customers.csv` | Lookup Sold-to (SOLDTO;NAME;ORT01;PSTLZ;STRAS;LAND1;VAT_NR) |
 | `10564_Partners.csv` | Lookup Ship-to (SOLDTO;SHIPTO;LAND1;NAME;ORT01;PSTLZ;STRAS) |
-| `10564_Materials.csv` | Index matières (MATNR;MAKTX) |
+| `DB_Materials.csv` | Index matières (MATNR;MAKTX + colonnes Statut si présentes) |
 | `DB_Salesorder.csv` | Référence historique (comparaison uniquement) |
 
 Sync quotidienne en production :
@@ -176,7 +176,7 @@ GenieCommande/
       delivery_address.py     # Résolution adresse livraison
   src/                    # Modules Python (config, SFTP, EDIFACT, matcher…)
     file2edi/
-      store.py            # Persistance File2EDI (PostgreSQL prioritaire + fallback SQLite)
+      store.py            # Persistance File2EDI (PostgreSQL obligatoire en runtime)
       mapper.py           # Mapping engine → React API contract
   frontend/               # Interface React + TypeScript + Tailwind
     dist/                 # Build React versionné (prêt à servir)
@@ -237,8 +237,8 @@ Copier `.env.example` → `.env` et renseigner :
 
 | Variable | Rôle | Requis |
 |---|---|---|
-| `PG_DATABASE_URL` | PostgreSQL principal (fallback SQLite seulement si `FILE2EDI_POSTGRES_STRICT=false`) | Staging/Prod |
-| `FILE2EDI_POSTGRES_STRICT` | `true` = échec au démarrage si PostgreSQL indisponible (recommandé en staging/prod) | Staging/Prod |
+| `PG_DATABASE_URL` | PostgreSQL obligatoire (pas de fallback SQLite runtime) | Staging/Prod |
+| `FILE2EDI_POSTGRES_STRICT` | Conservé pour compose/CI ; `PG_DATABASE_URL` reste requis | Staging/Prod |
 | `SFTP_HOST` / `SFTP_USERNAME` / `SFTP_PASSWORD` | Livraison SFTP | Prod |
 | `DATABRICKS_TOKEN` | Auth HTTP vers Databricks Model Serving | Prod |
 | `DATABRICKS_HOST` | Workspace Databricks qui heberge le LLM | Prod |

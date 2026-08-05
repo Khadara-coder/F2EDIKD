@@ -52,7 +52,7 @@ def open_master_csv(path: Path):
 
 
 def current_master_data_fingerprint() -> tuple:
-    names = ("10564_Customers.csv", "10564_Partners.csv", "10564_Materials.csv", "DB_Salesorder.csv")
+    names = ("10564_Customers.csv", "10564_Partners.csv", "DB_Materials.csv", "DB_Salesorder.csv")
     fingerprint = []
     for name in names:
         path = MASTER_DATA_DIR / name
@@ -96,7 +96,7 @@ def get_master_data() -> dict[str, Any]:
 
     customers_path = MASTER_DATA_DIR / "10564_Customers.csv"
     partners_path = MASTER_DATA_DIR / "10564_Partners.csv"
-    materials_path = MASTER_DATA_DIR / "10564_Materials.csv"
+    materials_path = MASTER_DATA_DIR / "DB_Materials.csv"
     salesorders_path = MASTER_DATA_DIR / "DB_Salesorder.csv"
     data: dict[str, Any] = {
         "loaded": False,

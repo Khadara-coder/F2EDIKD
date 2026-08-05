@@ -108,9 +108,7 @@ PDF_STORAGE_DIR = _ensure_dir(
     os.environ.get("PDF_STORAGE_DIR", os.environ.get("INTAKE_DIR", str(APP_ROOT / "data" / "intake"))),
     "intake",
 )
-# Database backend: PostgreSQL only (SQLite removed)
-# Configuration via PG_DATABASE_URL environment variable
-DB_PATH          = None  # Legacy SQLite path — NOT USED; PostgreSQL via PG_DATABASE_URL
+# Database backend: PostgreSQL only (configure via PG_DATABASE_URL)
 CONFIG_INI       = os.path.join(ENGINE_DIR, "config.ini")
 UNB_SENDER_GLN   = os.environ.get("UNB_SENDER_GLN",   "4399901876613")
 UNB_RECEIVER_GLN = os.environ.get("UNB_RECEIVER_GLN", "3015981600108")
@@ -602,35 +600,8 @@ def _extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
 
 # ── History ────────────────────────────────────────────────────────────────────
 def _load_history() -> list[list]:
-    try:
-        if DB_PATH is None or not os.path.exists(str(DB_PATH)):
-            return []
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        try:
-            rows = conn.execute(
-                "SELECT id,filename,status,po_number,sold_to,ship_to,created_at,rejection_reason "
-                "FROM jobs ORDER BY created_at DESC LIMIT 100"
-            ).fetchall()
-        except sqlite3.OperationalError:
-            try:
-                # Standalone schema variant (src/database.py): source_filename + soldto
-                rows = conn.execute(
-                    "SELECT id,source_filename,status,po_number,soldto,'' as ship_to,created_at,rejection_reason "
-                    "FROM jobs ORDER BY created_at DESC LIMIT 100"
-                ).fetchall()
-            except Exception:
-                try:
-                    rows = conn.execute(
-                        "SELECT correlation_id,source_filename,status,order_key,'','',created_at,rejection_code "
-                        "FROM order_ledger ORDER BY created_at DESC LIMIT 100"
-                    ).fetchall()
-                except Exception:
-                    rows = []
-        conn.close()
-        return [list(r) for r in rows]
-    except Exception as exc:
-        log.warning("History load error: %s", exc)
-        return []
+    """Legacy jobs history endpoint — PostgreSQL orders live under /api/orders."""
+    return []
 
 
 # ── Master data helpers ────────────────────────────────────────────────────────
@@ -802,7 +773,7 @@ async def _shutdown_event() -> None:
 
 
 def _get_db_backend() -> str:
-    """Detect current database backend: 'postgres' or 'sqlite'."""
+    """Detect current database backend ('postgres' when PG_DATABASE_URL is set)."""
     from src.runtime_status import get_db_backend
 
     return get_db_backend()
@@ -1216,32 +1187,8 @@ def _persist_uploaded_pdf(
 
 
 def _store_conversion_history(result: dict) -> None:
-    """Persist conversion result — no-op for PostgreSQL backend."""
-    if DB_PATH is None or not os.path.exists(str(DB_PATH)):
-        return
-    try:
-        decision  = result.get("rejection", {}).get("decision") or "UNKNOWN"
-        po_number = result.get("order", {}).get("po_number") or ""
-        sold_to   = result.get("customer", {}).get("soldto") or ""
-        ship_to   = result.get("customer", {}).get("shipto") or ""
-        filename  = result.get("filename") or ""
-        reason    = result.get("rejection", {}).get("reason") or ""
-        row_id    = result.get("pdf_hash") or str(uuid.uuid4())
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        try:
-            conn.execute(
-                "INSERT OR IGNORE INTO jobs "
-                "(id, filename, status, po_number, sold_to, ship_to, created_at, rejection_reason) "
-                "VALUES (?, ?, ?, ?, ?, ?, datetime('now'), ?)",
-                [row_id, filename, decision, po_number, sold_to, ship_to, reason],
-            )
-            conn.commit()
-        except Exception:
-            pass
-        finally:
-            conn.close()
-    except Exception as exc:
-        log.warning("_store_conversion_history: %s", exc)
+    """Legacy no-op — conversions persist via File2EDI PostgreSQL store."""
+    return
 
 
 @app.get("/api/proxy/health")
@@ -1472,11 +1419,10 @@ async def _startup_sync_masterdata() -> None:
     Masterdata strategy (in order):
     1. If all files already present in the runtime dir (bundled with snapshot) → use them.
     2. Otherwise, attempt API download from MASTER_DATA_SRC.
-    Persistence strategy: Delta > Workspace JSONL > SQLite (auto-detected).
-    File2EDI order tables: SQLite schema in data/file2edi_schema.sql.
+    Persistence: PostgreSQL (PG_DATABASE_URL) with optional Delta / Workspace JSONL.
     Non-blocking: failures are logged but never prevent the app from starting.
     """
-    # ── File2EDI SQLite schema ────────────────────────────────────────────
+    # ── File2EDI PostgreSQL schema ────────────────────────────────────────
     try:
         from src.file2edi.store import get_store
         get_store()  # initializes file2edi_* tables
@@ -1544,19 +1490,17 @@ async def _startup_sync_masterdata() -> None:
     # ── Persistence backend (always runs — no early return above) ─────────
     try:
         _detect_and_init_backend()
-        _maybe_migrate_sqlite_to_backend()
         log.info("persistence: backend=%s persistent=%s location=%s",
                  _PERSIST_BACKEND.get("backend"), _PERSIST_BACKEND.get("persistent"),
                  _PERSIST_BACKEND.get("location"))
-        # Rebuild the local SQLite order cache from Delta when the container is
-        # fresh/ephemeral (no data loss across redeploys).
+        # Optional: rebuild order cache from Delta when available.
         try:
             from src.file2edi.store import get_store as _gs
             _gs().hydrate_from_delta()
         except Exception as _he:
             log.warning("order-cache hydration from Delta failed (non-fatal): %s", _he)
     except Exception as _pe:
-        log.warning("persistence backend init failed (SQLite fallback active): %s", _pe)
+        log.warning("persistence backend init failed: %s", _pe)
 
 
 # ── Health ─────────────────────────────────────────────────────────────────────
@@ -2574,24 +2518,7 @@ def _load_conversion_callback_context(conversion_id: str) -> dict | None:
             }
     except Exception:
         pass
-    # Legacy SQLite fallback (only when DB_PATH is set)
-    if DB_PATH is None:
-        return None
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT id,correlation_id,callback_url,source_filename,pdf_hash,status,business_status,"
-            "delivery_status,po_number,soldto,shipto,tst_filename,sftp_status,email_status,"
-            "rejection_code,rejection_message,created_at,updated_at "
-            "FROM conversions WHERE id=?",
-            [conversion_id],
-        ).fetchone()
-        conn.close()
-        return dict(row) if row else None
-    except Exception as exc:
-        log.warning("_load_conversion_callback_context(%s): %s", conversion_id, exc)
-        return None
+    return None
 
 
 def _emit_conversion_callback(conversion_id: str, event_type: str, actor: str = "system",
@@ -2630,27 +2557,12 @@ def _emit_conversion_callback(conversion_id: str, event_type: str, actor: str = 
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PERSISTENCE ADAPTER  — Three-tier: Delta ▶ Workspace-JSONL ▶ SQLite
+# PERSISTENCE ADAPTER  — Delta ▶ Workspace-JSONL ▶ PostgreSQL
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# TIER 1 — Delta tables (preferred, scalable, persistent)
-#   Requires one-time admin setup:
-#     GRANT CREATE, USAGE ON SCHEMA <cat>.<schema>
-#       TO `afa4186f-eea1-4f6e-9fe4-cd9eb0d3910a`;
-#   Then set in app.yaml:
-#     DATABRICKS_WAREHOUSE_ID: "607eec0346978542"
-#     EDIFACT_CATALOG: "bci_rbs_prod"   # or any UC-managed catalog
-#     EDIFACT_SCHEMA:  "edifact_generator"
-#
+# TIER 1 — Delta tables (preferred on Databricks, scalable, persistent)
 # TIER 2 — Workspace JSONL (no admin needed, user-grantable)
-#   User grants app SP CAN_EDIT on the EDIFACT workspace folder once:
-#     Workspace UI → /Users/rsr1dy@bosch.com/EDIFACT → Permissions
-#     → Add  afa4186f-eea1-4f6e-9fe4-cd9eb0d3910a  as CAN_EDIT
-#   Or set DATABRICKS_PERSIST_TOKEN with a PAT that has write access.
-#   Optional: DATABRICKS_PERSIST_PATH (defaults to EDIFACT/data/persist/)
-#
-# TIER 3 — Container SQLite (fallback, NOT persistent across redeploys)
-#   Current default until admin/user sets up Tier 1 or 2.
+# TIER 3 — PostgreSQL via File2EDI store (PG_DATABASE_URL) — default runtime
 # ══════════════════════════════════════════════════════════════════════════════
 
 import threading as _threading
@@ -2923,7 +2835,7 @@ def save_order_graph(review: dict) -> bool:
 
     Best-effort: active only when the Delta backend and order-graph tables are
     available. Returns True on success, False when skipped or on failure
-    (failures are logged, never raised — this must not break the SQLite path).
+    (failures are logged, never raised — must not break the primary store path).
     """
     if _PERSIST_BACKEND.get("backend") != "delta":
         return False
@@ -3023,10 +2935,7 @@ def load_order_graphs_from_delta() -> list[dict]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_storage_mode() -> dict:
-    """Return storage backend descriptor for diagnostics and /api/proxy/health.
-
-    Since v2: PostgreSQL only (SQLite removed).
-    """
+    """Return storage backend descriptor for diagnostics and /api/proxy/health."""
     b = _PERSIST_BACKEND.copy()
     b.pop("_delta_exec", None)   # not JSON-serialisable
     if not b:
@@ -3036,51 +2945,14 @@ def get_storage_mode() -> dict:
             "db_exists": True,
             "db_size_kb": 0,
             "conversions_available": True, "audit_events_available": True,
-            "note": "Backend PostgreSQL (SQLite removed).",
+            "note": "Backend PostgreSQL.",
         }
-    bk = b.get("backend", "postgres")
     return b
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# SQLite write helpers (fallback path for workspace_jsonl failures)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _sqlite_save_conversion(row: dict) -> None:
-    """Upsert one conversion into container-local SQLite (workspace_jsonl fallback only)."""
-    if DB_PATH is None:
-        return
-    conn = sqlite3.connect(DB_PATH, timeout=5)
-    try:
-        sets     = ", ".join(f"{c}=excluded.{c}" for c in _CONV_COLS if c not in ("id", "created_at"))
-        cols_str = ", ".join(_CONV_COLS)
-        qmarks   = ", ".join("?" for _ in _CONV_COLS)
-        conn.execute(
-            f"INSERT INTO conversions ({cols_str}) VALUES ({qmarks})"
-            f" ON CONFLICT(id) DO UPDATE SET {sets}, updated_at=datetime('now')",
-            [row.get(c) for c in _CONV_COLS],
-        )
-        conn.commit()
-    except Exception as exc:
-        log.warning("_sqlite_save_conversion(%s): %s", row.get("id"), exc)
-    finally:
-        conn.close()
-
-
-def _sqlite_append_audit(
-    conversion_id: str,
-    event_type:    str,
-    actor:         str         = "system",
-    payload:       dict | None = None,
-    result:        str | None  = None,
-) -> None:
-    """Append one audit event to container-local SQLite (Req 6 fallback)."""
-    _add_audit(conversion_id, event_type, actor, payload, result)
 
 
 def save_conversion(row: dict) -> None:
     """Upsert a single conversion. Routes to active backend."""
-    bk = _PERSIST_BACKEND.get("backend", "sqlite")
+    bk = _PERSIST_BACKEND.get("backend", "postgres")
 
     if bk == "delta":
         t = _PERSIST_BACKEND["t_conv"]
@@ -3113,34 +2985,12 @@ def save_conversion(row: dict) -> None:
                 row.get("id"), _wje,
             )
 
-    elif bk == "postgres":
-        pass  # PostgreSQL: conversions saved directly via File2EDI store (store.save_order_review)
-
-    else:  # sqlite fallback (no longer supported)
-        log.debug("save_conversion: sqlite backend not supported, skipping")
-        return
-
-    if False:  # dead code kept for reference — was: sqlite3.connect(DB_PATH, timeout=5)
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        try:
-            sets = ", ".join(f"{c}=excluded.{c}" for c in _CONV_COLS if c not in ("id","created_at"))
-            cols_str = ", ".join(_CONV_COLS)
-            qmarks   = ", ".join("?" for _ in _CONV_COLS)
-            conn.execute(f"""
-            INSERT INTO conversions ({cols_str})
-            VALUES ({qmarks})
-            ON CONFLICT(id) DO UPDATE SET {sets}, updated_at=datetime('now')
-            """, [row.get(c) for c in _CONV_COLS])
-            conn.commit()
-        except Exception as exc:
-            log.warning("save_conversion(%s) sqlite: %s", row.get("id"), exc)
-        finally:
-            conn.close()
+    # postgres: conversions saved via File2EDI store (store.save_order_review)
 
 
 def load_conversion(cid: str) -> dict | None:
     """Load a single conversion by id. Returns None if not found."""
-    bk = _PERSIST_BACKEND.get("backend", "sqlite")
+    bk = _PERSIST_BACKEND.get("backend", "postgres")
 
     if bk == "delta":
         t = _PERSIST_BACKEND["t_conv"]
@@ -3155,18 +3005,8 @@ def load_conversion(cid: str) -> dict | None:
         rows = _ws_read_jsonl(ws_path)
         return next((r for r in rows if r.get("id") == cid), None)
 
-    # postgres: no legacy conversions table — return None
-    if DB_PATH is None:
-        return None
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.row_factory = sqlite3.Row
-        row = conn.execute("SELECT * FROM conversions WHERE id=?", [cid]).fetchone()
-        conn.close()
-        return dict(row) if row else None
-    except Exception as exc:
-        log.warning("load_conversion(%s): %s", cid, exc)
-        return None
+    # postgres: no legacy conversions table
+    return None
 
 
 def list_conversions(
@@ -3175,7 +3015,7 @@ def list_conversions(
     q:       str | None = None,
 ) -> list[dict]:
     """List conversions newest-first, optional status/text filter."""
-    bk = _PERSIST_BACKEND.get("backend", "sqlite")
+    bk = _PERSIST_BACKEND.get("backend", "postgres")
 
     if bk == "delta":
         t = _PERSIST_BACKEND["t_conv"]
@@ -3206,11 +3046,7 @@ def list_conversions(
         rows.sort(key=lambda r: r.get("updated_at") or r.get("created_at", ""), reverse=True)
         return rows[:limit]
 
-    # PostgreSQL backend
-    if bk == "postgres":
-        return []  # Conversions handled via File2EDI React API (/api/upload/list)
-
-    # Legacy SQLite (no longer supported)
+    # PostgreSQL: conversions via File2EDI React API (/api/upload/list)
     return []
 
 
@@ -3222,7 +3058,7 @@ def save_audit_event(
     result:        str | None  = None,
 ) -> None:
     """Append an audit event. Routes to active backend."""
-    bk = _PERSIST_BACKEND.get("backend", "sqlite")
+    bk = _PERSIST_BACKEND.get("backend", "postgres")
 
     if bk == "delta":
         t = _PERSIST_BACKEND["t_audit"]
@@ -3255,19 +3091,18 @@ def save_audit_event(
                 _ws_write_jsonl(ws_path, rows)
         except Exception as _wje:
             log.warning(
-                "save_audit_event(%s,%s): workspace_jsonl write failed (%s) — SQLite fallback",
+                "save_audit_event(%s,%s): workspace_jsonl write failed (%s)",
                 conversion_id, event_type, _wje,
             )
-            _sqlite_append_audit(conversion_id, event_type, actor, payload, result)
         return
 
-    # postgres/sqlite fallback — no-op (audit stored via File2EDI store in router.py)
+    # postgres: audit stored via File2EDI store in router.py
     log.debug("save_audit_event(%s, %s): non-delta backend, skipped", conversion_id, event_type)
 
 
 def list_audit_events(conversion_id: str) -> list[dict]:
     """List audit events for a conversion, oldest first."""
-    bk = _PERSIST_BACKEND.get("backend", "sqlite")
+    bk = _PERSIST_BACKEND.get("backend", "postgres")
 
     if bk == "delta":
         t = _PERSIST_BACKEND["t_audit"]
@@ -3285,155 +3120,76 @@ def list_audit_events(conversion_id: str) -> list[dict]:
             key=lambda r: r.get("created_at", ""),
         )
 
-    # postgres/sqlite fallback: no legacy audit table
     return []
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Migration helper  (SQLite → new backend, run once on first startup after
-# migration — writes a storage_migration_checked audit event when done)
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _maybe_migrate_sqlite_to_backend() -> None:
-    """Migration from SQLite to backend — no-op when using PostgreSQL."""
-    bk = _PERSIST_BACKEND.get("backend", "sqlite")
-    if bk in ("postgres", "sqlite"):
-        return  # nothing to migrate
-    if DB_PATH is None or not Path(DB_PATH).exists():
-        return  # no local SQLite data
-
-    # ── Idempotency check ────────────────────────────────────────────────────
-    sentinel_key  = "storage_migration_checked"
-
-    if bk == "workspace_jsonl":
-        # Primary guard: migration_sentinel.json file (lightweight get-status check)
-        base_path = _PERSIST_BACKEND.get("path_conv", "").rsplit("/", 1)[0]
-        sentinel_ws_path = base_path + "/migration_sentinel.json"
-        try:
-            r_chk = _ws_api("GET", "/api/2.0/workspace/get-status",
-                            params={"path": sentinel_ws_path})
-            if r_chk.status_code == 200:
-                log.info("migration: sentinel file found — skipping (already migrated)")
-                return
-        except Exception:
-            pass  # can't check → proceed with migration (write sentinel at end)
-    else:
-        # Delta / other: scan audit events for sentinel
-        try:
-            if any(e.get("event_type") == sentinel_key for e in list_audit_events("__migration__")):
-                return
-        except Exception:
-            pass
-
-    # ── Read SQLite source ───────────────────────────────────────────────────
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=5)
-        conn.row_factory = sqlite3.Row
-        existing_convs = [dict(r) for r in
-                          conn.execute("SELECT * FROM conversions ORDER BY created_at").fetchall()]
-        existing_audit = [dict(r) for r in
-                          conn.execute("SELECT * FROM audit_events ORDER BY created_at").fetchall()]
-        conn.close()
-    except Exception as exc:
-        log.warning("migration: could not read SQLite source: %s", exc)
-        return
-
-    if not existing_convs and not existing_audit:
-        log.info("migration: SQLite source is empty — nothing to migrate")
-        if bk == "workspace_jsonl":
-            _ws_write_migration_sentinel(sentinel_ws_path, 0, 0, bk)
-        return
-
-    # ── Migrate rows ─────────────────────────────────────────────────────────
-    migrated_conv = migrated_audit = 0
-    for row in existing_convs:
-        try:
-            save_conversion(row)
-            migrated_conv += 1
-        except Exception as exc:
-            log.warning("migration: skip conv %s: %s", row.get("id"), exc)
-    for evt in existing_audit:
-        try:
-            save_audit_event(
-                evt.get("conversion_id", "?"),
-                evt.get("event_type", "migrated"),
-                evt.get("actor", "migration"),
-                _json.loads(evt.get("payload") or "{}"),
-                evt.get("result"),
-            )
-            migrated_audit += 1
-        except Exception as exc:
-            log.warning("migration: skip audit %s: %s", evt.get("id"), exc)
-
-    # ── Write sentinel (idempotency guard for next startup) ──────────────────
-    if bk == "workspace_jsonl":
-        _ws_write_migration_sentinel(sentinel_ws_path, migrated_conv, migrated_audit, bk)
-    else:
-        # Delta: write sentinel as audit event
-        save_audit_event(
-            "__migration__", sentinel_key, "system",
-            {"migrated_conversions": migrated_conv, "migrated_audit_events": migrated_audit,
-             "source": str(DB_PATH), "target_backend": bk},
-            "OK" if migrated_conv + migrated_audit > 0 else "EMPTY_SOURCE",
-        )
-    log.info("migration: %d conversions + %d audit events → %s", migrated_conv, migrated_audit, bk)
-
-
-def _ws_write_migration_sentinel(
-    ws_path:        str,
-    migrated_conv:  int,
-    migrated_audit: int,
-    bk:             str,
-) -> None:
-    """Write migration_sentinel.json to the persist folder (Req 3+9)."""
-    sentinel_data = _json.dumps({
-        "storage_migration_checked": True,
-        "migrated_at":            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "migrated_conversions":   migrated_conv,
-        "migrated_audit_events":  migrated_audit,
-        "source":                 str(DB_PATH),
-        "target_backend":         bk,
-    }, default=str).encode("utf-8")
-    try:
-        r = _ws_api("POST", "/api/2.0/workspace/import", json={
-            "path": ws_path, "format": "AUTO",
-            "content": _b64.b64encode(sentinel_data).decode("ascii"),
-            "overwrite": True,
-        })
-        if r.status_code not in (200, 201):
-            log.warning("migration: sentinel write HTTP %d: %s", r.status_code, r.text[:80])
-        else:
-            log.info("migration: sentinel written to %s", ws_path)
-    except Exception as exc:
-        log.warning("migration: could not write sentinel file: %s", exc)
 
 # ── end PERSISTENCE ADAPTER ───────────────────────────────────────────────────
 
 
 def _upsert_conversion(data: dict, callback_url: str | None = None) -> None:
-    """Insert or replace a conversion row from a proxy-convert result dict.
-    PostgreSQL backend: conversions saved via File2EDI store; this is a no-op.
+    """Persist conversion metadata to Delta/JSONL when those backends are active.
+
+    PostgreSQL path is handled by File2EDI store in router.py.
     """
-    bk = _PERSIST_BACKEND.get("backend", "sqlite")
+    bk = _PERSIST_BACKEND.get("backend", "postgres")
     if bk == "postgres":
-        return  # PostgreSQL: handled by store.save_order_review() in router.py
+        return
     try:
-        r   = data.get("rejection", {})
-        cus = data.get("customer", {})
-        ord = data.get("order", {})
-        edi = data.get("edifact", {})
-        lines = data.get("lines", {})
-        dec   = r.get("decision") or "UNKNOWN"
+        r = data.get("rejection", {}) or {}
+        cus = data.get("customer", {}) or {}
+        ord_ = data.get("order", {}) or {}
+        edi = data.get("edifact", {}) or {}
+        lines = data.get("lines", {}) or {}
+        dec = r.get("decision") or "UNKNOWN"
         status_map = {
-            "ACCEPTED": "ACCEPTED", "REJECTED": "REJECTED",
+            "ACCEPTED": "ACCEPTED",
+            "REJECTED": "REJECTED",
             "REVIEW": "REVIEW_REQUIRED",
         }
-        status = status_map.get(dec, "FAILED" if data.get("status") == "ERROR" else "PROCESSING")
-        missing = sum(1 for it in (lines.get("items") or [])
-                      if (it.get("code_article","")).startswith("ARTICLE_MANQUANT"))
-        # SQLite no longer supported — this branch is only reached for non-postgres backends
-        # (delta/workspace_jsonl) which don't reach this point anyway
-        log.debug("_upsert_conversion: non-postgres backend not supported, skipping")
+        status = status_map.get(
+            dec, "FAILED" if data.get("status") == "ERROR" else "PROCESSING"
+        )
+        missing = sum(
+            1
+            for it in (lines.get("items") or [])
+            if str(it.get("code_article", "")).startswith("ARTICLE_MANQUANT")
+        )
+        cid = data.get("pdf_hash") or str(uuid.uuid4())
+        row = {
+            "id": cid,
+            "correlation_id": data.get("correlation_id"),
+            "callback_url": callback_url,
+            "source_filename": data.get("filename", ""),
+            "pdf_hash": data.get("pdf_hash"),
+            "status": status,
+            "business_status": status,
+            "delivery_status": None,
+            "po_number": ord_.get("po_number"),
+            "order_date": ord_.get("order_date"),
+            "delivery_date": ord_.get("delivery_date"),
+            "soldto": cus.get("soldto"),
+            "shipto": cus.get("shipto"),
+            "customer_name": cus.get("name"),
+            "confidence": cus.get("confidence", 0),
+            "line_count": lines.get("count", 0),
+            "missing_material_count": missing,
+            "rejection_code": r.get("reason"),
+            "rejection_message": (
+                REJECT_LABELS.get(r["reason"]) or r["reason"]
+                if r.get("reason")
+                else None
+            ),
+            "tst_filename": (
+                data.get("filename", "").replace(".pdf", ".tst")
+                if edi.get("generated")
+                else None
+            ),
+            "edifact_content": edi.get("message"),
+            "extraction_json": _json.dumps(data),
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "updated_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        save_conversion(row)
     except Exception as e:
         log.warning("_upsert_conversion: %s", e)
 
@@ -3785,7 +3541,7 @@ async def api_generate(cid: str, req: Request):
     """Regenerate EDIFACT using stored extraction + operator corrections.
 
     Flow:
-    1. Load conversion + corrections from SQLite.
+    1. Load conversion + corrections from the File2EDI store.
     2. Merge corrections over original extraction.
     3. Look up SOLDTO/SHIPTO from masterdata cache.
     4. Call src.edifact_builder.build_orders_message directly.

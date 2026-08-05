@@ -22,7 +22,7 @@ log = logging.getLogger("edifact.masterdata_runtime")
 MASTER_FILES = [
     "10564_Customers.csv",
     "10564_Partners.csv",
-    "10564_Materials.csv",
+    "DB_Materials.csv",
     "DB_Salesorder.csv",
 ]
 
@@ -30,7 +30,7 @@ MASTER_FILES = [
 MD_FILES = {
     "customers": "10564_Customers.csv",
     "partners": "10564_Partners.csv",
-    "materials": "10564_Materials.csv",
+    "materials": "DB_Materials.csv",
     "salesorders": "DB_Salesorder.csv",
 }
 
@@ -38,9 +38,12 @@ MD_FILES = {
 MD_PARQUET_FILES = {
     "customers": "10564_Customers.parquet",
     "partners": "10564_Partners.parquet",
-    "materials": "10564_Materials.parquet",
+    "materials": "DB_Materials.parquet",
     "salesorders": "DB_Salesorder.parquet",
 }
+
+# Ancien export Materials (fallback lecture seule si DB_Materials absent).
+_MD_MATERIALS_LEGACY = ("10564_Materials.parquet", "10564_Materials.csv")
 
 MD_SEARCH_COLS = {
     "customers": ["SOLDTO", "NAME", "ORT01", "PSTLZ", "STRAS", "LAND1", "VAT_NR"],
@@ -454,7 +457,16 @@ def resolve_source_path(key: str) -> Path:
         if parquet_path.exists():
             return parquet_path
     csv_name = MD_FILES.get(key, "")
-    return root / csv_name
+    csv_path = root / csv_name if csv_name else root
+    if csv_name and csv_path.exists():
+        return csv_path
+    # Materials: fall back to old 10564_Materials.* if DB_Materials not synced yet
+    if key == "materials":
+        for legacy in _MD_MATERIALS_LEGACY:
+            legacy_path = root / legacy
+            if legacy_path.exists():
+                return legacy_path
+    return csv_path
 
 
 def _dataframe_as_str(df: Any) -> Any:

@@ -39,7 +39,7 @@ _MASTERDATA_ROOT = os.environ.get(
 _MANDATORY_CSVs = [
     "10564_Customers.csv",
     "10564_Partners.csv",
-    "10564_Materials.csv",
+    "DB_Materials.csv",
 ]
 
 _RESULTS: list[tuple[str, str, str]] = []  # (status, check, detail)

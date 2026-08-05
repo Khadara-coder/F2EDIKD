@@ -154,12 +154,12 @@ export PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localh
 python server.py
 ```
 
-When `PG_DATABASE_URL` is set, `src.file2edi.store.get_store()` uses PostgreSQL with the same synchronous interface already consumed by `src/file2edi/router.py`. If PostgreSQL support is unavailable, the app falls back to SQLite by default; set `FILE2EDI_POSTGRES_STRICT=true` to fail fast instead.
+When `PG_DATABASE_URL` is set, `src.file2edi.store.get_store()` uses PostgreSQL with the same synchronous interface already consumed by `src/file2edi/router.py`. Without `PG_DATABASE_URL`, startup fails — SQLite runtime fallback is disabled.
 
 Current integration scope:
 - File2EDI uploads, orders, partners, lines, anomalies, conversion history, EDIFACT exports, and app settings are stored in PostgreSQL.
-- SQLite remains the no-config local fallback.
-- The legacy `server.py` platform/conversions persistence still has its existing Delta / JSONL / SQLite adapter and can be migrated separately if you want a full single-database cutover.
+- SQLite remains for unit tests (`File2EdiStore`) and optional diagnostic scripts only.
+- Optional Databricks persistence (Delta / Workspace JSONL) can still mirror conversions when configured.
 
 ---
 
@@ -194,8 +194,8 @@ All files compiled & tested ✅
 ## 🆘 Troubleshooting
 
 **"Still using SQLite?"**
-- Check: `echo $PG_DATABASE_URL`
-- If empty, app auto-falls back to SQLite (by design)
+- Check: `echo $PG_DATABASE_URL` — must be set; runtime has no SQLite fallback
+- Unit tests may still open temporary SQLite DBs via `File2EdiStore`
 
 **"Migration failed?"**
 - Check PG is running: `docker-compose -f docker-compose-pg.yml ps`

@@ -1,25 +1,25 @@
 # Phase 4: PostgreSQL Integration — Complete
 
-**Status**: ✅ **DEPLOYED TO REMOTE**
+**Status**: ✅ **DEPLOYED** — File2EDI runtime is PostgreSQL-only (`PG_DATABASE_URL` required).
+
+> Note: the experimental dual-mode `store_adapter.py` was removed; use
+> `src.file2edi.store.get_store()` (`PostgresFile2EdiStore`).
 
 ## What's Implemented
 
-### 1. Auto-Detection & Graceful Fallback
-- ✅ Server detects `PG_DATABASE_URL` environment variable at startup
-- ✅ If PostgreSQL is available → initializes async sessions + RLS policies
-- ✅ If PostgreSQL unavailable or not configured → falls back transparently to SQLite (ZERO breaking changes)
-- ✅ No deployment friction — works with or without PostgreSQL
+### 1. Mandatory PostgreSQL
+- ✅ Server / `get_store()` require `PG_DATABASE_URL` at startup
+- ✅ Initializes sessions + RLS policies when PG is available
+- ✅ No transparent SQLite runtime fallback
 
 ### 2. Startup/Shutdown Lifecycle
 - ✅ `@app.on_event("startup")` calls `_init_postgres_db()` if PG configured
 - ✅ RLS policies auto-initialized on first connection
 - ✅ `@app.on_event("shutdown")` gracefully closes PostgreSQL connections
 
-### 3. Dual-Mode Store Adapter
-- ✅ New file: `src/file2edi/store_adapter.py` (150+ lines)
-- ✅ Unified interface: same methods work for both SQLite and PostgreSQL
-- ✅ Backend detection: auto-selects based on `PG_DATABASE_URL` presence
-- ✅ Methods: `get_combined_orders()`, `get_combined_orders_async()`, `get_upload_meta()`, `save_upload_with_id()`
+### 3. Store
+- ✅ `src/file2edi/store.py` — `PostgresFile2EdiStore` for runtime; SQLite base class for tests
+- ✅ Same sync interface consumed by `router.py`
 
 ### 4. Router RBAC Context Passing
 - ✅ Modified `src/file2edi/router.py` to accept `actor` and `role` in all endpoints
@@ -34,37 +34,20 @@
 
 ## How to Use It
 
-### Option 1: Local SQLite (Default)
 ```bash
-# No configuration needed — just run
-python server.py
-# or
-.\run_local.ps1
-```
-**Behavior**: Uses `data/file2edi.db` (existing behavior)
-
-### Option 2: PostgreSQL (Production)
-```bash
-# Set PostgreSQL connection string
-$env:PG_DATABASE_URL="postgresql://edifact:password@localhost:5432/edifact"
-
-# Start Docker PostgreSQL locally
+# Start PostgreSQL locally
 docker-compose -f docker-compose-pg.yml up -d
 
-# Migrate data
+# Required
+$env:PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact"
+
+# Optional: migrate historical SQLite data
 python migrate_to_postgres.py --src data/file2edi.db --dst $env:PG_DATABASE_URL
 
-# Run server
 python server.py
 ```
-**Behavior**: Server auto-detects PostgreSQL, initializes schema, enforces RLS on all queries
 
-### Option 3: Databricks DBFS (Future)
-```bash
-$env:PG_DATABASE_URL="databricks+connector://..."
-python server.py
-```
-(Awaiting Bosch cloud backend specification)
+Without `PG_DATABASE_URL`, `get_store()` fails fast (no SQLite runtime fallback).
 
 ## What's NOT Yet Implemented (Phase 6)
 
@@ -79,52 +62,43 @@ These require a user decision (Phase 6) on filtering strategy:
 
 ## File Changes Summary
 
-**New Files**:
-- `src/file2edi/store_adapter.py` — Dual-mode backend adapter
-
-**Modified Files**:
-- `server.py` — Added `_init_postgres_db()`, startup/shutdown events
-- `src/file2edi/router.py` — Added `actor`/`role` parameters to 5 endpoints
-
-**No Breaking Changes**: Existing code continues to work unchanged.
+**Primary store**: `src/file2edi/store.py` (`PostgresFile2EdiStore`)
+**Removed**: experimental `src/file2edi/store_adapter.py`
+**Modified**: `server.py` (startup PG init; dead SQLite paths cleaned)
 
 ## Testing Checklist
 
-✅ Server imports without errors
-✅ PostgreSQL detection works (logs "PostgreSQL not configured" if PG_DATABASE_URL not set)
-✅ SQLite fallback works (default behavior preserved)
-✅ All Python files compile successfully (`py_compile`)
-✅ Startup events fire without exceptions
-✅ Router endpoints accept `Request` parameter and resolve actor/role
-✅ Zero changes to business logic (endpoints still return same data structure)
+✅ Server imports without errors when `PG_DATABASE_URL` is set
+✅ `get_store()` raises without `PG_DATABASE_URL`
+✅ Unit tests still use temporary SQLite via `File2EdiStore`
+✅ Router endpoints accept `Request` and resolve actor/role
 
 ## Next Steps (Phase 6)
 
 1. **User Decision**: Choose RBAC filtering strategy (assignment / scope / combined)
-2. **Implementation**: Modify `_list_combined_orders()` to apply filters based on strategy
+2. **Implementation**: Modify order listing to apply filters based on strategy
 3. **Testing**: Verify ADV users see only their data
-4. **PostgreSQL Direct**: Update endpoints to query PostgreSQL RLS directly (skip SQLite fallback)
+4. **PostgreSQL Direct**: Prefer RLS-backed queries end-to-end
 
 ## Troubleshooting
 
-### "PostgreSQL not configured — using SQLite"
-→ Normal. Set `PG_DATABASE_URL` to enable PostgreSQL.
+### "PG_DATABASE_URL is required; SQLite fallback is disabled"
+→ Set `PG_DATABASE_URL` before starting the server.
 
 ### "Failed to initialize PostgreSQL: ..."
 → Check PostgreSQL is running: `docker-compose -f docker-compose-pg.yml up -d`
-→ Check connection string: `postgresql://user:password@host:5432/database`
-→ Fall-back to SQLite is automatic (ZERO impact on users)
+→ Check connection string: `postgresql+psycopg://user:password@host:5432/database`
 
 ### "RLS policies auto-initialized"
-→ Good! This means your data is now protected at the database layer.
+→ Good — data is protected at the database layer.
 
 ## Security Notes
 
 - ✅ RLS is enforced at PostgreSQL level (can't bypass via code)
 - ✅ Admin users bypass RLS (`role=admin` sets no row restrictions)
 - ✅ ADV users restricted by `SET app.current_user = '{actor}'` before each query
-- ✅ SQLite fallback does NOT enforce RLS (so for production must use PostgreSQL)
+- ✅ Runtime has no SQLite path that could bypass RLS
 
 ---
 
-**Deployed**: 2026-07-28 | **Branch**: main | **Commit**: [see git log]
+**Deployed**: 2026-07-28 | **Updated**: 2026-08-05 (SQLite runtime cleanup)

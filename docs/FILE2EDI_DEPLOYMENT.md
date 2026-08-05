@@ -126,8 +126,7 @@ curl http://127.0.0.1:8080/api/health/system
 
 | Tier | Variable | Usage |
 |---|---|---|
-| PostgreSQL | `PG_DATABASE_URL` | Staging/production |
-| SQLite | `DB_PATH` | Debug local uniquement |
+| PostgreSQL | `PG_DATABASE_URL` | Required for File2EDI runtime (dev/staging/prod) |
 
-En production, garder `FILE2EDI_POSTGRES_STRICT=true` pour eviter de demarrer
-silencieusement en SQLite si Postgres est indisponible.
+Sans `PG_DATABASE_URL`, `get_store()` échoue au démarrage (pas de fallback SQLite).
+`FILE2EDI_POSTGRES_STRICT=true` reste recommandé dans les compose files pour cohérence CI/ops.

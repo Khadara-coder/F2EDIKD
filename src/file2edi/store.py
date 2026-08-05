@@ -1,4 +1,4 @@
-"""File2EDI persistence — SQLite (+ optional Delta sync via server persistence adapter)."""
+"""File2EDI persistence — PostgreSQL runtime (`PostgresFile2EdiStore`) with SQLite base class for tests."""
 from __future__ import annotations
 
 import json

@@ -1,7 +1,7 @@
 """PostgreSQL database layer for EDIFACT File2EDI.
 
 Uses SQLAlchemy ORM + Row-Level Security (RLS) for RBAC enforcement at DB level.
-Replaces src/file2edi/store.py for production; SQLite fallback remains for local dev.
+File2EDI runtime requires PG_DATABASE_URL (no SQLite fallback).
 """
 
 from __future__ import annotations
@@ -299,10 +299,10 @@ class PostgresDB:
         """
         Args:
             database_url: e.g., 'postgresql+psycopg://user:pass@host/dbname'
-                         if None, uses PG_DATABASE_URL env var or falls back to SQLite
+                         if None, uses PG_DATABASE_URL env var
         """
         self.database_url = database_url or os.getenv("PG_DATABASE_URL")
-        self.is_postgres = self.database_url and "postgresql" in self.database_url
+        self.is_postgres = bool(self.database_url and "postgresql" in self.database_url)
         
         if self.is_postgres:
             # Async engine for production
@@ -316,14 +316,14 @@ class PostgresDB:
                 self.engine, class_=AsyncSession, expire_on_commit=False, autoflush=False
             )
         else:
-            log.warning("PostgreSQL not configured; using SQLite fallback")
+            log.warning("PostgreSQL not configured (set PG_DATABASE_URL)")
             self.engine = None
             self.SessionLocal = None
 
     async def init_db(self) -> None:
         """Create all tables and initialize RLS policies."""
         if not self.is_postgres:
-            log.info("Skipping DB init (SQLite mode)")
+            log.info("Skipping DB init (PostgreSQL not configured)")
             return
 
         # Step 1: create tables (own transaction)

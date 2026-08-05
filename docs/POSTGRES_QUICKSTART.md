@@ -9,13 +9,12 @@ docker-compose -f docker-compose-pg.yml up -d
 # 2. Install dependencies
 pip install -r requirements.txt -r requirements-postgres.txt
 
-# 3. Run migration (from SQLite to PG)
+# 3. Optional: migrate historical SQLite data into PG
 python migrate_to_postgres.py \
   --src data/file2edi.db \
   --dst "postgresql://edifact:edifact_dev_password@localhost:5432/edifact"
 
-# 4. Set environment.
-# When PG_DATABASE_URL is set, src.file2edi.store.get_store() uses PostgreSQL.
+# 4. Set environment (required — no SQLite runtime fallback)
 export PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact"
 
 # 5. Start server
@@ -44,19 +43,14 @@ See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md#cloud-deployment-azure) for Az
 
 ## Troubleshooting
 
-**App still uses SQLite?**
-- Check: `echo $PG_DATABASE_URL`
-- Must be set before `python server.py`
-- In non-strict mode, the app falls back to SQLite if `psycopg` is not installed
-- To fail fast instead of falling back, set `FILE2EDI_POSTGRES_STRICT=true`
+**App fails at startup / store init?**
+- Check: `echo $PG_DATABASE_URL` — must be set before `python server.py`
+- Install drivers: `pip install -r requirements-postgres.txt`
+- `get_store()` raises if `PG_DATABASE_URL` is missing (SQLite fallback disabled)
 
 **RLS not restricting?**
 - Check postgres logs: `docker-compose -f docker-compose-pg.yml logs postgres`
 - Verify `auth_users` table populated: `docker exec edifact-postgres psql -U edifact edifact -c "SELECT * FROM auth_users;"`
-
-**Need to rollback to SQLite?**
-- Just unset `PG_DATABASE_URL`: `unset PG_DATABASE_URL`
-- App auto-falls back to `data/file2edi.db`
 
 ## Architecture
 
@@ -66,14 +60,14 @@ See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md#cloud-deployment-azure) for Az
 │  (src/file2edi/router.py)           │
 └──────────────┬──────────────────────┘
                │
-         ┌─────┴────────┐
-         ▼              ▼
-    PG_DATABASE_URL   (fallback)
-         │              │
-      [PostgreSQL]  [SQLite]
-    + RLS Policies  (local dev)
-    + auth_users
-    + auth_user_adv_scope
+         PG_DATABASE_URL (required)
+               │
+          [PostgreSQL]
+        + RLS Policies
+        + auth_users
+        + auth_user_adv_scope
 ```
+
+SQLite remains only for unit tests (`File2EdiStore` base class) and optional standalone/scripts — not for File2EDI runtime.
 
 For details, see [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md).

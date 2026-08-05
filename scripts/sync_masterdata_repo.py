@@ -26,14 +26,14 @@ from urllib.parse import urlparse, urlunparse
 REQUIRED_FILES = [
     "10564_Customers.parquet",
     "10564_Partners.parquet",
-    "10564_Materials.parquet",
+    "DB_Materials.parquet",
     "DB_Salesorder.parquet",
 ]
 # Legacy CSV still accepted if parquet absent (validated at publish time).
 REQUIRED_FILES_LEGACY = [
     "10564_Customers.csv",
     "10564_Partners.csv",
-    "10564_Materials.csv",
+    "DB_Materials.csv",
     "DB_Salesorder.csv",
 ]
 

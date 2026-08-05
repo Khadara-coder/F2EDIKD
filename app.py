@@ -40,7 +40,7 @@ AI_ENDPOINT_URL   = (
 MASTER_FILES = [
     ("Customers",    "10564_Customers.csv"),
     ("Partners",     "10564_Partners.csv"),
-    ("Materials",    "10564_Materials.csv"),
+    ("Materials",    "DB_Materials.csv"),
     ("Sales Orders", "DB_Salesorder.csv"),
 ]
 

@@ -46,16 +46,15 @@
 
 **Current status:**
 
-1. `server.py` and `src/file2edi/store.py` auto-detect `PG_DATABASE_URL`.
-2. The File2EDI router is already wired to the store interface used by PostgreSQL mode.
-3. Runtime fallback to SQLite still exists for no-config local development.
-4. `FILE2EDI_POSTGRES_STRICT=true` forces fail-fast startup when PostgreSQL is unavailable.
+1. `server.py` and `src/file2edi/store.py` require `PG_DATABASE_URL`.
+2. The File2EDI router is wired to `PostgresFile2EdiStore`.
+3. Runtime SQLite fallback is **disabled** (`get_store()` raises without PG).
+4. SQLite `File2EdiStore` remains for unit tests / scripts only.
 
 **Remaining hardening tasks (recommended):**
 
 - Add/extend integration tests that exercise File2EDI endpoints in PostgreSQL mode.
-- Reduce legacy SQLite code paths still used by non-File2EDI areas in `server.py`.
-- Keep documentation aligned with the current dual-mode behavior until full PostgreSQL-only cutover.
+- Keep docs aligned with PostgreSQL-only runtime.
 
 ---
 
@@ -74,13 +73,12 @@
 
 ## Architecture Decision
 
-### Why Not Replace SQLite Immediately?
+### Why PostgreSQL is mandatory
 
-**Risk Mitigation:**
-- PostgreSQL is optional (`PG_DATABASE_URL` env var)
-- If not set, app auto-falls back to SQLite
-- Zero breaking changes to existing code
-- Teams can migrate orders incrementally
+**Runtime contract:**
+- `PG_DATABASE_URL` is required
+- `get_store()` fails fast without it (no silent SQLite fallback)
+- Unit tests still use the SQLite `File2EdiStore` base class in isolation
 
 ### Migration Path
 

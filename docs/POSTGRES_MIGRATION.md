@@ -95,14 +95,11 @@ asyncio.run(seed_users())
 Create or update `.env`:
 
 ```bash
-# PostgreSQL connection (replaces SQLite)
+# PostgreSQL connection (required for File2EDI runtime)
 PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact"
 
 # Logging
 SQL_ECHO=false
-
-# Disable Delta/Workspace backends (PG is primary now)
-PERSIST_BACKEND=sqlite  # Falls back gracefully if PG unavailable
 
 # Optional: Cloud PostgreSQL (Azure Database for PostgreSQL)
 # PG_DATABASE_URL="postgresql+psycopg://user:password@your-server.postgres.database.azure.com:5432/edifact?sslmode=require"
@@ -173,14 +170,12 @@ FOR SELECT USING (
 
 Same logic for UPDATE — can only modify orders they can see.
 
-## Fallback to SQLite (Safety)
+## SQLite note (tests / scripts only)
 
-If PostgreSQL is unavailable (dev machine without Docker, network issue):
-
-1. Existing SQLite code paths remain unchanged
-2. Set `PG_DATABASE_URL=""` or omit it from `.env`
-3. App falls back to local SQLite automatically
-4. No code changes needed — it's transparent
+File2EDI runtime requires PostgreSQL (`PG_DATABASE_URL`). There is no automatic
+SQLite fallback. The `File2EdiStore` SQLite class remains for unit tests and
+local diagnostic scripts only. To migrate historical `data/file2edi.db` data,
+use `migrate_to_postgres.py`.
 
 ## Troubleshooting
 
