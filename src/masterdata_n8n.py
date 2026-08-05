@@ -4,11 +4,15 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse, urlunparse
 
 log = logging.getLogger("edifact.masterdata_n8n")
 
-DEFAULT_WEBHOOK_URL = "http://localhost:5678/webhook/masterdata-sync"
+# From inside the API container, localhost:5678 is the container itself — not host n8n.
+# Prefer host.docker.internal (published host port). Stacks stay separate; HTTP only.
+DEFAULT_WEBHOOK_URL = "http://host.docker.internal:5678/webhook/masterdata-sync"
 
 
 def default_config() -> dict[str, Any]:
@@ -20,6 +24,40 @@ def default_config() -> dict[str, Any]:
     }
 
 
+def _running_in_docker() -> bool:
+    return Path("/.dockerenv").exists() or os.environ.get("IN_DOCKER", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+def _docker_safe_webhook_url(url: str) -> str:
+    """Rewrite localhost/127.0.0.1 webhook targets when the API runs in Docker."""
+    raw = (url or "").strip()
+    if not raw:
+        return raw
+    env_url = (os.environ.get("MASTERDATA_N8N_WEBHOOK_URL") or "").strip()
+    if env_url:
+        return env_url
+    if not _running_in_docker():
+        return raw
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    if host not in {"localhost", "127.0.0.1"}:
+        return raw
+    # Keep path/query; swap host so the published n8n port on the Docker host is reachable.
+    netloc = "host.docker.internal"
+    if parsed.port:
+        netloc = f"{netloc}:{parsed.port}"
+    elif parsed.scheme == "https":
+        netloc = f"{netloc}:443"
+    else:
+        netloc = f"{netloc}:80"
+    return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+
+
 def resolve_config(raw: dict[str, Any] | None = None) -> dict[str, Any]:
     cfg = default_config()
     if isinstance(raw, dict):
@@ -27,7 +65,7 @@ def resolve_config(raw: dict[str, Any] | None = None) -> dict[str, Any]:
             if key in raw and raw.get(key) is not None:
                 cfg[key] = raw.get(key)
     cfg["enabled"] = bool(cfg.get("enabled"))
-    cfg["webhookUrl"] = str(cfg.get("webhookUrl") or "").strip()
+    cfg["webhookUrl"] = _docker_safe_webhook_url(str(cfg.get("webhookUrl") or "").strip())
     cfg["authHeader"] = str(cfg.get("authHeader") or "x-api-key").strip() or "x-api-key"
     try:
         cfg["timeoutSeconds"] = max(5, min(600, int(cfg.get("timeoutSeconds") or 120)))
@@ -70,6 +108,11 @@ def trigger_masterdata_sync_workflow(
         "reason": reason,
         "actor": actor,
         "source": "file2edi",
+        "repo_url": os.environ.get(
+            "MASTERDATA_REPO_URL",
+            "https://github.boschdevcloud.com/RSR1DY/masterdata.git",
+        ),
+        "branch": os.environ.get("MASTERDATA_REPO_BRANCH", "main"),
     }
     log.info("Triggering n8n masterdata sync webhook: %s", cfg["webhookUrl"])
     resp = requests.post(
@@ -87,9 +130,7 @@ def trigger_masterdata_sync_workflow(
 
     if resp.status_code >= 400:
         detail = payload if isinstance(payload, dict) else {"raw": text[:300]}
-        raise RuntimeError(
-            f"Webhook n8n HTTP {resp.status_code}: {detail}"
-        )
+        raise RuntimeError(f"Webhook n8n HTTP {resp.status_code}: {detail}")
 
     if isinstance(payload, dict):
         return {

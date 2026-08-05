@@ -1,12 +1,12 @@
-# Données maîtres (non versionnées)
+# Données maîtres (non versionnées dans ce repo app)
 
-Les fichiers CSV volumineux ne sont pas dans Git. Placez-les ici avant le premier lancement :
+Placez ici les exports Databricks (préféré : **Parquet**) ou CSV `;` UTF-8 :
 
-| Fichier | Description |
-|---------|-------------|
-| `10564_Customers.csv` | Sold-to |
-| `10564_Partners.csv` | Ship-to |
-| `10564_Materials.csv` | Articles Bosch |
-| `DB_Salesorder.csv` | Historique commandes (référence) |
+| Fichier Parquet (recommandé) | CSV legacy | Description |
+|------------------------------|------------|-------------|
+| `10564_Customers.parquet` | `10564_Customers.csv` | Sold-to |
+| `10564_Partners.parquet` | `10564_Partners.csv` | Ship-to |
+| `10564_Materials.parquet` | `10564_Materials.csv` | Articles Bosch |
+| `DB_Salesorder.parquet` | `DB_Salesorder.csv` | Historique commandes |
 
-Au démarrage, `server.py` tente de les charger depuis ce dossier ou de les synchroniser si configuré (voir `.env.example`).
+Colonnes minimales inchangées. L’API `/api/masterdata/import` et le cache acceptent Parquet et CSV.

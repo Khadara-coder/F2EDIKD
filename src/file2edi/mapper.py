@@ -279,6 +279,87 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 "createdAt": _now(),
             })
 
+    # Materials Statut: disponible OK; no sale = arrêté; Statut MATNR = remplacement; absent = erreur.
+    try:
+        from src.masterdata_runtime import material_line_status
+    except Exception:
+        material_line_status = None  # type: ignore[assignment]
+    if material_line_status is not None:
+        for ln in parsed_lines:
+            art = str(ln.get("boschArticle") or "").strip()
+            if not art or "?" in art:
+                continue
+            mat_status = material_line_status(art)
+            kind = mat_status.get("kind")
+            if kind == "available":
+                continue
+            chain = mat_status.get("replacement_chain") or []
+            final_ref = str(mat_status.get("replacement") or "").strip()
+            if kind == "missing":
+                msg = (
+                    f"Ligne {ln.get('lineNumber')} : article {art} absent dans la base de données "
+                    f"masterdata Materials."
+                )
+                severity = "error"
+            elif kind == "no_sale":
+                if mat_status.get("via_replacement") and final_ref:
+                    msg = (
+                        f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
+                        f"{final_ref}, mais {final_ref} est arrêtée (no sale)."
+                    )
+                else:
+                    msg = (
+                        f"Ligne {ln.get('lineNumber')} : la référence {art} est arrêtée (no sale)."
+                    )
+                severity = "warning"
+            elif kind == "replacement":
+                if mat_status.get("replacement_cycle"):
+                    chain_txt = " → ".join(chain) if chain else art
+                    msg = (
+                        f"Ligne {ln.get('lineNumber')} : chaîne de remplacement circulaire "
+                        f"pour {art} ({chain_txt})."
+                    )
+                    severity = "warning"
+                elif mat_status.get("replacement_missing") and final_ref:
+                    msg = (
+                        f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
+                        f"{final_ref}, mais {final_ref} est absent dans la base de données "
+                        f"masterdata Materials."
+                    )
+                    severity = "error"
+                else:
+                    if len(chain) > 2:
+                        via = " → ".join(chain[1:-1])
+                        msg = (
+                            f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
+                            f"{final_ref} (via {via}, colonne Statut du masterdata Materials)."
+                        )
+                    else:
+                        msg = (
+                            f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
+                            f"{final_ref} (colonne Statut du masterdata Materials)."
+                        )
+                    severity = "warning"
+            else:
+                continue
+            _add_anomaly({
+                "anomalyId": f"an-mat-status-{order_id}-{ln.get('lineNumber')}-{art}",
+                "orderId": order_id,
+                "lineId": ln.get("lineId"),
+                "severity": severity,
+                "fieldName": "boschArticle",
+                "message": msg,
+                "status": "Bloquante" if severity == "error" else "Ouverte",
+                "createdAt": _now(),
+            })
+            ln["status"] = "À vérifier"
+            existing_comment = str(ln.get("comment") or "").strip()
+            ln["comment"] = (
+                f"{existing_comment} | {msg}".strip(" |")
+                if existing_comment
+                else msg
+            )
+
     trace_steps = [
         {"id": "1", "label": "PDF reçu", "status": "completed", "timestamp": _now()},
         {"id": "2", "label": "Extraction OCR", "status": "completed"},

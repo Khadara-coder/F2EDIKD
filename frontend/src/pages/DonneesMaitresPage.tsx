@@ -102,6 +102,18 @@ export function DonneesMaitresPage() {
   const clients = (data?.clients ?? []) as MasterDataClient[];
   const shipTos = (tab === "shipto" ? (data?.rows ?? []) : []) as MasterDataShipToRow[];
   const articles = (tab === "articles" ? (data?.rows ?? []) : []) as MasterDataArticleRow[];
+  const articleColumns = useMemo(() => {
+    const preferred = ["MATNR", "MAKTX"];
+    const seen = new Set<string>();
+    for (const row of articles) {
+      Object.keys(row.fields || {}).forEach((k) => {
+        if (k.trim()) seen.add(k);
+      });
+    }
+    if (seen.size === 0) return preferred;
+    const rest = [...seen].filter((k) => !preferred.includes(k)).sort((a, b) => a.localeCompare(b));
+    return [...preferred.filter((k) => seen.has(k)), ...rest];
+  }, [articles]);
   const rules = (tab === "rules" ? (data?.rows ?? []) : []) as MasterDataRuleRow[];
 
   const filteredClients = useMemo(() => {
@@ -437,7 +449,11 @@ export function DonneesMaitresPage() {
                 </TabsContent>
 
                 <TabsContent value="articles" className="mt-0">
-                  <DataTable empty={paginated.length === 0} headers={["", "Code article", "Désignation"]}>
+                  <div className="w-full overflow-x-auto">
+                  <DataTable
+                    empty={paginated.length === 0}
+                    headers={["", ...articleColumns]}
+                  >
                     {(paginated as MasterDataArticleRow[]).map((row) => (
                       <TableRow
                         key={row.id}
@@ -454,11 +470,40 @@ export function DonneesMaitresPage() {
                             }`}
                           />
                         </TableCell>
-                        <TableCell className="font-mono text-xs">{row.materialId}</TableCell>
-                        <TableCell className="font-medium">{row.description}</TableCell>
+                        {articleColumns.map((col) => {
+                          const value =
+                            row.fields?.[col] ??
+                            (col === "MATNR"
+                              ? row.materialId
+                              : col === "MAKTX"
+                                ? row.description
+                                : "");
+                          return (
+                            <TableCell
+                              key={`${row.id}-${col}`}
+                              className={
+                                col === "MATNR"
+                                  ? "font-mono text-xs whitespace-nowrap"
+                                  : col === "MAKTX"
+                                    ? "font-medium max-w-[18rem] truncate"
+                                    : "text-xs max-w-[12rem] truncate"
+                              }
+                              title={value || undefined}
+                            >
+                              {value || "—"}
+                            </TableCell>
+                          );
+                        })}
                       </TableRow>
                     ))}
                   </DataTable>
+                  </div>
+                  {articleColumns.length <= 2 && (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Le fichier Materials chargé ne contient que {articleColumns.join(", ") || "MATNR, MAKTX"}.
+                      Si le Parquet GitHub a d&apos;autres colonnes, relance Synchroniser.
+                    </p>
+                  )}
                 </TabsContent>
 
                 <TabsContent value="rules" className="mt-0">
@@ -550,14 +595,24 @@ export function DonneesMaitresPage() {
             )}
             {selectedArticle && tab === "articles" && (
               <DetailCard
-                title={selectedArticle.description}
+                title={selectedArticle.description || selectedArticle.materialId}
                 badge="Article"
                 onClose={() => setSelectedArticle(null)}
-                rows={[
-                  ["Code article", selectedArticle.materialId],
-                  ["Désignation", selectedArticle.description],
-                ]}
-                onShowAll={() => setDetailFields(selectedArticle.fields || {})}
+                rows={
+                  Object.keys(selectedArticle.fields || {}).length > 0
+                    ? Object.entries(selectedArticle.fields || {}).map(([k, v]) => [
+                        k,
+                        v || "—",
+                      ])
+                    : [
+                        ["MATNR", selectedArticle.materialId || "—"],
+                        ["MAKTX", selectedArticle.description || "—"],
+                      ]
+                }
+                onShowAll={() => setDetailFields(selectedArticle.fields || {
+                  MATNR: selectedArticle.materialId,
+                  MAKTX: selectedArticle.description,
+                })}
               />
             )}
             {selectedRule && tab === "rules" && (
@@ -594,7 +649,7 @@ export function DonneesMaitresPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,text/csv"
+            accept=".csv,.parquet,text/csv,application/vnd.apache.parquet"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];

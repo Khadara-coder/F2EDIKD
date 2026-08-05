@@ -94,7 +94,7 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
     },
     "masterdataN8nConfig": {
         "enabled": True,
-        "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
+        "webhookUrl": "http://host.docker.internal:5678/webhook/masterdata-sync",
         "authHeader": "x-api-key",
         "timeoutSeconds": 120,
     },

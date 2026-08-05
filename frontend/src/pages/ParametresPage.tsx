@@ -562,9 +562,12 @@ export function ParametresPage() {
                   </div>
 
                   <p className="text-xs text-muted-foreground">
-                    Clé secrète : variable d&apos;environnement{" "}
-                    <code>MASTERDATA_N8N_WEBHOOK_KEY</code> (ou premier <code>APP_API_KEYS</code>).
-                    Importer <code>n8n_masterdata_github_sync.json</code> dans n8n.
+                    Le bouton Synchroniser appelle ce webhook HTTP (stacks séparées). Depuis le
+                    conteneur API, utilisez <code>host.docker.internal</code> plutôt que{" "}
+                    <code>localhost</code>. Clé optionnelle :{" "}
+                    <code>MASTERDATA_N8N_WEBHOOK_KEY</code>. Workflow :{" "}
+                    <code>n8n_masterdata_github_sync.json</code> (repo{" "}
+                    <code>github.boschdevcloud.com/RSR1DY/masterdata</code>).
                   </p>
 
                   <div className="flex items-center gap-3">

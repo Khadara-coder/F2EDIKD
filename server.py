@@ -2052,13 +2052,13 @@ async def api_md_import(
         key = _masterdata_kind_key(kind)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
-    if not file.filename or not str(file.filename).lower().endswith(".csv"):
-        raise HTTPException(400, "Un fichier .csv est requis")
+    if not file.filename or not str(file.filename).lower().endswith((".csv", ".parquet")):
+        raise HTTPException(400, "Un fichier .csv ou .parquet est requis")
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "Fichier vide")
     try:
-        result = _masterdata_import_dataframe(key, raw)
+        result = _masterdata_import_dataframe(key, raw, filename=str(file.filename))
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
@@ -3570,8 +3570,8 @@ def _masterdata_write_csv(key: str, df) -> None:
     _mdr.write_csv(key, df)
 
 
-def _masterdata_import_dataframe(key: str, raw: bytes) -> dict:
-    return _mdr.import_dataframe(key, raw)
+def _masterdata_import_dataframe(key: str, raw: bytes, filename: str = "") -> dict:
+    return _mdr.import_dataframe(key, raw, filename=filename)
 
 
 def _masterdata_append_row(key: str, fields: dict) -> dict:

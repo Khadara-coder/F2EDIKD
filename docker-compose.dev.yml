@@ -50,6 +50,9 @@ services:
       LOG_DIR: /app/data/logs
       INTAKE_DIR: /app/data/intake
     command: ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # Permet d'appeler des webhooks sur l'hôte (n8n séparé sur :5678) sans réseau partagé
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Code source monté — uvicorn --reload prend les changements à chaud
       - .:/app

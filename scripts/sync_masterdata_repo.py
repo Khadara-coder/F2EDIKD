@@ -24,6 +24,13 @@ from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 REQUIRED_FILES = [
+    "10564_Customers.parquet",
+    "10564_Partners.parquet",
+    "10564_Materials.parquet",
+    "DB_Salesorder.parquet",
+]
+# Legacy CSV still accepted if parquet absent (validated at publish time).
+REQUIRED_FILES_LEGACY = [
     "10564_Customers.csv",
     "10564_Partners.csv",
     "10564_Materials.csv",
@@ -99,9 +106,27 @@ def _sha256(path: Path) -> str:
 
 
 def _count_data_rows(path: Path) -> int:
+    if path.suffix.lower() == ".parquet":
+        try:
+            import pandas as pd
+
+            return int(len(pd.read_parquet(path)))
+        except Exception:
+            return 0
     # Fast line-count approximation for CSV rows: total lines minus header.
     with path.open("r", encoding="utf-8-sig", errors="replace") as f:
         return max(0, sum(1 for _ in f) - 1)
+
+
+def _resolve_required_file(worktree: Path, parquet_name: str) -> Path | None:
+    parquet_path = worktree / parquet_name
+    if parquet_path.exists():
+        return parquet_path
+    legacy = parquet_name.replace(".parquet", ".csv")
+    legacy_path = worktree / legacy
+    if legacy_path.exists():
+        return legacy_path
+    return None
 
 
 def _prepare_worktree(repo_url: str, branch: str, worktree: Path) -> str:
@@ -128,12 +153,12 @@ def _validate_required_files(worktree: Path) -> dict[str, dict[str, Any]]:
     missing: list[str] = []
 
     for name in REQUIRED_FILES:
-        p = worktree / name
-        if not p.exists():
-            missing.append(name)
+        p = _resolve_required_file(worktree, name)
+        if p is None:
+            missing.append(f"{name} (or {name.replace('.parquet', '.csv')})")
             continue
         rows = _count_data_rows(p)
-        file_info[name] = {
+        file_info[p.name] = {
             "rows": rows,
             "sha256": _sha256(p),
             "size_bytes": p.stat().st_size,
@@ -154,7 +179,10 @@ def _atomic_publish(worktree: Path, target_dir: Path, metadata_file: str, metada
     staging_dir.mkdir(parents=True, exist_ok=True)
 
     for name in REQUIRED_FILES:
-        shutil.copy2(worktree / name, staging_dir / name)
+        src = _resolve_required_file(worktree, name)
+        if src is None:
+            raise RuntimeError(f"Missing required masterdata file: {name}")
+        shutil.copy2(src, staging_dir / src.name)
 
     metadata_path = staging_dir / metadata_file
     metadata_path.write_text(json.dumps(metadata, indent=2, ensure_ascii=True), encoding="utf-8")

@@ -5,6 +5,21 @@ from __future__ import annotations
 from src.masterdata_n8n import resolve_config, trigger_masterdata_sync_workflow
 
 
+def test_resolve_config_rewrites_localhost_in_docker(monkeypatch):
+    monkeypatch.setattr("src.masterdata_n8n._running_in_docker", lambda: True)
+    cfg = resolve_config({"webhookUrl": "http://localhost:5678/webhook/masterdata-sync"})
+    assert cfg["webhookUrl"] == "http://host.docker.internal:5678/webhook/masterdata-sync"
+
+
+def test_resolve_config_env_override(monkeypatch):
+    monkeypatch.setenv(
+        "MASTERDATA_N8N_WEBHOOK_URL",
+        "http://host.docker.internal:5678/webhook/masterdata-sync",
+    )
+    cfg = resolve_config({"webhookUrl": "http://localhost:5678/webhook/other"})
+    assert cfg["webhookUrl"].endswith("/webhook/masterdata-sync")
+
+
 def test_resolve_config_clamps_timeout():
     cfg = resolve_config({"webhookUrl": " http://n8n/test ", "timeoutSeconds": 1})
     assert cfg["webhookUrl"] == "http://n8n/test"

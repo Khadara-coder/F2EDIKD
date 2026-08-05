@@ -26,6 +26,7 @@ MASTER_FILES = [
     "DB_Salesorder.csv",
 ]
 
+# Canonical runtime filenames (CSV). Import accepte aussi .parquet → écrit en CSV.
 MD_FILES = {
     "customers": "10564_Customers.csv",
     "partners": "10564_Partners.csv",
@@ -33,10 +34,18 @@ MD_FILES = {
     "salesorders": "DB_Salesorder.csv",
 }
 
+# Noms attendus côté GitHub / Databricks (préférés pour sync légère).
+MD_PARQUET_FILES = {
+    "customers": "10564_Customers.parquet",
+    "partners": "10564_Partners.parquet",
+    "materials": "10564_Materials.parquet",
+    "salesorders": "DB_Salesorder.parquet",
+}
+
 MD_SEARCH_COLS = {
     "customers": ["SOLDTO", "NAME", "ORT01", "PSTLZ", "STRAS", "LAND1", "VAT_NR"],
     "partners": ["SOLDTO", "SHIPTO", "NAME", "ORT01", "PSTLZ", "STRAS", "PARVW"],
-    "materials": ["MATNR", "MAKTX"],
+    "materials": ["MATNR", "MAKTX"],  # étendu dynamiquement aux colonnes présentes
     "salesorders": ["BSTNK", "VBELN", "KUNNR", "ERDAT", "BSTDK", "ERNAM"],
 }
 
@@ -130,6 +139,227 @@ def normalize_article_code(art: str) -> str:
     return s
 
 
+def _materials_df_and_cols() -> tuple[Any, str | None, str | None, str | None]:
+    entry = CACHE.get("materials") or {}
+    df = entry.get("df")
+    if df is None or getattr(df, "empty", True):
+        return None, None, None, None
+    cols = {str(c).strip().lower(): c for c in df.columns}
+    matnr_col = cols.get("matnr")
+    statut_col = next(
+        (cols[k] for k in ("statut", "status", "statut sap", "replacement", "remplace_par", "remplacé_par") if k in cols),
+        None,
+    )
+    vmsta_col = cols.get("vmsta")
+    return df, matnr_col, statut_col, vmsta_col
+
+
+def _statut_is_available(statut: str, vmsta: str = "") -> bool:
+    label = (statut or "").strip().lower()
+    if label in {"", "nan", "none", "null", "-", "n/a", "na"}:
+        return vmsta.strip() not in {"92"}
+    return label == "article disponible"
+
+
+def _statut_is_no_sale(statut: str, vmsta: str = "") -> bool:
+    label = (statut or "").strip().lower()
+    if label == "no sale" or "no sale" in label:
+        return True
+    return (vmsta or "").strip() == "92"
+
+
+def _statut_as_replacement_matnr(statut: str) -> str | None:
+    """When ``Statut`` holds another MATNR, return that replacement code."""
+    raw = (statut or "").strip()
+    if not raw:
+        return None
+    lower = raw.lower()
+    if lower in {"article disponible", "no sale"} or "no sale" in lower:
+        return None
+    digits = re.sub(r"\D", "", raw)
+    compact = raw.replace(" ", "")
+    if len(digits) >= 5 and len(digits) >= max(len(compact), 1) * 0.7:
+        return normalize_article_code(digits) or digits
+    if re.fullmatch(r"\d{5,18}", compact):
+        return normalize_article_code(compact) or compact
+    return None
+
+
+def _material_row_fields(code: str) -> tuple[str, str] | None:
+    """Return ``(statut, vmsta)`` for a normalized MATNR, or ``None`` if absent."""
+    df, matnr_col, statut_col, vmsta_col = _materials_df_and_cols()
+    if df is None or matnr_col is None:
+        return None
+    try:
+        series = df[matnr_col].astype(str).map(lambda v: normalize_article_code(v))
+        matches = df.loc[series == code]
+        if matches.empty:
+            return None
+        row = matches.iloc[0]
+        statut = str(row[statut_col] or "").strip() if statut_col else ""
+        vmsta = str(row[vmsta_col] or "").strip() if vmsta_col else ""
+        return statut, vmsta
+    except Exception:
+        return None
+
+
+def _material_direct_status(code: str) -> dict[str, Any]:
+    """Single-hop Materials status (no replacement chain resolution)."""
+    if not code:
+        return {
+            "found": False,
+            "kind": "missing",
+            "matnr": "",
+            "statut": None,
+            "replacement": None,
+        }
+
+    row_fields = _material_row_fields(code)
+    if row_fields is None:
+        return {
+            "found": False,
+            "kind": "missing",
+            "matnr": code,
+            "statut": None,
+            "replacement": None,
+        }
+
+    statut, vmsta = row_fields
+    replacement = _statut_as_replacement_matnr(statut)
+    if replacement and replacement != code:
+        return {
+            "found": True,
+            "kind": "replacement",
+            "matnr": code,
+            "statut": statut,
+            "replacement": replacement,
+        }
+    if _statut_is_no_sale(statut, vmsta):
+        return {
+            "found": True,
+            "kind": "no_sale",
+            "matnr": code,
+            "statut": statut,
+            "replacement": None,
+        }
+    if _statut_is_available(statut, vmsta):
+        return {
+            "found": True,
+            "kind": "available",
+            "matnr": code,
+            "statut": statut,
+            "replacement": None,
+        }
+    return {
+        "found": True,
+        "kind": "available",
+        "matnr": code,
+        "statut": statut,
+        "replacement": None,
+    }
+
+
+def material_line_status(matnr: str) -> dict[str, Any]:
+    """Evaluate Materials masterdata status for an order line article.
+
+    Replacement chains in ``Statut`` are resolved (A→B→C) with cycle detection.
+
+    Returns ``kind``:
+    - ``missing`` — MATNR not in masterdata
+    - ``available`` — ``Article disponible`` (no anomaly)
+    - ``no_sale`` — article arrêté (`no sale` / VMSTA 92), including replacement target
+    - ``replacement`` — resolved final reference MATNR in ``replacement``
+    """
+    code = normalize_article_code(matnr)
+    if not code:
+        return {
+            "found": False,
+            "kind": "missing",
+            "matnr": "",
+            "statut": None,
+            "replacement": None,
+        }
+
+    direct = _material_direct_status(code)
+    if direct["kind"] != "replacement":
+        return direct
+
+    chain: list[str] = [code]
+    visited: set[str] = {code}
+    current = str(direct.get("replacement") or "").strip()
+    max_hops = 25
+
+    for _ in range(max_hops):
+        if not current:
+            break
+        if current in visited:
+            return {
+                "found": True,
+                "kind": "replacement",
+                "matnr": code,
+                "statut": direct.get("statut"),
+                "replacement": current,
+                "replacement_chain": chain + [current],
+                "replacement_cycle": True,
+            }
+        visited.add(current)
+        chain.append(current)
+        hop = _material_direct_status(current)
+        if hop["kind"] == "replacement":
+            nxt = str(hop.get("replacement") or "").strip()
+            if nxt and nxt != current:
+                current = nxt
+                continue
+        if hop["kind"] == "missing":
+            return {
+                "found": True,
+                "kind": "replacement",
+                "matnr": code,
+                "statut": hop.get("statut"),
+                "replacement": current,
+                "replacement_chain": chain,
+                "replacement_missing": True,
+            }
+        if hop["kind"] == "no_sale":
+            return {
+                "found": True,
+                "kind": "no_sale",
+                "matnr": code,
+                "statut": hop.get("statut"),
+                "replacement": current,
+                "replacement_chain": chain,
+                "via_replacement": True,
+            }
+        return {
+            "found": True,
+            "kind": "replacement",
+            "matnr": code,
+            "statut": hop.get("statut"),
+            "replacement": current,
+            "replacement_chain": chain,
+        }
+
+    return {
+        "found": True,
+        "kind": "replacement",
+        "matnr": code,
+        "statut": direct.get("statut"),
+        "replacement": current or str(direct.get("replacement") or ""),
+        "replacement_chain": chain,
+        "replacement_cycle": True,
+    }
+
+
+def material_status_replacement(matnr: str) -> str | None:
+    """Legacy helper: final replacement MATNR after chain resolution."""
+    status = material_line_status(matnr)
+    if status.get("kind") == "replacement" and not status.get("replacement_cycle"):
+        repl = status.get("replacement")
+        if repl and not status.get("replacement_missing"):
+            return str(repl)
+    return None
+
+
 def validate_schema(key: str, df) -> dict:
     required = MD_REQUIRED_COLS.get(key, [])
     present = list(df.columns) if df is not None else []
@@ -213,6 +443,82 @@ def apply_sync_metadata_to_cache_state() -> None:
         return
     for key in MD_FILES:
         MD_LAST_SYNC.setdefault(key, sync_at)
+
+
+def resolve_source_path(key: str) -> Path:
+    """Prefer Parquet in runtime dir, then CSV (legacy / post-import)."""
+    root = runtime_dir()
+    parquet_name = MD_PARQUET_FILES.get(key)
+    if parquet_name:
+        parquet_path = root / parquet_name
+        if parquet_path.exists():
+            return parquet_path
+    csv_name = MD_FILES.get(key, "")
+    return root / csv_name
+
+
+def _dataframe_as_str(df: Any) -> Any:
+    """Normalize all columns to stripped strings for masterdata cache."""
+    out = df.fillna("").astype(str)
+    out.columns = [str(c).strip() for c in out.columns]
+    for col in out.columns:
+        out[col] = (
+            out[col]
+            .str.strip()
+            .replace({"nan": "", "None": "", "<NA>": "", "NaT": "", "NaN": ""})
+        )
+    return out
+
+
+def dataframe_from_bytes(raw: bytes, filename: str = "") -> Any:
+    """Load a masterdata table from CSV or Parquet bytes."""
+    import pandas as _pd
+    from io import BytesIO, StringIO
+
+    name = (filename or "").lower()
+    is_parquet = name.endswith(".parquet") or (
+        len(raw) >= 4 and raw[:4] == b"PAR1"
+    )
+    if is_parquet:
+        try:
+            df = _pd.read_parquet(BytesIO(raw))
+        except Exception as exc:
+            raise ValueError(f"Lecture Parquet impossible: {exc}") from exc
+        return _dataframe_as_str(df)
+
+    try:
+        text = raw.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = raw.decode("latin-1")
+    df = _pd.read_csv(
+        StringIO(text),
+        sep=";",
+        dtype=str,
+        keep_default_na=False,
+        on_bad_lines="skip",
+        encoding_errors="replace",
+    )
+    return _dataframe_as_str(df)
+
+
+def read_masterdata_dataframe(path: Path) -> Any:
+    """Load CSV or Parquet from disk into a string-normalized DataFrame."""
+    import pandas as _pd
+
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        df = _pd.read_parquet(path)
+        return _dataframe_as_str(df)
+    df = _pd.read_csv(
+        str(path),
+        sep=";",
+        dtype=str,
+        keep_default_na=False,
+        on_bad_lines="skip",
+        encoding="utf-8",
+        encoding_errors="replace",
+    )
+    return _dataframe_as_str(df)
 
 
 def stats() -> dict:
@@ -304,16 +610,15 @@ def load_cache() -> dict:
 
     with _MC_LOCK:
         for key, fname in MD_FILES.items():
-            fpath = runtime_dir() / fname
+            fpath = resolve_source_path(key)
             src_type = "workspace" if key in MD_LAST_SYNC else "bundled"
+            if fpath.suffix.lower() == ".parquet" and key not in MD_LAST_SYNC:
+                src_type = "parquet"
             prev_entry = CACHE.get(key)
             try:
-                df = _pd.read_csv(
-                    str(fpath), sep=";", dtype=str,
-                    keep_default_na=False, on_bad_lines="skip",
-                    encoding="utf-8", encoding_errors="replace",
-                )
-                df.columns = [c.strip() for c in df.columns]
+                if not fpath.exists():
+                    raise FileNotFoundError(fpath)
+                df = read_masterdata_dataframe(fpath)
                 schema_info = validate_schema(key, df)
                 try:
                     fsize_kb = round(fpath.stat().st_size / 1024, 1)
@@ -331,7 +636,7 @@ def load_cache() -> dict:
                     "rows": len(df),
                     "loaded_at": datetime.now().isoformat(timespec="seconds"),
                     "error": None,
-                    "fname": fname,
+                    "fname": fpath.name,
                     "source": src_type,
                     "source_path": str(fpath),
                     "file_size_kb": fsize_kb,
@@ -344,7 +649,7 @@ def load_cache() -> dict:
                 MD_SOURCE[key] = src_type
                 log.info(
                     "MD cache: %s — %d rows  schema_valid=%s  source=%s",
-                    fname, len(df), schema_info["schema_valid"], src_type,
+                    fpath.name, len(df), schema_info["schema_valid"], src_type,
                 )
             except FileNotFoundError:
                 if prev_entry and prev_entry.get("df") is not None:
@@ -479,6 +784,9 @@ def csv_search_cached(
     entry = CACHE.get(key, {})
     df = entry.get("df")
     cols = MD_SEARCH_COLS.get(key, [])
+    if df is not None and key == "materials":
+        # Afficher / chercher toutes les colonnes présentes dans le fichier Materials.
+        cols = [str(c) for c in df.columns]
     q_lo = q.strip().lower()
 
     if df is None:
@@ -686,6 +994,9 @@ def kind_key(kind: str) -> str:
         "partners": "partners",
         "articles": "materials",
         "materials": "materials",
+        "salesorders": "salesorders",
+        "salesorder": "salesorders",
+        "commandes": "salesorders",
     }
     key = mapping.get((kind or "").strip().lower())
     if not key:
@@ -704,31 +1015,29 @@ def write_csv(key: str, df) -> None:
     load_cache()
 
 
-def import_dataframe(key: str, raw: bytes) -> dict:
-    import pandas as _pd
-    from io import StringIO
-
-    try:
-        text = raw.decode("utf-8-sig")
-    except UnicodeDecodeError:
-        text = raw.decode("latin-1")
-    df = _pd.read_csv(
-        StringIO(text),
-        sep=";",
-        dtype=str,
-        keep_default_na=False,
-        on_bad_lines="skip",
-        encoding_errors="replace",
-    )
-    df.columns = [str(c).strip() for c in df.columns]
+def import_dataframe(key: str, raw: bytes, filename: str = "") -> dict:
+    df = dataframe_from_bytes(raw, filename=filename)
     schema = validate_schema(key, df)
     if not schema["schema_valid"]:
         missing = ", ".join(schema["missing_columns"])
         raise ValueError(f"Colonnes manquantes pour {key}: {missing}")
     if len(df) == 0:
-        raise ValueError("Fichier CSV vide")
+        raise ValueError("Fichier masterdata vide")
     write_csv(key, df)
-    return {"kind": key, "rows": int(len(df)), "file": MD_FILES[key]}
+    name = (filename or "").lower()
+    is_parquet = name.endswith(".parquet") or (len(raw) >= 4 and raw[:4] == b"PAR1")
+    if is_parquet:
+        pq_name = MD_PARQUET_FILES.get(key)
+        if pq_name:
+            pq_path = runtime_dir() / pq_name
+            pq_path.parent.mkdir(parents=True, exist_ok=True)
+            pq_path.write_bytes(raw)
+    return {
+        "kind": key,
+        "rows": int(len(df)),
+        "file": MD_PARQUET_FILES.get(key) if is_parquet else MD_FILES[key],
+        "format": "parquet" if is_parquet else "csv",
+    }
 
 
 def append_row(key: str, fields: dict) -> dict:
