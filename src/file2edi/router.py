@@ -254,7 +254,7 @@ def create_router() -> APIRouter:
     @router.post("/users")
     async def create_user(req: Request):
         body = await req.json()
-        username = str(body.get("username") or "").strip()
+        username = str(body.get("username") or "").strip().lower()
         display_name = str(body.get("displayName") or body.get("display_name") or username).strip()
         password = str(body.get("password") or "").strip()
         email = str(body.get("email") or "").strip()
@@ -632,6 +632,13 @@ def create_router() -> APIRouter:
         if not review:
             raise HTTPException(404)
         return review
+
+    @router.delete("/uploads/{upload_id}")
+    async def delete_upload(upload_id: str):
+        deleted = get_store().delete_upload(upload_id)
+        if not deleted:
+            raise HTTPException(404)
+        return {"deleted": upload_id}
 
     @router.patch("/orders/anomalies/{anomaly_id}")
     async def patch_anomaly(anomaly_id: str, payload: dict):
@@ -1412,7 +1419,8 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None) -> 
                 rows_by_id[conv_id] = conv_row
     except Exception:
         pass
-    rows = list(rows_by_id.values())
+    _DONE_STATUSES = {"Généré", "Transféré", "Envoyé SAP"}
+    rows = [r for r in rows_by_id.values() if r.get("status") not in _DONE_STATUSES]
     rows.sort(key=_row_sort_timestamp, reverse=True)
     return rows[:200]
 
@@ -1462,6 +1470,7 @@ def _order_list_item(o: dict) -> dict:
     created_at = _to_iso_utc(o.get("created_at"))
     updated_at = _to_iso_utc(o.get("updated_at"))
     processed_at = _to_iso_utc(o.get("processed_at"))
+    sap_sent_at = _to_iso_utc(o.get("sap_sent_at"))
     return {
         "orderId": o["order_id"],
         "fileName": o["file_name"],
@@ -1472,7 +1481,8 @@ def _order_list_item(o: dict) -> dict:
         "createdAt": created_at,
         "updatedAt": updated_at,
         "status": o.get("status", "À revoir"),
-        "processedAt": processed_at,
+        "processedAt": sap_sent_at or processed_at,
+        "sapSentAt": sap_sent_at,
         "processedBy": o.get("processed_by") or o.get("uploaded_by"),
         "assignedTo": o.get("assigned_to"),
         "holdReason": o.get("hold_reason"),

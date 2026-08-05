@@ -367,6 +367,7 @@ class File2EdiStore:
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA busy_timeout = 30000")
         conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA foreign_keys = ON")
         return conn
 
     def _execute_write(self, fn):
@@ -413,7 +414,16 @@ class File2EdiStore:
         _ensure_column("file2edi_orders", "corrections_json", "corrections_json TEXT")
         _ensure_column("file2edi_orders", "processed_by", "processed_by TEXT")
         _ensure_column("file2edi_orders", "soldto", "soldto TEXT")
+        _ensure_column("file2edi_orders", "uploaded_by", "uploaded_by TEXT DEFAULT 'operator'")
         _ensure_column("file2edi_orders", "assigned_to", "assigned_to TEXT")
+        _ensure_column("file2edi_orders", "hold_reason", "hold_reason TEXT")
+        _ensure_column("file2edi_orders", "hold_by", "hold_by TEXT")
+        _ensure_column("file2edi_orders", "hold_at", "hold_at TEXT")
+        _ensure_column("file2edi_orders", "transferred_from", "transferred_from TEXT")
+        _ensure_column("file2edi_orders", "transferred_to", "transferred_to TEXT")
+        _ensure_column("file2edi_orders", "transfer_note", "transfer_note TEXT")
+        _ensure_column("file2edi_orders", "transfer_at", "transfer_at TEXT")
+        _ensure_column("file2edi_orders", "sap_sent_at", "sap_sent_at TEXT")
 
         _ensure_column("file2edi_pdf_uploads", "file_name", "file_name TEXT")
 
@@ -531,6 +541,42 @@ class File2EdiStore:
             return None
         p = Path(row["file_path"])
         return p if p.exists() else None
+
+    def delete_upload(self, upload_id: str) -> bool:
+        """Delete an upload and all its orders (cascade partners/lines/anomalies/history)."""
+        conn = self._conn()
+        try:
+            conn.execute("PRAGMA foreign_keys = ON")
+        except Exception:
+            pass
+        row = conn.execute(
+            "SELECT file_path FROM file2edi_pdf_uploads WHERE upload_id=?", [upload_id]
+        ).fetchone()
+        if not row:
+            conn.close()
+            return False
+        file_path = row["file_path"]
+        order_ids = [
+            str(r["order_id"])
+            for r in conn.execute(
+                "SELECT order_id FROM file2edi_orders WHERE upload_id=?", [upload_id]
+            ).fetchall()
+            if r["order_id"]
+        ]
+        for oid in order_ids:
+            conn.execute("DELETE FROM file2edi_conversion_history WHERE order_id=?", [oid])
+            conn.execute("DELETE FROM file2edi_order_anomalies WHERE order_id=?", [oid])
+            conn.execute("DELETE FROM file2edi_order_lines WHERE order_id=?", [oid])
+            conn.execute("DELETE FROM file2edi_order_partners WHERE order_id=?", [oid])
+        conn.execute("DELETE FROM file2edi_orders WHERE upload_id=?", [upload_id])
+        conn.execute("DELETE FROM file2edi_pdf_uploads WHERE upload_id=?", [upload_id])
+        conn.commit()
+        conn.close()
+        if file_path:
+            p = Path(file_path)
+            if p.exists():
+                p.unlink(missing_ok=True)
+        return True
 
     def save_order_review(self, review: dict, sync_delta: bool = True) -> None:
         review = dict(review)
@@ -969,11 +1015,12 @@ class File2EdiStore:
                       o.source, o.assigned_to, o.uploaded_by,
                       o.hold_reason, o.hold_by,
                       o.transferred_from, o.transferred_to, o.transfer_note,
-                      o.created_at, o.updated_at,
+                      o.created_at, o.updated_at, o.sap_sent_at,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
                LEFT JOIN file2edi_conversion_history h ON h.order_id = o.order_id
+               WHERE o.status NOT IN ('Généré', 'Transféré', 'Envoyé SAP')
                ORDER BY o.created_at DESC
                LIMIT 200"""
         ).fetchall()
@@ -1233,10 +1280,11 @@ class File2EdiStore:
 
     def mark_sftp_delivery(self, order_id: str, ok: bool, detail: str = "") -> None:
         status = "Envoyé SAP" if ok else "Échec SAP"
+        now = _now()
         conn = self._conn()
         conn.execute(
-            "UPDATE file2edi_orders SET status=?, review_required=?, updated_at=? WHERE order_id=?",
-            [status, 0 if ok else 1, _now(), order_id],
+            "UPDATE file2edi_orders SET status=?, review_required=?, updated_at=?, sap_sent_at=? WHERE order_id=?",
+            [status, 0 if ok else 1, now, now if ok else None, order_id],
         )
         conn.commit()
         conn.close()
@@ -1579,6 +1627,7 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transferred_to TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_note TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_at TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS sap_sent_at TEXT",
                 # User profile columns
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS email TEXT",
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS sap_id TEXT",

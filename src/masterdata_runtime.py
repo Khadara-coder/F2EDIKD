@@ -1011,7 +1011,7 @@ def write_csv(key: str, df) -> None:
     tmp = path.with_suffix(path.suffix + ".tmp")
     df.to_csv(tmp, sep=";", index=False, encoding="utf-8")
     tmp.replace(path)
-    MD_LAST_SYNC[key] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    MD_LAST_SYNC[key] = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     load_cache()
 
 

@@ -11,7 +11,7 @@ import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, AsyncGenerator, Optional
 
 from sqlalchemy import (
@@ -36,6 +36,10 @@ log = logging.getLogger(__name__)
 Base = declarative_base()
 
 
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # ORM Models
 # ─────────────────────────────────────────────────────────────────────────────
@@ -50,8 +54,8 @@ class AuthUser(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     role = Column(String(10), nullable=False, default="adv")  # 'admin' or 'adv'
     active = Column(Integer, default=1)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_utc_now)
+    updated_at = Column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
 
     # Relationship
     adv_scopes = relationship("AuthUserAdvScope", back_populates="user", cascade="all, delete-orphan")
@@ -65,7 +69,7 @@ class AuthUserAdvScope(Base):
     id = Column(Integer, primary_key=True, autoincrement=True)
     user_id = Column(String(36), ForeignKey("auth_users.id"), nullable=False, index=True)
     soldto = Column(String(20), nullable=False, index=True)
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_utc_now)
 
     # Relationship
     user = relationship("AuthUser", back_populates="adv_scopes")
@@ -80,7 +84,7 @@ class PdfUpload(Base):
     file_name = Column(String(255), nullable=False)
     file_size = Column(Integer, nullable=False)
     file_path = Column(String(512), nullable=False)
-    uploaded_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    uploaded_at = Column(DateTime, nullable=False, default=_utc_now)
     uploaded_by = Column(String(255), nullable=False, default="operator")
     status = Column(String(20), default="RECEIVED")
 
@@ -140,8 +144,8 @@ class Order(Base):
     uploaded_by = Column(String(255), nullable=False, default="operator")
     
     # Timestamps
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_utc_now, index=True)
+    updated_at = Column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
     processed_at = Column(DateTime, nullable=True)
 
     # Relationships
@@ -225,7 +229,7 @@ class OrderAnomaly(Base):
     message = Column(Text, nullable=False)
     status = Column(String(20), default="Ouverte")
     
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_utc_now)
 
     # Relationship
     order = relationship("Order", back_populates="anomalies")
@@ -244,7 +248,7 @@ class ConversionHistory(Base):
     confidence = Column(Float, nullable=True)
     edifact_path = Column(String(512), nullable=True)
     
-    processed_at = Column(DateTime, nullable=False, default=datetime.utcnow)
+    processed_at = Column(DateTime, nullable=False, default=_utc_now)
     processed_by = Column(String(255), default="system")
 
 
@@ -266,8 +270,8 @@ class JobsLedger(Base):
     output_path = Column(String(512), nullable=True)
     error_message = Column(Text, nullable=True)
     
-    created_at = Column(DateTime, nullable=False, default=datetime.utcnow, index=True)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, nullable=False, default=_utc_now, index=True)
+    updated_at = Column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
 
 
 class AdvContact(Base):
@@ -280,7 +284,7 @@ class AdvContact(Base):
     dept = Column(String(10), nullable=True)  # postal[0:2] DEPT code
     email = Column(String(255), nullable=False)
     active = Column(Integer, default=1)
-    updated_at = Column(DateTime, nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, nullable=False, default=_utc_now, onupdate=_utc_now)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

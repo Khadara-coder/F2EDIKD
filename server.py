@@ -1872,7 +1872,7 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
                 actor,
                 {"source": "n8n_webhook", "error": err},
             )
-            now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             for key in _MD_FILES:
                 _MD_LAST_SYNC[key] = now_iso
             _apply_masterdata_sync_metadata_to_cache_state()
@@ -1888,7 +1888,7 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
                 "message": f"Échec déclenchement n8n — cache local rechargé ({err})",
             }
 
-        now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for key in _MD_FILES:
             _MD_LAST_SYNC[key] = now_iso
         _apply_masterdata_sync_metadata_to_cache_state()
@@ -1933,7 +1933,7 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
             repo_error = str(exc)[:300]
             log.warning("masterdata sync (repo) failed, fallback to cache reload: %s", repo_error)
 
-        now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for key in _MD_FILES:
             _MD_LAST_SYNC[key] = now_iso
         _apply_masterdata_sync_metadata_to_cache_state()
@@ -1997,7 +1997,7 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
     ok_files  = [r[0] for r in rows if len(r) >= 4 and r[3] == "OK"]
     err_files = [r[0] for r in rows if len(r) >= 4 and r[3] != "OK"]
     if ok_files:
-        now_iso = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for key, fname in _MD_FILES.items():
             if fname in ok_files:
                 _MD_LAST_SYNC[key] = now_iso
@@ -2376,7 +2376,7 @@ async def api_admin_create_key(req: Request):
             keys_list.append({
                 "id": key_id, "name": name, "key_hash": key_hash,
                 "created_by": admin_actor,
-                "created_at": _dt.datetime.utcnow().isoformat(),
+                "created_at": _dt.datetime.now(_dt.timezone.utc).isoformat(),
                 "last_used_at": None,
             })
             store.save_app_settings({**settings, "api_keys": keys_list})
@@ -3227,7 +3227,7 @@ def save_audit_event(
         ok, _ = _delta_exec(f"""
         INSERT INTO {t} (conversion_id, event_type, actor, payload, result, created_at)
         VALUES ({_q(conversion_id)}, {_q(event_type)}, {_q(actor)},
-                {p_json}, {_q(result or "")}, {_q(_datetime.utcnow().strftime('%Y-%m-%dT%H:%M:%SZ'))})
+                {p_json}, {_q(result or "")}, {_q(datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'))})
         """)
         if not ok:
             log.warning("save_audit_event(%s,%s): delta insert failed", conversion_id, event_type)
@@ -3242,7 +3242,7 @@ def save_audit_event(
             "actor": actor,
             "payload": _json.dumps(payload or {}),
             "result": result or "",
-            "created_at": _datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "created_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
         try:
             with _PERSIST_LOCK:
@@ -3385,7 +3385,7 @@ def _ws_write_migration_sentinel(
     """Write migration_sentinel.json to the persist folder (Req 3+9)."""
     sentinel_data = _json.dumps({
         "storage_migration_checked": True,
-        "migrated_at":            _datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "migrated_at":            datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "migrated_conversions":   migrated_conv,
         "migrated_audit_events":  migrated_audit,
         "source":                 str(DB_PATH),
