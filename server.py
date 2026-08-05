@@ -901,6 +901,9 @@ async def api_auth_login(req: Request):
                                  "sapId": user.get("sapId", "")})
             resp.set_cookie("f2edi_session", session_id, httponly=True, samesite="lax", max_age=43200, path="/")
             return resp
+        raise HTTPException(status_code=401, detail="Identifiant ou mot de passe incorrect")
+    except HTTPException:
+        raise
     except Exception as _e:
         log.debug("api_auth_login: PG auth failed: %s", _e)
 
