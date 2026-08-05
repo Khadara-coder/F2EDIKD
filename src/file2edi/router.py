@@ -357,7 +357,7 @@ def create_router() -> APIRouter:
         """All converted orders for the Revue list page."""
         actor = resolve_actor(req)
         role = resolve_role(actor)
-        return [_order_list_item(o) for o in _list_combined_orders(actor=actor, role=role)]
+        return [_order_list_item(o) for o in _list_combined_orders(actor=actor, role=role, include_done=True)]
 
     @router.get("/dashboard/review-queue")
     def review_queue(req: Request):

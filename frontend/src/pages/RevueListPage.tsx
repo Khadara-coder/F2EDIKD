@@ -170,10 +170,12 @@ export function RevueListPage() {
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToFilterGroup(row.status) === statusFilter;
-      // "Mes dossiers" filter
-      const rowAssignee = row.assignedTo || row.processedBy || "";
+      // "Mes dossiers" filter — match if user is assignee OR processor
+      const rowAssignee = row.assignedTo?.toLowerCase() || "";
+      const rowProcessor = (row.processedBy || "").toLowerCase();
+      const userLc = (currentUsername || "").toLowerCase();
       const matchesMyOrders = !myOrdersOnly || !currentUsername ||
-        rowAssignee.toLowerCase() === currentUsername.toLowerCase();
+        rowAssignee === userLc || rowProcessor === userLc;
       // Filtre par gestionnaire spécifique
       const matchesManager = managerFilter === "all" ||
         row.assignedTo?.toLowerCase() === managerFilter.toLowerCase() ||
