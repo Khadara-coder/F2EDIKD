@@ -349,7 +349,7 @@ def create_router() -> APIRouter:
     def dashboard_metrics(req: Request):
         actor = resolve_actor(req)
         role = resolve_role(actor)
-        orders = _list_combined_orders(actor=actor, role=role)
+        orders = _list_combined_orders(actor=actor, role=role, include_done=True)
         return dashboard_metrics_from_db(orders)
 
     @router.get("/orders")
@@ -368,7 +368,7 @@ def create_router() -> APIRouter:
             review_statuses = ("Revue requise", "À revoir", "À vérifier", "Bloqué")
             items = [
                 _order_list_item(o)
-                for o in _list_combined_orders(actor=actor, role=role)
+                for o in _list_combined_orders(actor=actor, role=role, include_done=True)
                 if o.get("status") in review_statuses
             ]
         except Exception:
@@ -399,7 +399,7 @@ def create_router() -> APIRouter:
         actor = resolve_actor(req)
         role = resolve_role(actor)
         out = []
-        for o in _list_combined_orders(actor=actor, role=role)[:10]:
+        for o in _list_combined_orders(actor=actor, role=role, include_done=True)[:10]:
             out.append({
                 "conversionId": f"conv-{o['order_id']}",
                 "orderId": o["order_id"],
