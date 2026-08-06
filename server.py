@@ -1005,6 +1005,22 @@ def _f2edi_build_raw_address(addr: dict) -> str:
     return ", ".join(parts)
 
 
+def _f2edi_soldto_customer_name(adr: dict) -> str:
+    """Sold-to AG name from Customers (via SOLDTO), never ship-to Partners NAME.
+
+    Chain: ship-to found → Partners.SOLDTO → Customers.NAME.
+    ``adr["Client"]`` is already the Customers name when matching succeeded;
+    fall back to a Customers cache lookup by SOLDTO code.
+    """
+    soldto = str(adr.get("SOLDTO") or "").strip()
+    client = str(adr.get("Client") or "").strip()
+    if client:
+        return client
+    if soldto:
+        return str(_get_soldto_row(soldto).get("name") or "").strip()
+    return ""
+
+
 def _f2edi_build_response(structured: dict, filename: str,
                            pdf_hash: str, elapsed: float,
                            cached: bool = False) -> dict:
@@ -1015,6 +1031,7 @@ def _f2edi_build_response(structured: dict, filename: str,
     rej    = structured.get("rejets", {})
     edi    = structured.get("edifact", {})
     lignes = structured.get("lignes_commande", {})
+    soldto_name = _f2edi_soldto_customer_name(adr)
     return {
         "status": "OK",
         "filename": filename,
@@ -1029,7 +1046,7 @@ def _f2edi_build_response(structured: dict, filename: str,
         "customer": {
             "soldto":    adr.get("SOLDTO"),
             "shipto":    adr.get("SHIPTO"),
-            "name":      adr.get("Nom"),
+            "name":      soldto_name,
             "confidence": adr.get("Confiance", 0),
             "soldto_confidence": 90 if adr.get("SOLDTO") != adr.get("SHIPTO")
                                     else adr.get("Confiance", 0),

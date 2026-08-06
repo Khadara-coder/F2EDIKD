@@ -254,7 +254,7 @@ export function RevuePage() {
         title="Revue de commande"
         breadcrumbs={[
           { label: "Cockpit", href: "/" },
-          { label: "Revue", href: "/revue" },
+          { label: "Gérer les commandes", href: "/revue" },
           { label: order.fileName },
         ]}
         actions={
@@ -336,6 +336,14 @@ export function RevuePage() {
         onUpdateHeader={async (payload) => {
           await updateHeader.mutateAsync(payload);
         }}
+        onUpdateSoldto={async (payload, options) => {
+          if (!soldto) throw new Error("Partenaire sold-to introuvable pour cette commande");
+          await api.updateOrderPartner(soldto.partnerId, {
+            ...payload,
+            ...options,
+          });
+          invalidate();
+        }}
         onUpdateShipto={async (payload, options) => {
           if (!shipto) throw new Error("Partenaire ship-to introuvable pour cette commande");
           await api.updateOrderPartner(shipto.partnerId, {
@@ -384,14 +392,14 @@ export function RevuePage() {
         </CardContent>
       </Card>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className={isAdv ? "space-y-6" : "grid gap-6 lg:grid-cols-2"}>
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Anomalies et commentaires</CardTitle>
             {pendingAnomalyCount > 0 && (
               <p className="text-sm text-amber-700">
                 {pendingAnomalyCount} anomalie{pendingAnomalyCount > 1 ? "s" : ""} à traiter — choisissez
-                Valider ou Ignorer pour chacune avant de valider la commande.
+                une action pour chacune avant de valider la commande.
               </p>
             )}
           </CardHeader>
@@ -403,28 +411,32 @@ export function RevuePage() {
                 const pending = isAnomalyPending(a);
                 const isValidated = a.status === "Corrigée";
                 const isIgnored = a.status === "Ignorée";
+                const acceptLabel = a.buttonAccept || "Valider";
+                const rejectLabel = a.buttonReject || "Ignorer";
                 return (
               <div key={a.anomalyId} className="flex items-start justify-between gap-4 rounded-lg border p-3">
-                <div>
+                <div className="min-w-0">
                   <p className="text-sm">{a.message}</p>
                   <Badge variant={pending ? "warning" : "success"} className="mt-1">
                     {a.status}
                   </Badge>
                 </div>
-                <div className="flex shrink-0 gap-1">
+                <div className="flex shrink-0 flex-col gap-1 sm:max-w-[240px]">
                   <Button
                     variant={isValidated ? "secondary" : "ghost"}
                     size="sm"
+                    className="h-auto whitespace-normal px-2 py-1.5 text-left text-xs leading-snug"
                     onClick={() => api.resolveAnomaly(a.anomalyId, "corrected").then(invalidate)}
                   >
-                    Valider
+                    {acceptLabel}
                   </Button>
                   <Button
                     variant={isIgnored ? "secondary" : "ghost"}
                     size="sm"
+                    className="h-auto whitespace-normal px-2 py-1.5 text-left text-xs leading-snug"
                     onClick={() => api.resolveAnomaly(a.anomalyId, "ignored").then(invalidate)}
                   >
-                    Ignorer
+                    {rejectLabel}
                   </Button>
                 </div>
               </div>
@@ -434,14 +446,16 @@ export function RevuePage() {
           </CardContent>
         </Card>
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Traçabilité</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ProgressStepper steps={traceability} />
-          </CardContent>
-        </Card>
+        {!isAdv && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Traçabilité</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ProgressStepper steps={traceability} />
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-6">

@@ -87,7 +87,7 @@ def test_mapper_no_anomaly_when_article_available(materials_cache):
 def test_mapper_warning_no_sale(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("222222"))
     msgs = [a["message"] for a in review["anomalies"]]
-    assert any("arrêtée (no sale)" in m for m in msgs)
+    assert any("arrêtée (plus commercialisée)" in m for m in msgs)
     assert review["lines"][0]["status"] == "À vérifier"
 
 
@@ -95,16 +95,19 @@ def test_mapper_warning_replacement_final_available(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("333333"))
     msgs = [a["message"] for a in review["anomalies"]]
     assert any("remplacée par 444444" in m for m in msgs)
+    assert not any("statut matière" in m for m in msgs)
 
 
 def test_mapper_warning_chain_ends_no_sale(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("555555"))
     msgs = [a["message"] for a in review["anomalies"]]
-    assert any("remplacée par 666666" in m and "arrêtée (no sale)" in m for m in msgs)
+    assert any(
+        "remplacée par 666666" in m and "arrêtée (plus commercialisée)" in m for m in msgs
+    )
 
 
 def test_mapper_error_missing_article(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("999999999"))
     msgs = [a["message"] for a in review["anomalies"]]
-    assert any("absent dans la base de données" in m for m in msgs)
+    assert any("absent du référentiel matières" in m for m in msgs)
     assert any(a.get("severity") == "error" for a in review["anomalies"])

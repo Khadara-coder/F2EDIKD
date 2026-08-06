@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -12,11 +13,17 @@ interface HeaderProps {
 }
 
 function SystemBadges() {
+  const { data: me } = useCurrentUser();
   const { data } = useQuery({
     queryKey: ["systemHealth"],
     queryFn: api.getSystemHealth,
     refetchInterval: 30_000,
+    enabled: me?.role === "admin",
   });
+
+  if (me?.role !== "admin") {
+    return null;
+  }
 
   const badges = [
     {

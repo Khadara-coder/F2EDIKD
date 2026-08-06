@@ -245,7 +245,7 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "business_status": "DUPLICATE",
         "retry_allowed": False,
         "manual_review_required": True,
-        "message_fr": "Ce numéro de commande existe déjà dans l'historique SAP des ventes.",
+        "message_fr": "Ce numéro de commande existe déjà dans l'historique SAP.",
         "message_en": "This purchase order number already exists in the SAP sales order history.",
     },
     "CUSTOMER_NOT_DEFINED": {
@@ -335,6 +335,272 @@ REJECTION_ACTION_TEXT: dict[str, str] = {
 REQUIRED_CODES = frozenset(REJECTION_CATALOG.keys())
 
 
+class ReviewActions(TypedDict):
+    button_accept: str
+    button_reject: str
+    auto_action_accept: str
+    auto_action_reject: str
+    mode: str  # Manuel | Automatique | Semi-auto
+
+
+DEFAULT_REVIEW_ACTIONS: ReviewActions = {
+    "button_accept": "Valider",
+    "button_reject": "Ignorer",
+    "auto_action_accept": "Continuer le traitement",
+    "auto_action_reject": "Clôturer l'anomalie sans correction",
+    "mode": "Manuel",
+}
+
+# UI labels + future automatic actions for each rejection code (manual review buttons).
+REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
+    "PDF_PARSE_FAILURE": {
+        "button_accept": "PDF relu, relancer l'extraction",
+        "button_reject": "Rejeter le fichier",
+        "auto_action_accept": "Relancer l'extraction OCR",
+        "auto_action_reject": "Clôturer la commande comme rejetée",
+        "mode": "Manuel",
+    },
+    "NOT_A_PDF": {
+        "button_accept": "Fichier corrigé, reprendre",
+        "button_reject": "Ce n'est pas un PDF valide",
+        "auto_action_accept": "Relancer le traitement",
+        "auto_action_reject": "Clôturer comme fichier invalide",
+        "mode": "Manuel",
+    },
+    "ORDER_KEY_MISSING": {
+        "button_accept": "N° commande renseigné",
+        "button_reject": "Impossible de retrouver le n°",
+        "auto_action_accept": "Continuer avec le n° saisi",
+        "auto_action_reject": "Mettre en attente de saisie",
+        "mode": "Manuel",
+    },
+    "NO_VALID_ARTICLE": {
+        "button_accept": "Articles corrigés",
+        "button_reject": "Rejeter les lignes invalides",
+        "auto_action_accept": "Continuer avec les articles validés",
+        "auto_action_reject": "Retirer les lignes invalides",
+        "mode": "Manuel",
+    },
+    "CONTRACT_KEYWORD": {
+        "button_accept": "C'est bien une commande",
+        "button_reject": "Ce n'est pas une commande",
+        "auto_action_accept": "Continuer le traitement",
+        "auto_action_reject": "Clôturer comme document non commande",
+        "mode": "Manuel",
+    },
+    "CONTRACT_BREAK_ADDRESSES_MISSING": {
+        "button_accept": "Adresse corrigée",
+        "button_reject": "Adresse introuvable",
+        "auto_action_accept": "Relancer la résolution SHIP-TO",
+        "auto_action_reject": "Clôturer faute d'adresse",
+        "mode": "Manuel",
+    },
+    "CONTRACT_BREAK_ARTICLES_MISSING": {
+        "button_accept": "Lignes articles corrigées",
+        "button_reject": "Aucune ligne exploitable",
+        "auto_action_accept": "Continuer avec les lignes saisies",
+        "auto_action_reject": "Clôturer faute de lignes",
+        "mode": "Manuel",
+    },
+    "CONTRACT_BREAK_SOLDTO_MISSING": {
+        "button_accept": "SOLD-TO sélectionné",
+        "button_reject": "SOLD-TO introuvable",
+        "auto_action_accept": "Continuer avec le SOLD-TO choisi",
+        "auto_action_reject": "Clôturer faute de SOLD-TO",
+        "mode": "Manuel",
+    },
+    "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING": {
+        "button_accept": "SHIP-TO sélectionné",
+        "button_reject": "Aucun SHIP-TO candidat",
+        "auto_action_accept": "Continuer avec le SHIP-TO choisi",
+        "auto_action_reject": "Clôturer faute de SHIP-TO",
+        "mode": "Manuel",
+    },
+    "SOLDTO_NOT_FOUND": {
+        "button_accept": "Client identifié manuellement",
+        "button_reject": "Client inconnu",
+        "auto_action_accept": "Appliquer le SOLD-TO saisi",
+        "auto_action_reject": "Clôturer comme client inconnu",
+        "mode": "Manuel",
+    },
+    "SOLDTO_AMBIGUOUS_MATCH": {
+        "button_accept": "J'ai choisi le bon SOLD-TO",
+        "button_reject": "Ambiguïté non résolue",
+        "auto_action_accept": "Appliquer le SOLD-TO choisi",
+        "auto_action_reject": "Mettre en attente de clarification",
+        "mode": "Manuel",
+    },
+    "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": {
+        "button_accept": "Adresse de livraison confirmée",
+        "button_reject": "Adresse insuffisante",
+        "auto_action_accept": "Continuer avec le SHIP-TO confirmé",
+        "auto_action_reject": "Clôturer faute de preuve adresse",
+        "mode": "Manuel",
+    },
+    "SHIPTO_NO_STRONG_MATCH": {
+        "button_accept": "SHIP-TO confirmé",
+        "button_reject": "Pas de correspondance fiable",
+        "auto_action_accept": "Appliquer le SHIP-TO confirmé",
+        "auto_action_reject": "Clôturer faute de match SHIP-TO",
+        "mode": "Manuel",
+    },
+    "SHIPTO_AMBIGUOUS_MATCH": {
+        "button_accept": "J'ai choisi le bon SHIP-TO",
+        "button_reject": "Ambiguïté non résolue",
+        "auto_action_accept": "Appliquer le SHIP-TO choisi",
+        "auto_action_reject": "Mettre en attente de clarification",
+        "mode": "Manuel",
+    },
+    "EDIFACT_MISSING_BGM": {
+        "button_accept": "Référence commande corrigée",
+        "button_reject": "Impossible de générer le BGM",
+        "auto_action_accept": "Régénérer l'EDIFACT",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
+    "EDIFACT_MISSING_DTM_137": {
+        "button_accept": "Date document corrigée",
+        "button_reject": "Date document invalide",
+        "auto_action_accept": "Régénérer l'EDIFACT",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
+    "EDIFACT_MISSING_NAD_BY": {
+        "button_accept": "Acheteur corrigé",
+        "button_reject": "Acheteur incomplet",
+        "auto_action_accept": "Régénérer l'EDIFACT",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
+    "EDIFACT_MISSING_NAD_DP": {
+        "button_accept": "Livraison corrigée",
+        "button_reject": "Livraison non résolue",
+        "auto_action_accept": "Régénérer l'EDIFACT",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
+    "EDIFACT_MISSING_LIN": {
+        "button_accept": "Lignes articles corrigées",
+        "button_reject": "Aucune ligne LIN",
+        "auto_action_accept": "Régénérer l'EDIFACT",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
+    "ARTICLE_QUANTITY_INVALID": {
+        "button_accept": "Quantité corrigée",
+        "button_reject": "Quantité invalide",
+        "auto_action_accept": "Continuer avec la quantité saisie",
+        "auto_action_reject": "Retirer ou bloquer la ligne",
+        "mode": "Manuel",
+    },
+    "UNIT_PRICE_MISSING": {
+        "button_accept": "Prix unitaire renseigné",
+        "button_reject": "Prix manquant",
+        "auto_action_accept": "Continuer avec le prix saisi",
+        "auto_action_reject": "Mettre la ligne en attente",
+        "mode": "Manuel",
+    },
+    "EDIFACT_LINE_INTEGRITY_MISMATCH": {
+        "button_accept": "Lignes réconciliées",
+        "button_reject": "Écart de lignes",
+        "auto_action_accept": "Régénérer l'EDIFACT",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
+    "EDIFACT_NAD_DP_MISMATCH": {
+        "button_accept": "SHIP-TO aligné",
+        "button_reject": "Écart NAD+DP",
+        "auto_action_accept": "Régénérer l'EDIFACT",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
+    "DUPLICATE_ALREADY_SENT": {
+        "button_accept": "J'ai vérifié, c'est une nouvelle commande",
+        "button_reject": "Cette commande existe déjà",
+        "auto_action_accept": "Continuer le traitement / renvoyer vers SAP",
+        "auto_action_reject": "Clôturer comme doublon déjà envoyé",
+        "mode": "Manuel",
+    },
+    "DELIVERY_ADDRESS_INVALID": {
+        "button_accept": "Adresse de livraison corrigée",
+        "button_reject": "Adresse non associative",
+        "auto_action_accept": "Relancer le matching adresse",
+        "auto_action_reject": "Clôturer faute d'adresse",
+        "mode": "Manuel",
+    },
+    "NO_DELIVERY_ADDRESS": {
+        "button_accept": "Adresse de livraison saisie",
+        "button_reject": "Aucune adresse de livraison",
+        "auto_action_accept": "Continuer avec l'adresse saisie",
+        "auto_action_reject": "Clôturer faute d'adresse",
+        "mode": "Manuel",
+    },
+    "ARTICLE_NOT_FOUND": {
+        "button_accept": "Accepter le matériau",
+        "button_reject": "Rejeter la ligne",
+        "auto_action_accept": "Continuer avec le matériau validé",
+        "auto_action_reject": "Retirer la ligne article",
+        "mode": "Manuel",
+    },
+    "PO_NUMBER_DUPLICATE": {
+        "button_accept": "J'ai vérifié, c'est une nouvelle commande",
+        "button_reject": "Cette commande existe déjà",
+        "auto_action_accept": "Continuer le traitement",
+        "auto_action_reject": "Clôturer comme doublon",
+        "mode": "Manuel",
+    },
+    "CUSTOMER_NOT_DEFINED": {
+        "button_accept": "Client identifié",
+        "button_reject": "Client non défini",
+        "auto_action_accept": "Appliquer le client saisi",
+        "auto_action_reject": "Clôturer comme client inconnu",
+        "mode": "Manuel",
+    },
+    "NOT_AN_ORDER": {
+        "button_accept": "C'est bien une commande",
+        "button_reject": "Ce n'est pas une commande",
+        "auto_action_accept": "Continuer le traitement",
+        "auto_action_reject": "Clôturer comme document non commande",
+        "mode": "Manuel",
+    },
+    "NO_LINE_ITEMS": {
+        "button_accept": "Lignes articles ajoutées",
+        "button_reject": "Aucune ligne article",
+        "auto_action_accept": "Continuer avec les lignes saisies",
+        "auto_action_reject": "Clôturer faute de lignes",
+        "mode": "Manuel",
+    },
+    "QUANTITY_MISSING": {
+        "button_accept": "Quantité renseignée",
+        "button_reject": "Quantité manquante",
+        "auto_action_accept": "Continuer avec la quantité saisie",
+        "auto_action_reject": "Mettre la ligne en attente",
+        "mode": "Manuel",
+    },
+    "PRICE_MISSING": {
+        "button_accept": "Prix renseigné",
+        "button_reject": "Prix manquant",
+        "auto_action_accept": "Continuer avec le prix saisi",
+        "auto_action_reject": "Mettre la ligne en attente",
+        "mode": "Manuel",
+    },
+    "DELIVERY_SFTP_FAILED": {
+        "button_accept": "Relancer l'envoi SFTP",
+        "button_reject": "Abandonner l'envoi",
+        "auto_action_accept": "Relancer l'upload SFTP",
+        "auto_action_reject": "Marquer l'échec SFTP comme clôturé",
+        "mode": "Semi-auto",
+    },
+    "DELIVERY_EMAIL_FAILED": {
+        "button_accept": "Relancer l'envoi email",
+        "button_reject": "Abandonner l'envoi",
+        "auto_action_accept": "Relancer l'envoi email",
+        "auto_action_reject": "Marquer l'échec email comme clôturé",
+        "mode": "Semi-auto",
+    },
+}
+
+
 def get(code: str) -> RejectionEntry:
     """Return the catalog entry for *code*, or a fallback entry if unknown."""
     return REJECTION_CATALOG.get(code, {
@@ -345,6 +611,70 @@ def get(code: str) -> RejectionEntry:
         "message_fr": f"Erreur inconnue: {code}",
         "message_en": f"Unknown error: {code}",
     })
+
+
+def format_rejection_message(
+    code: str,
+    details: dict | None = None,
+    fallback: str = "",
+) -> str:
+    """Return a French user-facing message for a rejection code."""
+    entry = get(code)
+    base = (entry.get("message_fr") or fallback or code).strip()
+    details = details or {}
+
+    if code == "PO_NUMBER_DUPLICATE":
+        po = str(details.get("po_number") or details.get("po") or "").strip()
+        if po:
+            return f"Ce numéro de commande {po} existe déjà dans l'historique SAP."
+        return base
+
+    if code == "QUANTITY_MISSING":
+        lines = details.get("lines") or []
+        if lines:
+            return f"Quantité manquante sur la/les ligne(s) : {', '.join(str(l) for l in lines)}."
+        return base
+
+    if code == "PRICE_MISSING":
+        lines = details.get("lines") or []
+        if lines:
+            return f"Prix unitaire manquant sur la/les ligne(s) : {', '.join(str(l) for l in lines)}."
+        return base
+
+    if code == "ARTICLE_NOT_FOUND":
+        articles = details.get("articles") or []
+        if articles:
+            if isinstance(articles[0], dict):
+                art_list = ", ".join(str(a.get("article") or "") for a in articles[:5])
+                count = len(articles)
+            else:
+                art_list = ", ".join(str(a) for a in articles[:5])
+                count = len(articles)
+            if art_list:
+                return f"{count} article(s) inconnu(s) dans le référentiel : {art_list}."
+        return base
+
+    if code == "DELIVERY_ADDRESS_INVALID":
+        conf = details.get("confiance")
+        if conf is not None and conf != "":
+            return f"{base} (confiance {conf} %)."
+        return base
+
+    if code == "NOT_AN_ORDER" and details.get("detected_type"):
+        return f"Le document semble être un {details['detected_type']}, pas un bon de commande."
+
+    if code == "ORDER_CHANGE" and details.get("detected_type"):
+        return f"Document de modification de commande (type : {details['detected_type']})."
+
+    return base
+
+
+def review_actions(code: str) -> ReviewActions:
+    """Return button labels and future auto-actions for a rejection code."""
+    override = REJECTION_REVIEW_ACTIONS.get(code)
+    if not override:
+        return dict(DEFAULT_REVIEW_ACTIONS)
+    return {**DEFAULT_REVIEW_ACTIONS, **override}
 
 
 def action_text(code: str, lang: str = "fr") -> str:

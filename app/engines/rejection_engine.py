@@ -22,6 +22,8 @@ import logging
 import re
 from typing import Optional
 
+from src.rejection_catalog import format_rejection_message
+
 logger = logging.getLogger(__name__)
 
 
@@ -92,21 +94,27 @@ def _check_delivery_address(validated: dict) -> list[dict]:
         if "non identifie" in statut.lower() or not statut:
             rejections.append({
                 "code": "NO_DELIVERY_ADDRESS",
-                "message": "No delivery address found in the document",
+                "message": format_rejection_message("NO_DELIVERY_ADDRESS"),
                 "severity": "blocking",
                 "details": {"statut": statut},
             })
         else:
             rejections.append({
                 "code": "DELIVERY_ADDRESS_INVALID",
-                "message": "Delivery address could not be matched to masterdata",
+                "message": format_rejection_message(
+                    "DELIVERY_ADDRESS_INVALID",
+                    {"statut": statut, "confiance": confidence},
+                ),
                 "severity": "blocking",
                 "details": {"statut": statut, "confiance": confidence},
             })
     elif confidence > 0 and confidence < 50:
         rejections.append({
             "code": "DELIVERY_ADDRESS_INVALID",
-            "message": f"Delivery address match confidence too low ({confidence}%)",
+            "message": format_rejection_message(
+                "DELIVERY_ADDRESS_INVALID",
+                {"shipto": shipto, "confiance": confidence},
+            ),
             "severity": "blocking",
             "details": {"shipto": shipto, "confiance": confidence},
         })
@@ -120,7 +128,7 @@ def _check_po_number(document: dict) -> list[dict]:
     if not po or po == "-" or po.strip() == "":
         return [{
             "code": "PO_NUMBER_MISSING",
-            "message": "No purchase order number found in the document",
+            "message": format_rejection_message("ORDER_KEY_MISSING"),
             "severity": "blocking",
             "details": {},
         }]
@@ -152,7 +160,14 @@ def _check_po_duplicate(document: dict, master_data: dict = None) -> list[dict]:
             so = so_entry if isinstance(so_entry, dict) else {}
         return [{
             "code": "PO_NUMBER_DUPLICATE",
-            "message": f"Order number '{po_clean}' already exists (SAP order {so.get('VBELN', '?') if isinstance(so, dict) else '?'})",
+            "message": format_rejection_message(
+                "PO_NUMBER_DUPLICATE",
+                {
+                    "po_number": po_clean,
+                    "existing_vbeln": so.get("VBELN", "") if isinstance(so, dict) else "",
+                    "existing_kunnr": so.get("KUNNR", "") if isinstance(so, dict) else "",
+                },
+            ),
             "severity": "warning",
             "details": {
                 "po_number": po_clean,
@@ -170,7 +185,7 @@ def _check_customer(validated: dict) -> list[dict]:
     if not soldto or soldto == "-":
         return [{
             "code": "CUSTOMER_NOT_DEFINED",
-            "message": "No customer reference found in masterdata",
+            "message": format_rejection_message("CUSTOMER_NOT_DEFINED"),
             "severity": "blocking",
             "details": {},
         }]
@@ -187,7 +202,7 @@ def _check_line_items(lignes: dict, materials: dict = None) -> list[dict]:
         # but flag as warning
         rejections.append({
             "code": "NO_LINE_ITEMS",
-            "message": "No order line items found in the document",
+            "message": format_rejection_message("NO_LINE_ITEMS"),
             "severity": "warning",
             "details": {},
         })
@@ -232,7 +247,7 @@ def _check_line_items(lignes: dict, materials: dict = None) -> list[dict]:
     if lines_without_qty:
         rejections.append({
             "code": "QUANTITY_MISSING",
-            "message": f"Quantity missing on line(s): {', '.join(str(l) for l in lines_without_qty)}",
+            "message": format_rejection_message("QUANTITY_MISSING", {"lines": lines_without_qty}),
             "severity": "blocking",
             "details": {"lines": lines_without_qty},
         })
@@ -240,16 +255,18 @@ def _check_line_items(lignes: dict, materials: dict = None) -> list[dict]:
     if lines_without_price:
         rejections.append({
             "code": "PRICE_MISSING",
-            "message": f"Unit price missing on line(s): {', '.join(str(l) for l in lines_without_price)}",
+            "message": format_rejection_message("PRICE_MISSING", {"lines": lines_without_price}),
             "severity": "blocking",
             "details": {"lines": lines_without_price},
         })
 
     if lines_article_not_found:
-        art_list = ", ".join(a["article"] for a in lines_article_not_found[:5])
         rejections.append({
             "code": "ARTICLE_NOT_FOUND",
-            "message": f"{len(lines_article_not_found)} article(s) inconnu(s) dans le référentiel: {art_list}",
+            "message": format_rejection_message(
+                "ARTICLE_NOT_FOUND",
+                {"articles": lines_article_not_found},
+            ),
             "severity": "warning",
             "details": {"articles": lines_article_not_found, "action": "saisir_et_informer"},
         })
@@ -266,14 +283,20 @@ def _check_document_type(document: dict) -> list[dict]:
         if "avoir" in doc_type or "credit" in doc_type:
             return [{
                 "code": "NOT_AN_ORDER",
-                "message": f"Document appears to be a credit note, not a purchase order (type: {doc_type})",
+                "message": format_rejection_message(
+                    "NOT_AN_ORDER",
+                    {"detected_type": "avoir / note de crédit"},
+                ),
                 "severity": "blocking",
                 "details": {"detected_type": doc_type},
             }]
         if "modif" in doc_type or "change" in doc_type:
             return [{
                 "code": "ORDER_CHANGE",
-                "message": f"Document is an order change/modification (type: {doc_type})",
+                "message": format_rejection_message(
+                    "ORDER_CHANGE",
+                    {"detected_type": doc_type},
+                ),
                 "severity": "blocking",
                 "details": {"detected_type": doc_type},
             }]

@@ -84,6 +84,128 @@ def test_norm_order_key():
     assert norm_order_key(" cm-00302553 ") == "CM-00302553"
 
 
+def test_remap_customer_id_if_delivery_shipto():
+    from app.masterdata import remap_customer_id_if_delivery_shipto
+
+    data = {
+        "partners_by_shipto": {
+            "15900966": ["15015760"],
+            "15015760": ["15015760"],  # unlikely but ensure self-parent stays
+        }
+    }
+    parent, shipto = remap_customer_id_if_delivery_shipto(data, "15900966")
+    assert parent == "15015760"
+    assert shipto == "15900966"
+    parent2, shipto2 = remap_customer_id_if_delivery_shipto(data, "15015760")
+    assert parent2 == "15015760"
+    assert shipto2 is None
+
+
+def test_soldto_billing_does_not_collapse_shipto_as_soldto():
+    """Site Customers rows that are Partners.SHIPTO must remap to parent SOLDTO."""
+    from app.masterdata import build_soldto_billing_result, soldto_billing_matches_by_address
+
+    data = {
+        "customers": [
+            {
+                "id": "15900966",
+                "name": ".ISERBA (HAR)",
+                "postal": "76430",
+                "city": "OUDALLE",
+                "street": "1 CHEMIN DES PLANS D'EAU",
+                "country": "FR",
+                "vat": "FR54793797283",
+            },
+            {
+                "id": "15015760",
+                "name": "ISERBA",
+                "postal": "01700",
+                "city": "BEYNOST CEDEX",
+                "street": "HQ",
+                "country": "FR",
+                "vat": "FR54793797283",
+            },
+        ],
+        "customers_by_id": {},
+        "customers_by_postal": {
+            "76430": [
+                {
+                    "id": "15900966",
+                    "name": ".ISERBA (HAR)",
+                    "postal": "76430",
+                    "city": "OUDALLE",
+                    "street": "1 CHEMIN DES PLANS D'EAU",
+                    "country": "FR",
+                    "vat": "FR54793797283",
+                }
+            ]
+        },
+        "partners_by_shipto": {"15900966": ["15015760"]},
+        "partners_by_soldto": {
+            "15015760": [
+                {
+                    "id": "15900966",
+                    "name": ".ISERBA (HAR)",
+                    "postal": "76430",
+                    "city": "OUDALLE",
+                    "street": "1 CHEMIN DES PLANS D'EAU",
+                    "country": "FR",
+                }
+            ]
+        },
+    }
+    data["customers_by_id"] = {c["id"]: c for c in data["customers"]}
+
+    delivery = {
+        "Code postal": "76430",
+        "Ville": "OUDALLE",
+        "Rue": "1 CHEMIN DES PLANS D'EAU",
+    }
+    matches = soldto_billing_matches_by_address(data, delivery)
+    assert matches
+    assert matches[0][2] == "15015760"
+    assert "shipto_parent_remap" in matches[0][1]
+
+    _detected, validated = build_soldto_billing_result(
+        data=data,
+        matches=matches,
+        layout_analysis=None,
+        detected_candidate={**delivery, "Score resolution": 100},
+        filename="0.4.1 17571514 ISERBA (HAR) OUDALLE CAC2410HAR00035.pdf",
+    )
+    assert validated["SOLDTO"] == "15015760"
+    assert validated["SHIPTO"] == "15900966"
+    assert validated.get("Livraison egale facturation SOLDTO") == "non"
+
+
+@pytest.mark.skipif(
+    not (Path(__file__).resolve().parents[1] / "data" / "masterdata" / "10564_Partners.csv").exists(),
+    reason="Master data CSV absent",
+)
+def test_iserba_oudalle_resolves_parent_soldto(master_data):
+    from app.masterdata import resolve_delivery_with_masterdata
+
+    text = """
+BON DE COMMANDE
+N° commande: CAC2410HAR00035
+Adresse de livraison
+.ISERBA (HAR)
+1 CHEMIN DES PLANS D'EAU
+76430 OUDALLE
+FRANCE
+"""
+    _detected, validated = resolve_delivery_with_masterdata(
+        text,
+        {"vat_numbers": []},
+        "0.4.1 17571514 ISERBA (HAR) OUDALLE CAC2410HAR00035.pdf",
+        None,
+        None,
+        order_number="CAC2410HAR00035",
+    )
+    assert validated["SOLDTO"] == "15015760"
+    assert validated["SHIPTO"] == "15900966"
+
+
 def test_filter_candidates_keeps_primary_detected_address():
     from app.masterdata import filter_candidates_to_primary_detection
 

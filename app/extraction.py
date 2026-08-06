@@ -495,12 +495,15 @@ def extract_structured_fields(
         )
         if cross_resolution.get("resolved"):
             shipto_entry = cross_resolution["shipto"]
+            soldto_resolved = cross_resolution["soldto"]
+            soldto_customer = get_master_data().get("customers_by_id", {}).get(soldto_resolved) or {}
             master_delivery_address = {
                 "Statut": cross_resolution["statut"],
                 "Confiance": cross_resolution["confidence"],
                 "Raison": f"cross_resolve:{cross_resolution['path']}",
-                "SOLDTO": cross_resolution["soldto"],
-                "SHIPTO": shipto_entry.get("id", cross_resolution["soldto"]),
+                "SOLDTO": soldto_resolved,
+                "Client": soldto_customer.get("name", ""),
+                "SHIPTO": shipto_entry.get("id", soldto_resolved),
                 "Nom": shipto_entry.get("name", ""),
                 "Rue": shipto_entry.get("street", ""),
                 "Code postal": shipto_entry.get("postal", ""),
@@ -555,6 +558,7 @@ def extract_structured_fields(
                     "Confiance": llm_result["confidence"],
                     "Raison": f"llm_resolve:{llm_result['path']}",
                     "SOLDTO": soldto_resolved,
+                    "Client": (md.get("customers_by_id", {}).get(soldto_resolved) or {}).get("name", ""),
                     "SHIPTO": shipto_id,
                     "Nom": shipto_entry.get("name", ""),
                     "Rue": shipto_entry.get("street", ""),

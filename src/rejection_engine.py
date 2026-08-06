@@ -7,7 +7,7 @@ adapted to work against both:
 
 Every returned rejection dict has keys:
     code (str)       — matches a REJECTION_CATALOG key
-    message (str)    — English short message for logging/API
+    message (str)    — French short message for UI/logging
     severity (str)   — "blocking" | "warning"
     details (dict)   — optional context
 
@@ -21,7 +21,7 @@ import logging
 import re
 from typing import Any
 
-from .rejection_catalog import get as catalog_get
+from .rejection_catalog import format_rejection_message, get as catalog_get
 
 log = logging.getLogger("edifact.rejection_engine")
 
@@ -128,17 +128,23 @@ def _check_delivery_address(validated: dict) -> list[dict]:
     if not shipto or shipto == "-":
         if "non identifie" in statut.lower() or not statut:
             return [{"code": "NO_DELIVERY_ADDRESS",
-                     "message": "No delivery address detected",
+                     "message": format_rejection_message("NO_DELIVERY_ADDRESS"),
                      "severity": "blocking",
                      "details": {"statut": statut}}]
         return [{"code": "DELIVERY_ADDRESS_INVALID",
-                 "message": "Delivery address could not be matched to masterdata",
+                 "message": format_rejection_message(
+                     "DELIVERY_ADDRESS_INVALID",
+                     {"statut": statut, "confiance": confidence},
+                 ),
                  "severity": "blocking",
                  "details": {"statut": statut, "confiance": confidence}}]
 
     if 0 < confidence < 50:
         return [{"code": "DELIVERY_ADDRESS_INVALID",
-                 "message": f"Delivery address confidence too low ({confidence}%)",
+                 "message": format_rejection_message(
+                     "DELIVERY_ADDRESS_INVALID",
+                     {"shipto": shipto, "confiance": confidence},
+                 ),
                  "severity": "blocking",
                  "details": {"shipto": shipto, "confiance": confidence}}]
     return []
@@ -148,8 +154,8 @@ def _check_po_number(document: dict) -> list[dict]:
     """Rule 6: PO number presence."""
     po = (document.get("Numero de commande") or document.get("order_number") or "").strip()
     if not po or po == "-":
-        return [{"code": "PO_NUMBER_MISSING",
-                 "message": "No purchase order number found",
+        return [{"code": "ORDER_KEY_MISSING",
+                 "message": format_rejection_message("ORDER_KEY_MISSING"),
                  "severity": "blocking",
                  "details": {}}]
     return []
@@ -167,12 +173,16 @@ def _check_po_duplicate(document: dict, master_data: dict | None) -> list[dict]:
     if po_clean in sales:
         entry = sales[po_clean]
         so = (entry[0] if isinstance(entry, list) else entry) if entry else {}
+        details = {
+            "po": po_clean,
+            "po_number": po_clean,
+            "vbeln": so.get("VBELN", "") if isinstance(so, dict) else "",
+            "kunnr": so.get("KUNNR", "") if isinstance(so, dict) else "",
+        }
         return [{"code": "PO_NUMBER_DUPLICATE",
-                 "message": f"Order {po_clean!r} already in SAP (VBELN={so.get('VBELN','?') if isinstance(so, dict) else '?'})",
+                 "message": format_rejection_message("PO_NUMBER_DUPLICATE", details),
                  "severity": "warning",
-                 "details": {"po": po_clean,
-                              "vbeln": so.get("VBELN", "") if isinstance(so, dict) else "",
-                              "kunnr": so.get("KUNNR", "") if isinstance(so, dict) else ""}}]
+                 "details": details}]
     return []
 
 
@@ -181,7 +191,7 @@ def _check_customer(validated: dict) -> list[dict]:
     soldto = validated.get("SOLDTO", "")
     if not soldto or soldto == "-":
         return [{"code": "CUSTOMER_NOT_DEFINED",
-                 "message": "No customer (SOLDTO) reference found in masterdata",
+                 "message": format_rejection_message("CUSTOMER_NOT_DEFINED"),
                  "severity": "blocking",
                  "details": {}}]
     return []
@@ -194,7 +204,7 @@ def _check_line_items(lignes: dict, materials: dict | None) -> list[dict]:
 
     if not items:
         return [{"code": "NO_LINE_ITEMS",
-                 "message": "No order line items found",
+                 "message": format_rejection_message("NO_LINE_ITEMS"),
                  "severity": "warning",
                  "details": {}}]
 
@@ -216,17 +226,23 @@ def _check_line_items(lignes: dict, materials: dict | None) -> list[dict]:
 
     if missing_qty:
         rejections.append({"code": "QUANTITY_MISSING",
-                            "message": f"Quantity missing on line(s): {', '.join(missing_qty)}",
+                            "message": format_rejection_message(
+                                "QUANTITY_MISSING", {"lines": missing_qty},
+                            ),
                             "severity": "blocking",
                             "details": {"lines": missing_qty}})
     if missing_price:
         rejections.append({"code": "PRICE_MISSING",
-                           "message": f"Unit price missing on line(s): {', '.join(missing_price)}",
+                           "message": format_rejection_message(
+                               "PRICE_MISSING", {"lines": missing_price},
+                           ),
                            "severity": "blocking",
                            "details": {"lines": missing_price}})
     if not_found:
         rejections.append({"code": "ARTICLE_NOT_FOUND",
-                           "message": f"Article(s) not in materials master: {not_found}",
+                           "message": format_rejection_message(
+                               "ARTICLE_NOT_FOUND", {"articles": not_found},
+                           ),
                            "severity": "blocking",
                            "details": {"articles": not_found}})
     return rejections
@@ -237,7 +253,7 @@ def _check_document_type(document: dict) -> list[dict]:
     raw = (document.get("raw_text") or document.get("Type document") or "").lower()
     if any(kw in raw for kw in _CONTRACT_KEYWORDS):
         return [{"code": "NOT_AN_ORDER",
-                 "message": "Document appears to be a contract/quote/proforma, not a PO",
+                 "message": format_rejection_message("NOT_AN_ORDER"),
                  "severity": "blocking",
                  "details": {}}]
     return []

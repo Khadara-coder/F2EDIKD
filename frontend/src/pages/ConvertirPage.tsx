@@ -4,6 +4,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Eye, ArrowRight, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ExtractionPreview } from "@/types";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { Header } from "@/components/layout/Header";
 import { UploadDropzone } from "@/components/file2edi/UploadDropzone";
 import { ProgressStepper } from "@/components/file2edi/ProgressStepper";
@@ -14,6 +15,8 @@ import { Button } from "@/components/ui/button";
 export function ConvertirPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const meQuery = useCurrentUser();
+  const isAdv = meQuery.data?.role === "adv";
   const [preview, setPreview] = useState<ExtractionPreview | null>(null);
 
   const extractMutation = useMutation({
@@ -33,8 +36,8 @@ export function ConvertirPage() {
   return (
     <>
       <Header
-        title="Convertir"
-        subtitle="Convertir un PDF commande en fichier EDIFACT .tst"
+        title="Déposer une commande"
+        subtitle="Déposer un PDF commande pour le convertir en fichier EDIFACT .tst"
       />
 
       <div className="space-y-6">
@@ -56,22 +59,24 @@ export function ConvertirPage() {
           </p>
         )}
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-              Progression
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="overflow-x-auto">
-            {preview ? (
-              <ProgressStepper steps={preview.steps} orientation="horizontal" />
-            ) : (
-              <p className="text-sm text-muted-foreground">
-                La progression apparaîtra après l'extraction d'un PDF.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+        {!isAdv && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
+                Progression
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="overflow-x-auto">
+              {preview ? (
+                <ProgressStepper steps={preview.steps} orientation="horizontal" />
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  La progression apparaîtra après l'extraction d'un PDF.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         <Card>
           <CardHeader>

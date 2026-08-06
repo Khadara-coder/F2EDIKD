@@ -100,6 +100,7 @@ export interface ReviewQueueItem {
   status: OrderStatus;
   processedAt?: string;
   sapSentAt?: string;
+  sapSentBy?: string;
   processedBy?: string;
   assignedTo?: string;       // username du gestionnaire assigné
   holdReason?: string;       // motif mise en attente
@@ -107,6 +108,7 @@ export interface ReviewQueueItem {
   transferredTo?: string;    // username du destinataire
   transferNote?: string;     // note de transfert
   source?: "ui" | "n8n" | "api" | "unknown";
+  action?: string | null;
 }
 
 export interface ConversionHistoryItem {
@@ -184,6 +186,12 @@ export interface OrderAnomaly {
   message: string;
   status: AnomalyStatus;
   createdAt: string;
+  rejectionCode?: string;
+  buttonAccept?: string;
+  buttonReject?: string;
+  autoActionAccept?: string;
+  autoActionReject?: string;
+  actionMode?: string;
 }
 
 export interface TraceabilityStep {
@@ -353,6 +361,11 @@ export interface MasterDataRuleRow {
   message: string;
   retryAllowed: boolean;
   manualReview: boolean;
+  buttonAccept?: string;
+  buttonReject?: string;
+  autoActionAccept?: string;
+  autoActionReject?: string;
+  mode?: string;
   fields?: Record<string, string>;
 }
 

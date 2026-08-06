@@ -136,7 +136,13 @@ def _resolve_via_order(order_result: dict, master_data: dict) -> list[str]:
 def _get_shiptos_for_soldto(soldto: str, master_data: dict) -> list[dict]:
     """Get all SHIPTO entries for a given SOLDTO."""
     partners_by_soldto = master_data.get("partners_by_soldto", {})
-    partners = partners_by_soldto.get(soldto, [])
+    partners = list(partners_by_soldto.get(soldto, []))
+    # If the id is itself a delivery SHIPTO under another parent, use that family.
+    if not partners:
+        parents = master_data.get("partners_by_shipto", {}).get(soldto) or []
+        unique_parents = list(dict.fromkeys(str(p).strip() for p in parents if str(p).strip()))
+        if len(unique_parents) == 1 and unique_parents[0] != soldto:
+            partners = list(partners_by_soldto.get(unique_parents[0], []))
     # Fallback: if no partners, use the customer itself as SHIPTO
     if not partners:
         customers_by_id = master_data.get("customers_by_id", {})

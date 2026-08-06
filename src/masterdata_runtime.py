@@ -448,18 +448,32 @@ def apply_sync_metadata_to_cache_state() -> None:
         MD_LAST_SYNC.setdefault(key, sync_at)
 
 
+def _parquet_engine_available() -> bool:
+    try:
+        import pyarrow  # noqa: F401
+        return True
+    except ImportError:
+        try:
+            import fastparquet  # noqa: F401
+            return True
+        except ImportError:
+            return False
+
+
 def resolve_source_path(key: str) -> Path:
-    """Prefer Parquet in runtime dir, then CSV (legacy / post-import)."""
+    """Prefer Parquet in runtime dir when readable, else CSV (legacy / post-import)."""
     root = runtime_dir()
     parquet_name = MD_PARQUET_FILES.get(key)
-    if parquet_name:
-        parquet_path = root / parquet_name
-        if parquet_path.exists():
-            return parquet_path
     csv_name = MD_FILES.get(key, "")
     csv_path = root / csv_name if csv_name else root
+    parquet_path = root / parquet_name if parquet_name else None
+
+    if parquet_path and parquet_path.exists() and _parquet_engine_available():
+        return parquet_path
     if csv_name and csv_path.exists():
         return csv_path
+    if parquet_path and parquet_path.exists():
+        return parquet_path
     # Materials: fall back to old 10564_Materials.* if DB_Materials not synced yet
     if key == "materials":
         for legacy in _MD_MATERIALS_LEGACY:
@@ -903,14 +917,25 @@ def format_materials(rows: list[dict], sync_at: str = "") -> list[dict]:
 
 
 def format_rules(search: str = "") -> list[dict]:
-    from src.rejection_catalog import REJECTION_CATALOG
+    from src.rejection_catalog import REJECTION_CATALOG, review_actions
 
     q = (search or "").strip().lower()
     out: list[dict] = []
     for code, entry in REJECTION_CATALOG.items():
         message = str(entry.get("message_fr") or "")
         severity = str(entry.get("severity") or "")
-        if q and q not in code.lower() and q not in message.lower() and q not in severity.lower():
+        actions = review_actions(code)
+        haystack = " ".join([
+            code,
+            message,
+            severity,
+            actions["button_accept"],
+            actions["button_reject"],
+            actions["auto_action_accept"],
+            actions["auto_action_reject"],
+            actions["mode"],
+        ]).lower()
+        if q and q not in haystack:
             continue
         out.append({
             "id": code,
@@ -920,6 +945,11 @@ def format_rules(search: str = "") -> list[dict]:
             "message": message,
             "retryAllowed": bool(entry.get("retry_allowed")),
             "manualReview": bool(entry.get("manual_review_required")),
+            "buttonAccept": actions["button_accept"],
+            "buttonReject": actions["button_reject"],
+            "autoActionAccept": actions["auto_action_accept"],
+            "autoActionReject": actions["auto_action_reject"],
+            "mode": actions["mode"],
             "fields": {
                 "code": code,
                 "severity": severity,
@@ -928,6 +958,11 @@ def format_rules(search: str = "") -> list[dict]:
                 "message_en": str(entry.get("message_en") or ""),
                 "retry_allowed": str(bool(entry.get("retry_allowed"))),
                 "manual_review_required": str(bool(entry.get("manual_review_required"))),
+                "button_accept": actions["button_accept"],
+                "button_reject": actions["button_reject"],
+                "auto_action_accept": actions["auto_action_accept"],
+                "auto_action_reject": actions["auto_action_reject"],
+                "mode": actions["mode"],
             },
         })
     return out

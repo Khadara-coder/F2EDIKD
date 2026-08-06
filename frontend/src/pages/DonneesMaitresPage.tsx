@@ -507,7 +507,20 @@ export function DonneesMaitresPage() {
                 </TabsContent>
 
                 <TabsContent value="rules" className="mt-0">
-                  <DataTable empty={paginated.length === 0} headers={["", "Code", "Sévérité", "Statut", "Message"]}>
+                  <DataTable
+                    empty={paginated.length === 0}
+                    headers={[
+                      "",
+                      "Code",
+                      "Sévérité",
+                      "Mode",
+                      "Bouton accepter",
+                      "Bouton rejeter",
+                      "Action auto (accepter)",
+                      "Action auto (rejeter)",
+                      "Message",
+                    ]}
+                  >
                     {(paginated as MasterDataRuleRow[]).map((row) => (
                       <TableRow
                         key={row.id}
@@ -538,7 +551,15 @@ export function DonneesMaitresPage() {
                             {row.severity}
                           </Badge>
                         </TableCell>
-                        <TableCell className="text-xs">{row.businessStatus}</TableCell>
+                        <TableCell className="text-xs">{row.mode || "Manuel"}</TableCell>
+                        <TableCell className="max-w-[140px] truncate text-xs">{row.buttonAccept || "Valider"}</TableCell>
+                        <TableCell className="max-w-[140px] truncate text-xs">{row.buttonReject || "Ignorer"}</TableCell>
+                        <TableCell className="max-w-[140px] truncate text-xs text-muted-foreground">
+                          {row.autoActionAccept || "—"}
+                        </TableCell>
+                        <TableCell className="max-w-[140px] truncate text-xs text-muted-foreground">
+                          {row.autoActionReject || "—"}
+                        </TableCell>
                         <TableCell className="text-sm max-w-xs truncate">{row.message}</TableCell>
                       </TableRow>
                     ))}
@@ -624,6 +645,11 @@ export function DonneesMaitresPage() {
                   ["Code", selectedRule.code],
                   ["Sévérité", selectedRule.severity],
                   ["Statut métier", selectedRule.businessStatus],
+                  ["Mode", selectedRule.mode || "Manuel"],
+                  ["Bouton accepter", selectedRule.buttonAccept || "Valider"],
+                  ["Bouton rejeter", selectedRule.buttonReject || "Ignorer"],
+                  ["Action auto (accepter)", selectedRule.autoActionAccept || "—"],
+                  ["Action auto (rejeter)", selectedRule.autoActionReject || "—"],
                   ["Message", selectedRule.message],
                   ["Retry", selectedRule.retryAllowed ? "Oui" : "Non"],
                   ["Revue manuelle", selectedRule.manualReview ? "Oui" : "Non"],

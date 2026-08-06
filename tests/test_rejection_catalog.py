@@ -96,6 +96,29 @@ def test_action_text_returns_default_for_unknown():
     assert "BI" in text or "équipe" in text
 
 
+def test_review_actions_cover_all_catalog_codes():
+    for code in rc.REJECTION_CATALOG:
+        actions = rc.review_actions(code)
+        for key in ("button_accept", "button_reject", "auto_action_accept", "auto_action_reject", "mode"):
+            assert actions[key].strip(), f"{code}.{key} empty"
+        assert actions["mode"] in {"Manuel", "Automatique", "Semi-auto"}
+
+
+def test_po_duplicate_review_buttons():
+    actions = rc.review_actions("PO_NUMBER_DUPLICATE")
+    assert "nouvelle commande" in actions["button_accept"].lower()
+    assert "existe déjà" in actions["button_reject"].lower()
+
+
+def test_format_rejection_message_po_duplicate_french():
+    msg = rc.format_rejection_message(
+        "PO_NUMBER_DUPLICATE",
+        {"po_number": "CAC2410HAR00035", "existing_vbeln": "0017571514"},
+    )
+    assert msg == "Ce numéro de commande CAC2410HAR00035 existe déjà dans l'historique SAP."
+    assert "already exists" not in msg.lower()
+
+
 def test_messages_not_empty():
     for code, entry in rc.REJECTION_CATALOG.items():
         assert entry["message_fr"].strip(), f"{code} has empty message_fr"

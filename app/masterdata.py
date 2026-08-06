@@ -106,6 +106,7 @@ def get_master_data() -> dict[str, Any]:
         "customers_by_vat": {},
         "customers_by_postal": {},
         "partners_by_soldto": {},
+        "partners_by_shipto": {},
         "partners_by_postal": {},
         "partners_by_agency": {},
         "partners_by_normalized_city": {},
@@ -150,6 +151,8 @@ def get_master_data() -> dict[str, Any]:
                 continue
             partner = party_from_row(row, "SHIPTO")
             data["partners_by_soldto"].setdefault(soldto, []).append(partner)
+            if partner.get("id"):
+                data["partners_by_shipto"].setdefault(partner["id"], []).append(soldto)
             if partner["postal"]:
                 data["partners_by_postal"].setdefault(partner["postal"], []).append((soldto, partner))
             # Index by agency code (from name like ".ISERBA (STQ)")
@@ -204,6 +207,32 @@ def get_master_data() -> dict[str, Any]:
     master_data_cache = data
     master_data_cache_fingerprint = fingerprint
     return data
+
+
+def parent_soldtos_for_shipto(data: dict[str, Any], shipto_id: str) -> list[str]:
+    """Return unique parent SOLDTO ids for a SHIPTO code (Partners reverse index)."""
+    if not shipto_id:
+        return []
+    parents = data.get("partners_by_shipto", {}).get(shipto_id) or []
+    return list(dict.fromkeys(str(p).strip() for p in parents if str(p).strip()))
+
+
+def remap_customer_id_if_delivery_shipto(
+    data: dict[str, Any],
+    customer_id: str,
+) -> tuple[str, str | None]:
+    """If *customer_id* is a SHIPTO under another SOLDTO, return (parent, shipto).
+
+    Site accounts sometimes exist in Customers with the same id as Partners.SHIPTO.
+    Billing-by-address must not treat those as the commercial sold-to.
+    """
+    cid = (customer_id or "").strip()
+    if not cid:
+        return "", None
+    parents = parent_soldtos_for_shipto(data, cid)
+    if len(parents) == 1 and parents[0] != cid:
+        return parents[0], cid
+    return cid, None
 
 
 def lookup_customer_by_order_number(data: dict[str, Any], order_number: str | None) -> dict | None:
@@ -797,6 +826,7 @@ def best_matching_partner_for_soldto(
     data: dict[str, Any],
     soldto_id: str,
     delivery: dict,
+    filename: str | None = None,
 ) -> dict | None:
     cfg = scoring_config()
     street = delivery.get("Rue") or ""
@@ -819,6 +849,19 @@ def best_matching_partner_for_soldto(
             score += 35
         elif postal_compatible(postal, partner_postal):
             score += 15
+        service_score, _reasons = score_partner_service_name(partner, delivery)
+        score += service_score
+        if filename:
+            folded_name = fold_text(partner.get("name") or "")
+            folded_file = fold_text(filename)
+            # Agency code in parentheses, e.g. ".ISERBA (HAR)" vs filename "...(HAR)..."
+            lp = (partner.get("name") or "").find("(")
+            rp = (partner.get("name") or "").find(")", lp + 1) if lp >= 0 else -1
+            agency = (partner.get("name") or "")[lp + 1:rp] if lp >= 0 and rp > lp else ""
+            if agency and len(agency) >= 2 and agency.upper() in (filename or "").upper():
+                score += 20
+            elif folded_name and folded_name in folded_file:
+                score += 10
         if score > best_score:
             best_score = score
             best_partner = partner
@@ -845,7 +888,7 @@ def soldto_billing_matches_by_address(
 
     for customer in candidates:
         soldto_id = customer.get("id", "")
-        if not soldto_id or soldto_id in seen:
+        if not soldto_id:
             continue
         if norm_postal(customer.get("postal", "")) != postal:
             continue
@@ -863,7 +906,19 @@ def soldto_billing_matches_by_address(
         else:
             score += 10
             reasons.append("street_fuzzy")
-        matches.append((score, reasons, soldto_id, customer))
+
+        parent_id, remapped_shipto = remap_customer_id_if_delivery_shipto(data, soldto_id)
+        payload = customer
+        if remapped_shipto:
+            reasons.append("shipto_parent_remap")
+            parent_customer = data.get("customers_by_id", {}).get(parent_id)
+            if parent_customer:
+                payload = parent_customer
+            soldto_id = parent_id
+
+        if soldto_id in seen:
+            continue
+        matches.append((score, reasons, soldto_id, payload))
         seen.add(soldto_id)
 
     matches.sort(key=lambda item: item[0], reverse=True)
@@ -890,6 +945,14 @@ def build_soldto_billing_result(
     filename: str | None = None,
 ) -> tuple[dict, dict]:
     best_score, best_reasons, best_soldto, customer = matches[0]
+    # Safety net: never keep a delivery SHIPTO id as commercial SOLDTO.
+    parent_id, remapped_shipto = remap_customer_id_if_delivery_shipto(data, best_soldto)
+    if remapped_shipto:
+        parent_customer = data.get("customers_by_id", {}).get(parent_id)
+        if parent_customer:
+            customer = parent_customer
+            best_soldto = parent_id
+            best_reasons = list(best_reasons) + ["shipto_parent_remap"]
     buyer = dict(customer)
     buyer["_score"] = best_score
     buyer["_reason"] = "+".join(best_reasons)
@@ -905,7 +968,12 @@ def build_soldto_billing_result(
     partner = customer_as_delivery_partner(customer)
     second_score = matches[1][0] if len(matches) > 1 else -1
     detected = candidate_to_delivery(detected_candidate)
-    shipto_partner = best_matching_partner_for_soldto(data, best_soldto, detected)
+    shipto_partner = best_matching_partner_for_soldto(data, best_soldto, detected, filename=filename)
+    if remapped_shipto and not shipto_partner:
+        for candidate_partner in data.get("partners_by_soldto", {}).get(best_soldto, []):
+            if candidate_partner.get("id") == remapped_shipto:
+                shipto_partner = candidate_partner
+                break
     if shipto_partner and shipto_partner.get("id") != best_soldto:
         partner = shipto_partner
     detected["Source retenue"] = detected_candidate.get("Source", detected_candidate.get("Source retenue", ""))
@@ -1296,9 +1364,29 @@ def resolve_delivery_with_masterdata(
         shipto_matches, filtered_by_vat = prefer_shipto_matches_with_soldto_filter(shipto_matches, vat_soldtos)
         if shipto_matches:
             direct_candidate = candidate
-            if is_clear_match_winner(shipto_matches):
+            top_score = shipto_matches[0][0]
+            top_ties = [m for m in shipto_matches if m[0] == top_score]
+            shared_parent = {m[2] for m in top_ties}
+            same_parent_family = len(shared_parent) == 1
+            if is_clear_match_winner(shipto_matches) or same_parent_family:
                 best_soldto = shipto_matches[0][2]
                 best_partner = shipto_matches[0][3] or {}
+                if same_parent_family and not is_clear_match_winner(shipto_matches) and filename:
+                    # Prefer SHIPTO whose agency/name appears in the filename (e.g. HAR).
+                    ranked = []
+                    for score, reasons, soldto, partner in shipto_matches:
+                        boost = 0
+                        name = partner.get("name") or ""
+                        lp = name.find("(")
+                        rp = name.find(")", lp + 1) if lp >= 0 else -1
+                        agency = name[lp + 1:rp] if lp >= 0 and rp > lp else ""
+                        if agency and agency.upper() in filename.upper():
+                            boost += 25
+                        ranked.append((score + boost, reasons, soldto, partner))
+                    ranked.sort(key=lambda item: item[0], reverse=True)
+                    shipto_matches = ranked
+                    best_soldto = shipto_matches[0][2]
+                    best_partner = shipto_matches[0][3] or {}
                 if str(best_partner.get("id") or "") != str(best_soldto or ""):
                     direct_result = build_direct_shipto_result(
                         data=data,

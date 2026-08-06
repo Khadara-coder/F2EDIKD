@@ -210,7 +210,7 @@ export function RevueListPage() {
   return (
     <>
       <Header
-        title="Revue"
+        title="Gérer les commandes"
         subtitle="Toutes les commandes converties — ouvrez un dossier pour valider ou corriger"
       />
 
@@ -231,7 +231,7 @@ export function RevueListPage() {
           </div>
           <Button variant="outline" className="gap-2" onClick={() => navigate("/convertir")}>
             <Upload className="h-4 w-4" />
-            Convertir un PDF
+            Déposer une commande
           </Button>
         </CardHeader>
 
@@ -350,7 +350,7 @@ export function RevueListPage() {
             <div className="flex flex-col items-center gap-4 p-12 text-center">
               <p className="text-muted-foreground">Aucune commande ne correspond à ces filtres.</p>
               <Button onClick={() => navigate("/convertir")}>
-                Importer un bon de commande PDF
+                Déposer une commande PDF
               </Button>
             </div>
           ) : (
@@ -393,7 +393,7 @@ export function RevueListPage() {
                   </TableHead>
                   <TableHead>
                     <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedAt")}>
-                      Envoyé SAP le
+                      Envoyé vers SAP le
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </TableHead>
@@ -405,7 +405,9 @@ export function RevueListPage() {
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </TableHead>
+                  <TableHead>Envoyé vers SAP par</TableHead>
                   <TableHead>Source</TableHead>
+                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -460,8 +462,14 @@ export function RevueListPage() {
                         || row.processedBy
                       ) || <span className="text-muted-foreground">—</span>}
                     </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {getDisplayName(row.sapSentBy) || <span className="text-muted-foreground">—</span>}
+                    </TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground">
+                      {row.action || <span className="text-muted-foreground">—</span>}
                     </TableCell>
                   </TableRow>
                 ))}

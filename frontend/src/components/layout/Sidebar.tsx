@@ -17,9 +17,9 @@ import { Badge } from "@/components/ui/badge";
 
 const navItems = [
   { to: "/", icon: Home, label: "Cockpit", minRole: "admin" as AppRole },
-  { to: "/convertir", icon: Upload, label: "Convertir", minRole: "adv" as AppRole },
-  { to: "/revue", icon: FileText, label: "Revue", badgeFromApi: true, minRole: "adv" as AppRole },
-  { to: "/historique", icon: Clock, label: "Historique", minRole: "adv" as AppRole },
+  { to: "/convertir", icon: Upload, label: "Déposer une commande", minRole: "adv" as AppRole },
+  { to: "/revue", icon: FileText, label: "Gérer les commandes", badgeFromApi: true, minRole: "adv" as AppRole },
+  { to: "/historique", icon: Clock, label: "Historique", minRole: "admin" as AppRole },
   { to: "/donnees-maitres", icon: Database, label: "Données maîtres", minRole: "admin" as AppRole },
   { to: "/parametres", icon: Settings, label: "Paramètres", minRole: "admin" as AppRole },
 ];
@@ -94,7 +94,7 @@ export function Sidebar() {
             }
           >
             <Icon className="h-5 w-5 shrink-0" />
-            <span className="flex-1">{label}</span>
+            <span className="flex-1 leading-snug">{label}</span>
             {badgeFromApi && reviewCount > 0 && (
               <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
                 {reviewCount}

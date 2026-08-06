@@ -181,11 +181,12 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "partnerId": f"p-soldto-{order_id}",
             "orderId": order_id,
             "partnerFunction": "soldto",
-            "partnerCode": str(cust.get("soldto") or cust.get("name") or ""),
-            "partnerName": str(cust.get("name") or cust.get("soldto") or ""),
-            "addressLine1": addr.get("street") or det.get("street") or "",
-            "postalCode": addr.get("postal_code") or det.get("postal_code") or "",
-            "city": addr.get("city") or det.get("city") or "",
+            "partnerCode": str(cust.get("soldto") or ""),
+            # Customers.NAME for SOLDTO (not Partners ship-to name)
+            "partnerName": str(cust.get("name") or ""),
+            "addressLine1": addr.get("street") or "",
+            "postalCode": addr.get("postal_code") or "",
+            "city": addr.get("city") or "",
             "country": addr.get("country") or "FR",
             "confidence": int(cust.get("soldto_confidence") or conf),
         },
@@ -194,10 +195,12 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "orderId": order_id,
             "partnerFunction": "shipto",
             "partnerCode": str(cust.get("shipto") or det.get("name") or ""),
+            # Partners.NAME for SHIPTO
             "partnerName": str(det.get("name") or cust.get("shipto") or ""),
-            "addressLine1": det.get("street") or addr.get("street") or "",
-            "postalCode": det.get("postal_code") or "",
-            "city": det.get("city") or "",
+            # Prefer validated masterdata street (Partners.STRAS) over OCR detection
+            "addressLine1": addr.get("street") or det.get("street") or "",
+            "postalCode": addr.get("postal_code") or det.get("postal_code") or "",
+            "city": addr.get("city") or det.get("city") or "",
             "country": "FR",
             "confidence": int(cust.get("shipto_confidence") or conf),
         },
@@ -205,7 +208,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "partnerId": f"p-billto-{order_id}",
             "orderId": order_id,
             "partnerFunction": "billto",
-            "partnerCode": str(cust.get("soldto") or cust.get("name") or ""),
+            "partnerCode": str(cust.get("soldto") or ""),
             "partnerName": str(cust.get("name") or ""),
             "addressLine1": addr.get("street") or "",
             "postalCode": addr.get("postal_code") or "",
@@ -217,7 +220,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "partnerId": f"p-payer-{order_id}",
             "orderId": order_id,
             "partnerFunction": "payer",
-            "partnerCode": str(cust.get("soldto") or cust.get("name") or ""),
+            "partnerCode": str(cust.get("soldto") or ""),
             "partnerName": str(cust.get("name") or ""),
             "addressLine1": addr.get("street") or "",
             "postalCode": addr.get("postal_code") or "",
@@ -244,12 +247,18 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
     for i, d in enumerate(rej.get("details") or []):
         sev = "error" if d.get("severity") == "blocking" else "warning"
         code = d.get("code") or f"rej-{i}"
+        from src.rejection_catalog import format_rejection_message
+        message = format_rejection_message(
+            code,
+            d.get("details") if isinstance(d.get("details"), dict) else None,
+            fallback=str(d.get("message") or d.get("code") or ""),
+        )
         _add_anomaly({
             "anomalyId": f"{order_id}-{code}",
             "orderId": order_id,
             "severity": sev,
             "fieldName": d.get("code"),
-            "message": d.get("message") or d.get("code") or "",
+            "message": message,
             "status": "Bloquante" if sev == "error" else "Ouverte",
             "createdAt": _now(),
         })
@@ -297,19 +306,19 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             final_ref = str(mat_status.get("replacement") or "").strip()
             if kind == "missing":
                 msg = (
-                    f"Ligne {ln.get('lineNumber')} : article {art} absent dans la base de données "
-                    f"masterdata Materials."
+                    f"Ligne {ln.get('lineNumber')} : article {art} absent du référentiel matières."
                 )
                 severity = "error"
             elif kind == "no_sale":
                 if mat_status.get("via_replacement") and final_ref:
                     msg = (
                         f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                        f"{final_ref}, mais {final_ref} est arrêtée (no sale)."
+                        f"{final_ref}, mais {final_ref} est arrêtée (plus commercialisée)."
                     )
                 else:
                     msg = (
-                        f"Ligne {ln.get('lineNumber')} : la référence {art} est arrêtée (no sale)."
+                        f"Ligne {ln.get('lineNumber')} : la référence {art} est arrêtée "
+                        f"(plus commercialisée)."
                     )
                 severity = "warning"
             elif kind == "replacement":
@@ -323,8 +332,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 elif mat_status.get("replacement_missing") and final_ref:
                     msg = (
                         f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                        f"{final_ref}, mais {final_ref} est absent dans la base de données "
-                        f"masterdata Materials."
+                        f"{final_ref}, mais {final_ref} est absent du référentiel matières."
                     )
                     severity = "error"
                 else:
@@ -332,12 +340,12 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                         via = " → ".join(chain[1:-1])
                         msg = (
                             f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                            f"{final_ref} (via {via}, colonne Statut du masterdata Materials)."
+                            f"{final_ref} (via {via})."
                         )
                     else:
                         msg = (
                             f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                            f"{final_ref} (colonne Statut du masterdata Materials)."
+                            f"{final_ref}."
                         )
                     severity = "warning"
             else:

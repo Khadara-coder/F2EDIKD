@@ -691,7 +691,11 @@ def create_router() -> APIRouter:
 
     @router.post("/orders/{order_id}/send-sftp")
     @router.post("/orders/{order_id}/send-sap")
-    async def send_to_sap(order_id: str, payload: dict = Body(default_factory=dict)):
+    async def send_to_sap(
+        order_id: str,
+        req: Request,
+        payload: dict = Body(default_factory=dict),
+    ):
         import tempfile
         from src.sftp_delivery import upload_tst
 
@@ -702,6 +706,7 @@ def create_router() -> APIRouter:
 
         # Align runtime SFTP env with persisted app settings before sending.
         _apply_runtime_sftp_config(store.load_app_settings())
+        sent_by = resolve_actor(req)
 
         try:
             force_resend = bool((payload or {}).get("force"))
@@ -771,7 +776,7 @@ def create_router() -> APIRouter:
                 result = upload_tst(local_path, filename, cfg)
 
             if result.success:
-                store.mark_sftp_delivery(order_id, True, result.remote_path)
+                store.mark_sftp_delivery(order_id, True, result.remote_path, sent_by=sent_by)
                 remote = str(result.remote_path or "")
                 return {
                     "success": True,
@@ -779,6 +784,7 @@ def create_router() -> APIRouter:
                     "alreadySent": already_sent,
                     "message": f"Fichier envoyé vers SAP (SFTP) {remote}".strip(),
                     "remote_path": remote,
+                    "sapSentBy": sent_by,
                 }
 
             store.mark_sftp_delivery(order_id, False, result.error_reason)
@@ -1484,6 +1490,7 @@ def _order_list_item(o: dict) -> dict:
         "status": o.get("status", "À revoir"),
         "processedAt": sap_sent_at or processed_at,
         "sapSentAt": sap_sent_at,
+        "sapSentBy": o.get("sap_sent_by") or None,
         "processedBy": o.get("processed_by") or o.get("uploaded_by"),
         "assignedTo": o.get("assigned_to"),
         "holdReason": o.get("hold_reason"),
@@ -1491,6 +1498,7 @@ def _order_list_item(o: dict) -> dict:
         "transferredTo": o.get("transferred_to"),
         "transferNote": o.get("transfer_note"),
         "source": o.get("source") or "unknown",
+        "action": None,
     }
 
 

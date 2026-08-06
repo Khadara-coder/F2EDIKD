@@ -424,6 +424,7 @@ class File2EdiStore:
         _ensure_column("file2edi_orders", "transfer_note", "transfer_note TEXT")
         _ensure_column("file2edi_orders", "transfer_at", "transfer_at TEXT")
         _ensure_column("file2edi_orders", "sap_sent_at", "sap_sent_at TEXT")
+        _ensure_column("file2edi_orders", "sap_sent_by", "sap_sent_by TEXT")
 
         _ensure_column("file2edi_pdf_uploads", "file_name", "file_name TEXT")
 
@@ -971,11 +972,38 @@ class File2EdiStore:
             "order": order,
             "partners": [self._partner_to_api(dict(p)) for p in partners],
             "lines": [camel(dict(l), l_map) for l in lines],
-            "anomalies": [camel(dict(a), a_map) for a in anomalies],
+            "anomalies": [self._anomaly_to_api(dict(a), a_map, order=order) for a in anomalies],
             "traceability": trace,
             "edifactReady": bool(row.get("edifact_content") or row.get("edifact_filename")),
             "pdfUrl": f"/api/orders/{order['orderId']}/pdf",
         }
+
+    def _anomaly_to_api(self, anomaly: dict, mapping: dict, order: dict | None = None) -> dict:
+        from src.rejection_catalog import REJECTION_CATALOG, format_rejection_message, review_actions
+
+        mapped = {mapping.get(k, k): v for k, v in anomaly.items()}
+        code = str(mapped.get("fieldName") or "").strip()
+        if code and code in REJECTION_CATALOG:
+            details = None
+            if code == "PO_NUMBER_DUPLICATE" and order:
+                po = str(
+                    order.get("customerOrderNumber") or order.get("documentReference") or ""
+                ).strip()
+                if po:
+                    details = {"po_number": po}
+            mapped["message"] = format_rejection_message(
+                code,
+                details,
+                fallback=str(mapped.get("message") or ""),
+            )
+            actions = review_actions(code)
+            mapped["rejectionCode"] = code
+            mapped["buttonAccept"] = actions["button_accept"]
+            mapped["buttonReject"] = actions["button_reject"]
+            mapped["autoActionAccept"] = actions["auto_action_accept"]
+            mapped["autoActionReject"] = actions["auto_action_reject"]
+            mapped["actionMode"] = actions["mode"]
+        return mapped
 
     def _partner_to_api(self, partner: dict) -> dict:
         raw = partner.get("edited_fields_json")
@@ -1015,7 +1043,7 @@ class File2EdiStore:
                       o.source, o.assigned_to, o.uploaded_by,
                       o.hold_reason, o.hold_by,
                       o.transferred_from, o.transferred_to, o.transfer_note,
-                      o.created_at, o.updated_at, o.sap_sent_at,
+                      o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
@@ -1036,7 +1064,7 @@ class File2EdiStore:
                       o.source, o.assigned_to, o.uploaded_by,
                       o.hold_reason, o.hold_by,
                       o.transferred_from, o.transferred_to, o.transfer_note,
-                      o.created_at, o.updated_at, o.sap_sent_at,
+                      o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
@@ -1076,6 +1104,63 @@ class File2EdiStore:
         review = self.load_order_review(order_id)
         self._sync_order_graph(review)
         return review
+
+    def _sync_billing_partners_from_soldto(
+        self,
+        conn,
+        order_id: str,
+        payload: dict,
+        edit_sources: dict,
+        default_source: str,
+    ) -> None:
+        """Align bill-to and payer with sold-to billing data after a sold-to edit."""
+        field_map = {
+            "partnerCode": "partner_code",
+            "partnerName": "partner_name",
+            "addressLine1": "address_line_1",
+            "postalCode": "postal_code",
+            "city": "city",
+            "country": "country",
+        }
+        for func in ("billto", "payer"):
+            billing_row = conn.execute(
+                "SELECT partner_id, edited_fields_json FROM file2edi_order_partners "
+                "WHERE order_id=? AND partner_function=?",
+                [order_id, func],
+            ).fetchone()
+            if not billing_row:
+                continue
+            edited_fields: dict[str, str] = {}
+            if billing_row["edited_fields_json"]:
+                try:
+                    parsed = json.loads(billing_row["edited_fields_json"])
+                    if isinstance(parsed, dict):
+                        edited_fields = {
+                            str(k): v for k, v in parsed.items() if v in ("manual", "auto")
+                        }
+                except json.JSONDecodeError:
+                    pass
+            sets, vals = [], []
+            for key, col in field_map.items():
+                if key not in payload:
+                    continue
+                source = edit_sources.get(key, default_source)
+                if source not in ("manual", "auto"):
+                    source = default_source
+                edited_fields[key] = source
+                sets.append(f"{col}=?")
+                vals.append(payload[key])
+            if not sets:
+                continue
+            sets.append("edited_fields_json=?")
+            vals.append(json.dumps(edited_fields))
+            sets.append("manually_edited=?")
+            vals.append(1 if any(v == "manual" for v in edited_fields.values()) else 0)
+            vals.append(billing_row["partner_id"])
+            conn.execute(
+                f"UPDATE file2edi_order_partners SET {', '.join(sets)} WHERE partner_id=?",
+                vals,
+            )
 
     def update_partner(self, partner_id: str, payload: dict) -> dict | None:
         payload = dict(payload)
@@ -1131,6 +1216,22 @@ class File2EdiStore:
                 f"UPDATE file2edi_order_partners SET {', '.join(sets)} WHERE partner_id=?",
                 vals,
             )
+            if row["partner_function"] == "soldto":
+                billing_payload = {
+                    k: payload[k] for k in field_map if k in payload
+                }
+                billing_sources = {
+                    k: edit_sources.get(k, default_source)
+                    for k in billing_payload
+                }
+                if billing_payload:
+                    self._sync_billing_partners_from_soldto(
+                        conn,
+                        order_id,
+                        billing_payload,
+                        billing_sources,
+                        default_source,
+                    )
             if row["partner_function"] == "soldto" and "partnerCode" in payload:
                 conn.execute(
                     "UPDATE file2edi_orders SET soldto=?, updated_at=? WHERE order_id=?",
@@ -1298,14 +1399,27 @@ class File2EdiStore:
             "content": row["edifact_content"],
         }
 
-    def mark_sftp_delivery(self, order_id: str, ok: bool, detail: str = "") -> None:
+    def mark_sftp_delivery(
+        self,
+        order_id: str,
+        ok: bool,
+        detail: str = "",
+        sent_by: str | None = None,
+    ) -> None:
         status = "Envoyé SAP" if ok else "Échec SAP"
         now = _now()
         conn = self._conn()
-        conn.execute(
-            "UPDATE file2edi_orders SET status=?, review_required=?, updated_at=?, sap_sent_at=? WHERE order_id=?",
-            [status, 0 if ok else 1, now, now if ok else None, order_id],
-        )
+        if ok:
+            actor = (sent_by or "").strip() or None
+            conn.execute(
+                "UPDATE file2edi_orders SET status=?, review_required=?, updated_at=?, sap_sent_at=?, sap_sent_by=? WHERE order_id=?",
+                [status, 0, now, now, actor, order_id],
+            )
+        else:
+            conn.execute(
+                "UPDATE file2edi_orders SET status=?, review_required=?, updated_at=?, sap_sent_at=? WHERE order_id=?",
+                [status, 1, now, None, order_id],
+            )
         conn.commit()
         conn.close()
         self._sync_order_graph(self.load_order_review(order_id))
@@ -1648,6 +1762,7 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_note TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_at TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS sap_sent_at TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS sap_sent_by TEXT",
                 # User profile columns
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS email TEXT",
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS sap_id TEXT",

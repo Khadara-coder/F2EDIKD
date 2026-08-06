@@ -123,7 +123,7 @@ function AppContent() {
           <Route
             path="/historique"
             element={
-              <GuardedRoute minRole="adv">
+              <GuardedRoute minRole="admin">
                 <HistoriquePage />
               </GuardedRoute>
             }

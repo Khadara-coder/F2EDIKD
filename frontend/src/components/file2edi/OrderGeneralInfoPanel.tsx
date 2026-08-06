@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { EditableField } from "@/components/file2edi/EditableField";
+import { SoldtoNameSelectField } from "@/components/file2edi/SoldtoNameSelectField";
 import { ShiptoNameSelectField } from "@/components/file2edi/ShiptoNameSelectField";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MasterDataCustomerRow, MasterDataPartnerRow, Order, OrderPartner, PartnerEditSource, PartnerFieldKey, UpdateOrderHeaderPayload } from "@/types";
@@ -10,6 +11,13 @@ interface OrderGeneralInfoPanelProps {
   soldto?: OrderPartner;
   shipto?: OrderPartner;
   onUpdateHeader: (payload: UpdateOrderHeaderPayload) => Promise<void> | void;
+  onUpdateSoldto: (
+    payload: Partial<Record<PartnerFieldKey, string>>,
+    options?: {
+      editSource?: PartnerEditSource;
+      editSources?: Partial<Record<PartnerFieldKey, PartnerEditSource>>;
+    },
+  ) => Promise<void> | void;
   onUpdateShipto: (
     payload: Partial<Record<PartnerFieldKey, string>>,
     options?: {
@@ -52,6 +60,13 @@ function shiptoFieldFlag(
   return shipto?.editedFields?.[field];
 }
 
+function soldtoFieldFlag(
+  soldto: OrderPartner | undefined,
+  field: PartnerFieldKey,
+): PartnerEditSource | undefined {
+  return soldto?.editedFields?.[field];
+}
+
 const ADDRESS_FIELDS: PartnerFieldKey[] = [
   "addressLine1",
   "postalCode",
@@ -68,6 +83,7 @@ export function OrderGeneralInfoPanel({
   soldto,
   shipto,
   onUpdateHeader,
+  onUpdateSoldto,
   onUpdateShipto,
 }: OrderGeneralInfoPanelProps) {
   const soldtoCode = soldto?.partnerCode ?? "";
@@ -94,6 +110,44 @@ export function OrderGeneralInfoPanel({
   const clientName = cleanDisplay(
     shipto?.partnerName || shiptoMd?.NAME || order.clientName || "—",
   );
+
+  const handleSoldtoSelect = async (md: MasterDataCustomerRow) => {
+    const payload = {
+      partnerCode: cleanDisplay(md.SOLDTO),
+      partnerName: cleanDisplay(md.NAME),
+      addressLine1: cleanDisplay(md.STRAS),
+      postalCode: cleanDisplay(md.PSTLZ),
+      city: cleanDisplay(md.ORT01),
+      country: cleanDisplay(md.LAND1),
+    };
+    await onUpdateSoldto(payload, {
+      editSources: {
+        partnerName: "manual",
+        partnerCode: "auto",
+        ...autoSources(ADDRESS_FIELDS),
+      },
+    });
+  };
+
+  const handleSoldtoCodeSave = async (code: string) => {
+    const res = await api.searchCustomers(code);
+    const md = findCustomer(res.results, code);
+    const payload = {
+      partnerCode: cleanDisplay(md?.SOLDTO ?? code),
+      partnerName: cleanDisplay(md?.NAME ?? soldto?.partnerName),
+      addressLine1: cleanDisplay(md?.STRAS ?? soldto?.addressLine1),
+      postalCode: cleanDisplay(md?.PSTLZ ?? soldto?.postalCode),
+      city: cleanDisplay(md?.ORT01 ?? soldto?.city),
+      country: cleanDisplay(md?.LAND1 ?? soldto?.country),
+    };
+    await onUpdateSoldto(payload, {
+      editSources: {
+        partnerCode: "manual",
+        partnerName: "auto",
+        ...autoSources(ADDRESS_FIELDS),
+      },
+    });
+  };
 
   const handleShiptoSelect = async (md: MasterDataPartnerRow) => {
     const payload = {
@@ -144,8 +198,19 @@ export function OrderGeneralInfoPanel({
             Sold-to / AG
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <EditableField label="Compte SAP sold-to" value={soldtoSapId} readOnly />
-            <EditableField label="Nom client sold-to" value={soldtoName} readOnly />
+            <EditableField
+              label="Compte SAP sold-to"
+              value={soldtoSapId}
+              editFlag={soldtoFieldFlag(soldto, "partnerCode")}
+              onSave={handleSoldtoCodeSave}
+            />
+            <SoldtoNameSelectField
+              label="Nom client sold-to"
+              value={soldtoName}
+              currentSoldtoCode={soldtoCode || soldtoSapId}
+              editFlag={soldtoFieldFlag(soldto, "partnerName")}
+              onSelect={handleSoldtoSelect}
+            />
           </div>
         </section>
 
