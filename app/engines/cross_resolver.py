@@ -134,9 +134,14 @@ def _resolve_via_order(order_result: dict, master_data: dict) -> list[str]:
 
 
 def _get_shiptos_for_soldto(soldto: str, master_data: dict) -> list[dict]:
-    """Get all SHIPTO entries for a given SOLDTO."""
+    """Get all SHIPTO entries for a given SOLDTO (expands site ids to parent family)."""
+    from app.masterdata import remap_customer_id_if_delivery_shipto
+
     partners_by_soldto = master_data.get("partners_by_soldto", {})
-    partners = list(partners_by_soldto.get(soldto, []))
+    commercial_id, _site = remap_customer_id_if_delivery_shipto(master_data, soldto)
+    partners = list(partners_by_soldto.get(commercial_id, []))
+    if not partners and commercial_id != soldto:
+        partners = list(partners_by_soldto.get(soldto, []))
     # If the id is itself a delivery SHIPTO under another parent, use that family.
     if not partners:
         parents = master_data.get("partners_by_shipto", {}).get(soldto) or []
@@ -146,10 +151,22 @@ def _get_shiptos_for_soldto(soldto: str, master_data: dict) -> list[dict]:
     # Fallback: if no partners, use the customer itself as SHIPTO
     if not partners:
         customers_by_id = master_data.get("customers_by_id", {})
-        customer = customers_by_id.get(soldto)
+        customer = customers_by_id.get(commercial_id or soldto)
         if customer:
             partners = [customer]
     return partners
+
+
+def _commercial_soldto(soldto: str, shipto_id: str | None, master_data: dict) -> str:
+    """Rewrite a site Customers id to Partners.SOLDTO parent when unique."""
+    from app.masterdata import resolve_commercial_party
+
+    oid, _sid, _buyer = resolve_commercial_party(
+        master_data,
+        soldto_id=soldto,
+        shipto_id=shipto_id,
+    )
+    return oid or soldto
 
 
 def _resolve_via_name(text: str, master_data: dict) -> list[str]:
@@ -299,6 +316,7 @@ def cross_resolve(
     scored.sort(key=lambda x: x.get("_cross_score", 0), reverse=True)
     best = scored[0]
     best_score = best.get("_cross_score", 0)
+    soldto = _commercial_soldto(soldto, str(best.get("id") or ""), master_data)
 
     # Determine confidence
     if best_score >= 80:

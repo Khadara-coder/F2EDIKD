@@ -1009,16 +1009,19 @@ def _f2edi_soldto_customer_name(adr: dict) -> str:
     """Sold-to AG name from Customers (via SOLDTO), never ship-to Partners NAME.
 
     Chain: ship-to found → Partners.SOLDTO → Customers.NAME.
-    ``adr["Client"]`` is already the Customers name when matching succeeded;
-    fall back to a Customers cache lookup by SOLDTO code.
+    Prefer Customers lookup by commercial SOLDTO; ``Client`` is fallback only.
     """
     soldto = str(adr.get("SOLDTO") or "").strip()
-    client = str(adr.get("Client") or "").strip()
-    if client:
-        return client
+    shipto = str(adr.get("SHIPTO") or "").strip()
+    if shipto:
+        parent = str(_get_shipto_row(shipto).get("soldto") or "").strip()
+        if parent:
+            soldto = parent
     if soldto:
-        return str(_get_soldto_row(soldto).get("name") or "").strip()
-    return ""
+        name = str(_get_soldto_row(soldto).get("name") or "").strip()
+        if name:
+            return name
+    return str(adr.get("Client") or "").strip()
 
 
 def _f2edi_build_response(structured: dict, filename: str,
@@ -1031,7 +1034,13 @@ def _f2edi_build_response(structured: dict, filename: str,
     rej    = structured.get("rejets", {})
     edi    = structured.get("edifact", {})
     lignes = structured.get("lignes_commande", {})
-    soldto_name = _f2edi_soldto_customer_name(adr)
+    soldto_code = str(adr.get("SOLDTO") or "").strip()
+    shipto_code = str(adr.get("SHIPTO") or "").strip()
+    if shipto_code:
+        parent = str(_get_shipto_row(shipto_code).get("soldto") or "").strip()
+        if parent:
+            soldto_code = parent
+    soldto_name = _f2edi_soldto_customer_name({**adr, "SOLDTO": soldto_code, "SHIPTO": shipto_code})
     return {
         "status": "OK",
         "filename": filename,
@@ -1044,11 +1053,11 @@ def _f2edi_build_response(structured: dict, filename: str,
             "delivery_date": doc.get("Date livraison souhaitee"),
         },
         "customer": {
-            "soldto":    adr.get("SOLDTO"),
-            "shipto":    adr.get("SHIPTO"),
+            "soldto":    soldto_code or adr.get("SOLDTO"),
+            "shipto":    shipto_code or adr.get("SHIPTO"),
             "name":      soldto_name,
             "confidence": adr.get("Confiance", 0),
-            "soldto_confidence": 90 if adr.get("SOLDTO") != adr.get("SHIPTO")
+            "soldto_confidence": 90 if (soldto_code or adr.get("SOLDTO")) != (shipto_code or adr.get("SHIPTO"))
                                     else adr.get("Confiance", 0),
             "shipto_confidence": adr.get("Confiance", 0),
             "shipto_score":      adr.get("shipto_score", 0),

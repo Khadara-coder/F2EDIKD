@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { Download, CheckCircle, Send, PauseCircle, UserCheck } from "lucide-react";
+import { Download, CheckCircle, Send, PauseCircle, UserCheck, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOrderReview } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -20,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { formatCurrency, formatDate, downloadTextFile } from "@/lib/utils";
+import { formatCurrency, formatDate, formatDateTime, downloadTextFile } from "@/lib/utils";
 import { collectReviewBlockers, countPendingAnomalies, isAnomalyPending } from "@/lib/reviewValidation";
 import type { GestionnaireUser } from "@/types";
 
@@ -37,6 +37,8 @@ export function RevuePage() {
   const [confirmResendOpen, setConfirmResendOpen] = useState(false);
   const [holdOpen, setHoldOpen] = useState(false);
   const [holdReason, setHoldReason] = useState("");
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState("");
   const [transferNote, setTransferNote] = useState("");
@@ -133,6 +135,20 @@ export function RevuePage() {
     onError: (e) => setInfoDialog({ title: "Erreur", message: e instanceof Error ? e.message : "Erreur" }),
   });
 
+  const rejectMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch(`/api/orders/${orderId}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: rejectReason }),
+      });
+      if (!res.ok) throw new Error((await res.json()).detail || "Échec du rejet");
+      return res.json();
+    },
+    onSuccess: () => { setRejectOpen(false); setRejectReason(""); invalidate(); },
+    onError: (e) => setInfoDialog({ title: "Erreur", message: e instanceof Error ? e.message : "Erreur" }),
+  });
+
   const transferMutation = useMutation({
     mutationFn: async () => {
       const res = await fetch(`/api/orders/${orderId}/transfer`, {
@@ -195,23 +211,26 @@ export function RevuePage() {
 
   const handleSendToSap = async () => {
     try {
-      const first = await sendToSap.mutateAsync({});
-      if (first.success) {
+      const result = await sendToSap.mutateAsync({});
+      if (result.success) {
         setInfoDialog({
           title: "Succès",
-          message: first.message || "Commande envoyée vers SAP",
+          message: result.message || "Commande envoyée vers SAP",
         });
+        invalidate();
         return;
       }
 
-      if (first.requiresConfirmation || first.alreadySent) {
-        setConfirmResendOpen(true);
-        return;
+      if (result.requiresConfirmation || result.alreadySent) {
+        if (isAdmin) {
+          setConfirmResendOpen(true);
+          return;
+        }
       }
 
       setInfoDialog({
         title: "Erreur",
-        message: `Impossible d'envoyer vers SAP :\n\n${first.message || "Erreur inconnue"}`,
+        message: `Impossible d'envoyer vers SAP :\n\n${result.message || "Erreur inconnue"}`,
       });
     } catch (err) {
       setInfoDialog({
@@ -229,6 +248,7 @@ export function RevuePage() {
           title: "Succès",
           message: forced.message || "Commande renvoyée vers SAP",
         });
+        invalidate();
         return;
       }
       setInfoDialog({
@@ -243,10 +263,26 @@ export function RevuePage() {
     }
   };
 
+  const handleSendClick = () => {
+    if (isSentToSap && isAdmin) {
+      setConfirmResendOpen(true);
+      return;
+    }
+    setConfirmSendOpen(true);
+  };
+
   const edifactBusy = generateEdifact.isPending || downloadEdifact.isPending || sendToSap.isPending;
   const canValidate = pendingAnomalyCount === 0;
   const isValidated = data.edifactReady || order.status === "Généré";
   const isAdv = meQuery.data?.role === "adv";
+  const isAdmin = meQuery.data?.role === "admin";
+  const isRejected = order.status === "Rejeté";
+  const isOnHold = order.status === "En attente";
+  const isSentToSap = order.status === "Envoyé SAP" || Boolean(order.sapSentAt);
+  const workflowLocked = isRejected || isSentToSap;
+  const canSendToSap = !isRejected && !edifactBusy && (
+    (!isSentToSap && isValidated) || (isSentToSap && isAdmin)
+  );
 
   return (
     <>
@@ -284,9 +320,19 @@ export function RevuePage() {
               size="sm"
               className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50"
               onClick={() => setHoldOpen(true)}
-              disabled={order.status === "En attente"}
+              disabled={isOnHold || workflowLocked}
             >
               <PauseCircle className="h-4 w-4" /> En attente
+            </Button>
+            {/* Rejeter */}
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
+              onClick={() => setRejectOpen(true)}
+              disabled={workflowLocked}
+            >
+              <XCircle className="h-4 w-4" /> Rejeter
             </Button>
             {/* Transférer */}
             <Button
@@ -294,10 +340,11 @@ export function RevuePage() {
               size="sm"
               className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
               onClick={() => setTransferOpen(true)}
+              disabled={workflowLocked}
             >
               <UserCheck className="h-4 w-4" /> Transférer
             </Button>
-            <Button size="sm" className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate}>
+            <Button size="sm" className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate || workflowLocked}>
               <CheckCircle className="h-4 w-4" /> Valider
             </Button>
           </div>
@@ -312,6 +359,18 @@ export function RevuePage() {
         <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
           Confiance globale {order.globalConfidence}%
         </Badge>
+        {isRejected && order.rejectionMessage && (
+          <Badge variant="destructive" className="max-w-xl truncate" title={order.rejectionMessage}>
+            Motif : {order.rejectionMessage}
+          </Badge>
+        )}
+        {isSentToSap && (
+          <Badge variant="success" className="max-w-xl truncate">
+            Envoyé vers SAP
+            {order.sapSentAt ? ` le ${formatDateTime(order.sapSentAt)}` : ""}
+            {order.sapSentBy ? ` par ${order.sapSentBy}` : ""}
+          </Badge>
+        )}
       </div>
 
       <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
@@ -465,14 +524,23 @@ export function RevuePage() {
             variant="outline"
             className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50"
             onClick={() => setHoldOpen(true)}
-            disabled={order.status === "En attente"}
+            disabled={isOnHold || workflowLocked}
           >
             <PauseCircle className="h-4 w-4" /> En attente
           </Button>
           <Button
             variant="outline"
+            className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
+            onClick={() => setRejectOpen(true)}
+            disabled={workflowLocked}
+          >
+            <XCircle className="h-4 w-4" /> Rejeter
+          </Button>
+          <Button
+            variant="outline"
             className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
             onClick={() => setTransferOpen(true)}
+            disabled={workflowLocked}
           >
             <UserCheck className="h-4 w-4" /> Transférer
           </Button>
@@ -484,21 +552,21 @@ export function RevuePage() {
               variant="outline"
               className="gap-2"
               onClick={handleDownloadEdifact}
-              disabled={edifactBusy}
+              disabled={edifactBusy || workflowLocked}
             >
               <Download className="h-4 w-4" /> Télécharger EDIFACT
             </Button>
           )}
-          <Button className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate}>
+          <Button className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate || workflowLocked}>
             <CheckCircle className="h-4 w-4" /> Valider
           </Button>
           <Button
             variant="outline"
             className="gap-2"
-            onClick={() => setConfirmSendOpen(true)}
-            disabled={edifactBusy || !isValidated}
+            onClick={handleSendClick}
+            disabled={!canSendToSap}
           >
-            <Send className="h-4 w-4" /> Envoyer vers SAP
+            <Send className="h-4 w-4" /> {isSentToSap && isAdmin ? "Renvoyer vers SAP" : "Envoyer vers SAP"}
           </Button>
         </div>
       </div>
@@ -537,7 +605,7 @@ export function RevuePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm">
-                Cette commande avait déjà été envoyée vers SAP. Voulez-vous vraiment la renvoyer ?
+                Cette commande a déjà été envoyée vers SAP. En tant qu&apos;administrateur, vous pouvez la renvoyer.
               </p>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setConfirmResendOpen(false)}>
@@ -605,6 +673,44 @@ export function RevuePage() {
             >
               <PauseCircle className="h-4 w-4" />
               {holdMutation.isPending ? "En cours…" : "Mettre en attente"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal : Rejet ─────────────────────────────────────────────── */}
+      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <XCircle className="h-5 w-5 text-rose-500" />
+              Rejeter la commande
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-muted-foreground">
+              Indiquez le motif du rejet. La commande passera au statut Rejeté.
+            </p>
+            <div className="space-y-1.5">
+              <Label>Motif *</Label>
+              <Textarea
+                value={rejectReason}
+                onChange={(e) => setRejectReason(e.target.value)}
+                placeholder="Ex: Document illisible, client inconnu, commande annulée par le client…"
+                rows={3}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRejectOpen(false)}>Annuler</Button>
+            <Button
+              variant="destructive"
+              className="gap-2"
+              onClick={() => rejectMutation.mutate()}
+              disabled={!rejectReason.trim() || rejectMutation.isPending}
+            >
+              <XCircle className="h-4 w-4" />
+              {rejectMutation.isPending ? "En cours…" : "Rejeter"}
             </Button>
           </DialogFooter>
         </DialogContent>

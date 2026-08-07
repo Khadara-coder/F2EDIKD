@@ -217,6 +217,14 @@ def parent_soldtos_for_shipto(data: dict[str, Any], shipto_id: str) -> list[str]
     return list(dict.fromkeys(str(p).strip() for p in parents if str(p).strip()))
 
 
+def commercial_soldto_for_shipto(data: dict[str, Any], shipto_id: str) -> str | None:
+    """Return the unique Partners.SOLDTO parent for a SHIPTO, else None."""
+    parents = parent_soldtos_for_shipto(data, shipto_id)
+    if len(parents) == 1:
+        return parents[0]
+    return None
+
+
 def remap_customer_id_if_delivery_shipto(
     data: dict[str, Any],
     customer_id: str,
@@ -235,6 +243,74 @@ def remap_customer_id_if_delivery_shipto(
     return cid, None
 
 
+def resolve_commercial_party(
+    data: dict[str, Any],
+    *,
+    soldto_id: str | None = None,
+    shipto_id: str | None = None,
+) -> tuple[str, str | None, dict]:
+    """Enforce SHIPTO → Partners.SOLDTO parent → Customers.
+
+    Returns ``(commercial_soldto, shipto_or_none, buyer_customer_dict)``.
+    Prefer parent derived from a known SHIPTO; otherwise remap a Customers site id.
+    """
+    sid = str(shipto_id or "").strip() or None
+    oid = str(soldto_id or "").strip()
+
+    if sid:
+        parent = commercial_soldto_for_shipto(data, sid)
+        if parent:
+            oid = parent
+        else:
+            remapped, _ = remap_customer_id_if_delivery_shipto(data, sid)
+            if remapped:
+                oid = remapped
+    elif oid:
+        remapped, remapped_shipto = remap_customer_id_if_delivery_shipto(data, oid)
+        oid = remapped
+        if remapped_shipto and not sid:
+            sid = remapped_shipto
+
+    buyer = dict(data.get("customers_by_id", {}).get(oid) or {})
+    if oid:
+        buyer["id"] = oid
+        if not buyer.get("name"):
+            buyer["name"] = ""
+    return oid, sid, buyer
+
+
+def apply_commercial_soldto_to_buyer(
+    data: dict[str, Any],
+    buyer: dict | None,
+    *,
+    shipto_id: str | None = None,
+) -> dict | None:
+    """Rewrite *buyer* so its id/name are the commercial AG (Customers), not a site."""
+    if not buyer:
+        return buyer
+    oid, _sid, remapped_buyer = resolve_commercial_party(
+        data,
+        soldto_id=str(buyer.get("id") or ""),
+        shipto_id=shipto_id,
+    )
+    if not oid:
+        return buyer
+    out = dict(buyer)
+    out["id"] = oid
+    if remapped_buyer.get("name"):
+        out["name"] = remapped_buyer["name"]
+    elif oid in data.get("customers_by_id", {}):
+        out["name"] = data["customers_by_id"][oid].get("name", out.get("name", ""))
+    # Preserve scoring metadata from original buyer
+    for key in ("_score", "_reason", "_buyer_candidates", "_order_vbeln"):
+        if key in buyer and key not in remapped_buyer:
+            out[key] = buyer[key]
+    if oid != str(buyer.get("id") or ""):
+        reason = str(out.get("_reason") or "")
+        out["_reason"] = f"{reason}+shipto_parent_remap".strip("+")
+    return out
+
+
 def lookup_customer_by_order_number(data: dict[str, Any], order_number: str | None) -> dict | None:
     if not order_number:
         return None
@@ -246,7 +322,9 @@ def lookup_customer_by_order_number(data: dict[str, Any], order_number: str | No
         return None
     records = sorted(records, key=lambda item: item.get("erdat", ""), reverse=True)
     kunnr = records[0]["kunnr"]
-    customer = data.get("customers_by_id", {}).get(kunnr)
+    kunnr, _site, customer = resolve_commercial_party(data, soldto_id=kunnr)
+    if not customer.get("id"):
+        customer = data.get("customers_by_id", {}).get(kunnr)
     if not customer:
         return None
     buyer = dict(customer)
@@ -475,13 +553,13 @@ def infer_buyer_from_master(
 
     buyer = lookup_customer_by_order_number(data, order_number)
     if buyer:
-        return buyer
+        return apply_commercial_soldto_to_buyer(data, buyer)
 
     explicit_soldtos = soldto_ids_from_document(text)
     if len(explicit_soldtos) == 1:
         soldto_id = next(iter(explicit_soldtos))
-        customer = data.get("customers_by_id", {}).get(soldto_id)
-        if customer:
+        soldto_id, _site, customer = resolve_commercial_party(data, soldto_id=soldto_id)
+        if customer.get("id"):
             result = dict(customer)
             result["_score"] = cfg.get("buyer_order_lookup_score", 180)
             result["_reason"] = f"soldto_doc:{soldto_id}"
@@ -518,7 +596,7 @@ def infer_buyer_from_master(
         result["_score"] = best_score
         result["_reason"] = "+".join(best_reasons)
         result["_buyer_candidates"] = sorted(ranked, key=lambda item: item["score"], reverse=True)[:5]
-        return result
+        return apply_commercial_soldto_to_buyer(data, result)
     return None
 
 
@@ -990,6 +1068,7 @@ def build_soldto_billing_result(
         scored_partners=[(score, reasons, customer_as_delivery_partner(payload), None) for score, reasons, _sid, payload in matches],
         guided=True,
         detected_candidate=detected_candidate,
+        data=data,
     )
     validated["Strategie matching"] = "adresse_soldto_facturation"
     if shipto_partner and shipto_partner.get("id") != best_soldto:
@@ -1078,6 +1157,7 @@ def build_global_shipto_result(
         scored_partners=[(score, reasons, partner, layout_match) for score, reasons, _soldto, partner, layout_match in results],
         guided=True,
         detected_candidate=detected_candidate,
+        data=data,
     )
     validated["Strategie matching"] = strategy
     return detected, validated
@@ -1134,10 +1214,13 @@ def direct_shipto_matches_by_address(
             else:
                 score += 15
                 reasons.append("street_fuzzy")
-            matches.append((score, reasons, soldto, partner))
+            # Prefer exact postal + higher street similarity when scores tie later.
+            postal_bonus = 1 if norm_postal(partner.get("postal", "")) == postal else 0
+            matches.append((score, reasons, soldto, partner, ratio, postal_bonus))
 
-    matches.sort(key=lambda item: item[0], reverse=True)
-    return matches
+    matches.sort(key=lambda item: (item[0], item[5], item[4]), reverse=True)
+    # Strip sort helpers from public return shape (score, reasons, soldto, partner)
+    return [(score, reasons, soldto, partner) for score, reasons, soldto, partner, _r, _p in matches]
 
 
 def prefer_shipto_matches_with_soldto_filter(
@@ -1170,7 +1253,14 @@ def build_direct_shipto_result(
     if not matches:
         return None
     best_score, best_reasons, best_soldto, best_partner = matches[0]
-    buyer = dict(data.get("customers_by_id", {}).get(best_soldto, {}))
+    # Prefer Customers name for Partners.SOLDTO parent (never site SHIPTO as commercial AG)
+    best_soldto, _sid, buyer = resolve_commercial_party(
+        data,
+        soldto_id=best_soldto,
+        shipto_id=str(best_partner.get("id") or ""),
+    )
+    if not buyer.get("id"):
+        buyer = dict(data.get("customers_by_id", {}).get(best_soldto, {}))
     if not buyer:
         return None
     buyer["_score"] = best_score
@@ -1202,6 +1292,7 @@ def build_direct_shipto_result(
         scored_partners=scored_partners,
         guided=True,
         detected_candidate=detected_candidate,
+        data=data,
     )
     validated["Strategie matching"] = "adresse_directe_shipto"
     return detected, validated
@@ -1220,10 +1311,19 @@ def build_validated_delivery_result(
     semantic_similarity: float | None = None,
     guided: bool = False,
     detected_candidate: dict | None = None,
+    data: dict[str, Any] | None = None,
 ) -> dict:
     cfg = scoring_config()
+    md = data if data is not None else get_master_data()
     best_partner_id = str(best_partner.get("id") or "")
+    # Mechanical chain: SHIPTO → Partners.SOLDTO → Customers.NAME
+    buyer = apply_commercial_soldto_to_buyer(md, buyer, shipto_id=best_partner_id) or buyer
     buyer_id = str(buyer.get("id") or "")
+    buyer_name = str(
+        (md.get("customers_by_id", {}).get(buyer_id) or {}).get("name")
+        or buyer.get("name")
+        or ""
+    )
     top_ties = [
         partner
         for score, _reasons, partner, _layout_match in scored_partners
@@ -1262,8 +1362,8 @@ def build_validated_delivery_result(
         "Confiance": min(100, best_score),
         "Raison": "+".join(best_reasons),
         "Ambigu": "oui" if ambiguous else "non",
-        "SOLDTO": buyer["id"],
-        "Client": buyer["name"],
+        "SOLDTO": buyer_id,
+        "Client": buyer_name,
         "Buyer score": buyer.get("_score", 0),
         "Buyer reason": buyer.get("_reason", ""),
         "Buyer candidates": buyer.get("_buyer_candidates", []),
@@ -1387,7 +1487,8 @@ def resolve_delivery_with_masterdata(
                     shipto_matches = ranked
                     best_soldto = shipto_matches[0][2]
                     best_partner = shipto_matches[0][3] or {}
-                if str(best_partner.get("id") or "") != str(best_soldto or ""):
+                if best_partner.get("id"):
+                    # Address → Partners SHIPTO wins; SOLDTO remapped inside build_direct_shipto_result
                     direct_result = build_direct_shipto_result(
                         data=data,
                         matches=shipto_matches,
@@ -1457,6 +1558,7 @@ def resolve_delivery_with_masterdata(
         buyer = dict(data["customers_by_id"][known_soldto_id])
         buyer["_score"] = cfg["buyer_order_lookup_score"]
         buyer["_reason"] = f"known_soldto:{known_soldto_id}"
+        buyer = apply_commercial_soldto_to_buyer(data, buyer)
     if buyer is None and order_buyer:
         buyer = order_buyer
     if buyer is None and strong_detection:
@@ -1484,7 +1586,14 @@ def resolve_delivery_with_masterdata(
         detected["Guidage masterdata"] = "non"
         return detected, validated
 
+    buyer = apply_commercial_soldto_to_buyer(data, buyer) or buyer
     partners = data["partners_by_soldto"].get(buyer["id"], [])
+    if not partners:
+        # Site id with empty partners_by_soldto — remap then retry parent family
+        remapped_id, _site = remap_customer_id_if_delivery_shipto(data, buyer["id"])
+        if remapped_id and remapped_id != buyer["id"]:
+            buyer = apply_commercial_soldto_to_buyer(data, buyer) or buyer
+            partners = data["partners_by_soldto"].get(buyer["id"], [])
     if not partners:
         soldto_matches = soldto_billing_matches_by_address(data, primary_delivery)
         if soldto_matches and soldto_matches[0][2] == buyer["id"]:
@@ -1604,6 +1713,7 @@ def resolve_delivery_with_masterdata(
         semantic_similarity=best_semantic if use_embeddings else None,
         guided=True,
         detected_candidate=best_detected_candidate,
+        data=data,
     )
     return detected, validated
 
@@ -1632,6 +1742,7 @@ def validate_delivery_with_master(
         buyer = dict(data["customers_by_id"][known_soldto_id])
         buyer["_score"] = cfg["buyer_order_lookup_score"]
         buyer["_reason"] = f"known_soldto:{known_soldto_id}"
+        buyer = apply_commercial_soldto_to_buyer(data, buyer)
     if buyer is None:
         buyer = infer_buyer_from_master(data, text, fields, filename, order_number, delivery)
     if not buyer:
@@ -1642,6 +1753,7 @@ def validate_delivery_with_master(
             "Adresse complete": "",
         }
 
+    buyer = apply_commercial_soldto_to_buyer(data, buyer) or buyer
     partners = data["partners_by_soldto"].get(buyer["id"], [])
     if not partners:
         return {
@@ -1693,4 +1805,5 @@ def validate_delivery_with_master(
         layout_analysis=layout_analysis,
         scored_partners=scored_partners,
         guided=False,
+        data=data,
     )

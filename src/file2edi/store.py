@@ -425,6 +425,9 @@ class File2EdiStore:
         _ensure_column("file2edi_orders", "transfer_at", "transfer_at TEXT")
         _ensure_column("file2edi_orders", "sap_sent_at", "sap_sent_at TEXT")
         _ensure_column("file2edi_orders", "sap_sent_by", "sap_sent_by TEXT")
+        _ensure_column("file2edi_orders", "rejection_message", "rejection_message TEXT")
+        _ensure_column("file2edi_orders", "rejected_by", "rejected_by TEXT")
+        _ensure_column("file2edi_orders", "rejected_at", "rejected_at TEXT")
 
         _ensure_column("file2edi_pdf_uploads", "file_name", "file_name TEXT")
 
@@ -955,10 +958,16 @@ class File2EdiStore:
             "lineCount": row["line_count"],
             "source": row.get("source") or "unknown",
             "assignedTo": row.get("assigned_to"),
+            "holdReason": row.get("hold_reason"),
+            "rejectionMessage": row.get("rejection_message"),
+            "rejectedBy": row.get("rejected_by"),
+            "sapSentAt": row.get("sap_sent_at"),
+            "sapSentBy": row.get("sap_sent_by"),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
         review_required = order["globalConfidence"] < 90
+        sap_export_done = bool(row.get("sap_sent_at")) or order["status"] == "Envoyé SAP"
         trace = [
             {"id": "1", "label": "PDF reçu", "status": "completed"},
             {"id": "2", "label": "Extraction OCR", "status": "completed"},
@@ -966,7 +975,7 @@ class File2EdiStore:
             {"id": "4", "label": "Contrôles métier", "status": "completed"},
             {"id": "5", "label": "Revue manuelle", "status": "current" if review_required else "completed"},
             {"id": "6", "label": "Génération EDIFACT", "status": "completed" if row.get("edifact_content") else "pending"},
-            {"id": "7", "label": "Export SFTP", "status": "pending"},
+            {"id": "7", "label": "Export SFTP", "status": "completed" if sap_export_done else "pending"},
         ]
         return {
             "order": order,
@@ -1042,6 +1051,7 @@ class File2EdiStore:
                       o.client_name, o.global_confidence, o.status,
                       o.source, o.assigned_to, o.uploaded_by,
                       o.hold_reason, o.hold_by,
+                      o.rejection_message, o.rejected_by,
                       o.transferred_from, o.transferred_to, o.transfer_note,
                       o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
                       h.processed_at, h.processed_by
@@ -1063,6 +1073,7 @@ class File2EdiStore:
                       o.client_name, o.global_confidence, o.status,
                       o.source, o.assigned_to, o.uploaded_by,
                       o.hold_reason, o.hold_by,
+                      o.rejection_message, o.rejected_by,
                       o.transferred_from, o.transferred_to, o.transfer_note,
                       o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
                       h.processed_at, h.processed_by
@@ -1763,6 +1774,9 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS transfer_at TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS sap_sent_at TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS sap_sent_by TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS rejection_message TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS rejected_by TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS rejected_at TEXT",
                 # User profile columns
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS email TEXT",
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS sap_id TEXT",
@@ -2006,6 +2020,18 @@ def _users_mixin(cls):
         conn.close()
         return dict(row) if row else None
 
+    def reject_order(self, order_id: str, reason: str, actor: str) -> dict | None:
+        conn = self._conn()
+        conn.execute(
+            "UPDATE file2edi_orders SET status='Rejeté', rejection_message=?, rejected_by=?, rejected_at=?, "
+            "review_required=0, updated_at=? WHERE order_id=?",
+            [reason, actor, _now(), _now(), order_id],
+        )
+        conn.commit()
+        row = conn.execute("SELECT * FROM file2edi_orders WHERE order_id=?", [order_id]).fetchone()
+        conn.close()
+        return dict(row) if row else None
+
     def transfer_order(self, order_id: str, to_username: str, note: str, from_actor: str) -> dict | None:
         conn = self._conn()
         conn.execute(
@@ -2048,6 +2074,7 @@ def _users_mixin(cls):
     cls.change_password = change_password
     cls.update_user = update_user
     cls.hold_order = hold_order
+    cls.reject_order = reject_order
     cls.transfer_order = transfer_order
     cls.list_orders_filtered = list_orders_filtered
     return cls

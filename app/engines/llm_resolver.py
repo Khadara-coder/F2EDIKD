@@ -285,6 +285,9 @@ def llm_resolve(text: str, master_data: dict, pre_extracted: dict = None) -> dic
                     best_path = path
 
     if best_soldto:
+        from app.engines.cross_resolver import _commercial_soldto
+
+        best_soldto = _commercial_soldto(best_soldto, str(best_shipto or ""), master_data)
         # Confidence based on score
         if best_score >= 80:
             confidence = 95

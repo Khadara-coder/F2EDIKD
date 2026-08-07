@@ -206,6 +206,149 @@ FRANCE
     assert validated["SHIPTO"] == "15900966"
 
 
+def _rexel_masterdata_fixture() -> dict:
+    """Minimal Rexel AG + site Customers + Partners family (Caen / Meung)."""
+    ag = {
+        "id": "15021368",
+        "name": "REXEL FRANCE S.A.S.U.",
+        "postal": "75017",
+        "city": "PARIS",
+        "street": "13 BOULEVARD DU FORT DE VAUX",
+        "country": "FR",
+        "vat": "FR26309304616",
+    }
+    site_clr = {
+        "id": "15900721",
+        "name": ".REXEL CLR",
+        "postal": "45130",
+        "city": "MEUNG-SUR-LOIRE",
+        "street": "RUE 1ERE AVENUE, N° 300",
+        "country": "FR",
+        "vat": "FR26309304616",
+    }
+    site_cli = {
+        "id": "15019298",
+        "name": ".REXEL CLI",
+        "postal": "14000",
+        "city": "CAEN",
+        "street": "3 IMPASSE DE LA GIRAFE",
+        "country": "FR",
+        "vat": "FR26309304616",
+    }
+    p_caen = {
+        "id": "15019298",
+        "name": ".REXEL CLI",
+        "postal": "14000",
+        "city": "CAEN",
+        "street": "3 IMPASSE DE LA GIRAFE",
+        "country": "FR",
+    }
+    p_meung = {
+        "id": "15900721",
+        "name": ".REXEL CLR",
+        "postal": "45130",
+        "city": "MEUNG-SUR-LOIRE",
+        "street": "RUE 1ERE AVENUE, N° 300",
+        "country": "FR",
+    }
+    return {
+        "loaded": True,
+        "customers": [ag, site_clr, site_cli],
+        "customers_by_id": {"15021368": ag, "15900721": site_clr, "15019298": site_cli},
+        "customers_by_vat": {"FR26309304616": [ag, site_clr, site_cli]},
+        "customers_by_postal": {
+            "14000": [site_cli],
+            "45130": [site_clr],
+            "75017": [ag],
+        },
+        "partners_by_shipto": {
+            "15019298": ["15021368"],
+            "15900721": ["15021368"],
+        },
+        "partners_by_soldto": {
+            "15021368": [p_caen, p_meung],
+        },
+        "partners_by_postal": {
+            "14000": [("15021368", p_caen)],
+            "45130": [("15021368", p_meung)],
+        },
+        "partners_by_agency": {},
+        "partners_by_normalized_city": {},
+        "partners_by_normalized_street": {},
+        "salesorders_by_bstnk": {},
+        "salesorders_by_kunnr": {},
+    }
+
+
+def test_resolve_commercial_party_rexel_site_to_ag():
+    from app.masterdata import resolve_commercial_party
+
+    data = _rexel_masterdata_fixture()
+    soldto, shipto, buyer = resolve_commercial_party(data, soldto_id="15900721")
+    assert soldto == "15021368"
+    assert shipto == "15900721"
+    assert buyer["name"] == "REXEL FRANCE S.A.S.U."
+
+    soldto2, shipto2, buyer2 = resolve_commercial_party(
+        data, soldto_id="15900721", shipto_id="15019298"
+    )
+    assert soldto2 == "15021368"
+    assert shipto2 == "15019298"
+    assert buyer2["name"] == "REXEL FRANCE S.A.S.U."
+
+
+def test_direct_shipto_caen_yields_rexel_ag_soldto():
+    """Address Caen → SHIPTO 15019298 → SOLDTO 15021368 → Customers name."""
+    from app.masterdata import build_direct_shipto_result, direct_shipto_matches_by_address
+
+    data = _rexel_masterdata_fixture()
+    delivery = {
+        "Code postal": "14000",
+        "Ville": "CAEN",
+        "Rue": "3 IMPASSE DE LA GIRAFE",
+    }
+    matches = direct_shipto_matches_by_address(data, delivery)
+    assert matches
+    assert matches[0][2] == "15021368"
+    assert matches[0][3]["id"] == "15019298"
+
+    _detected, validated = build_direct_shipto_result(
+        data=data,
+        matches=matches,
+        layout_analysis=None,
+        detected_candidate={**delivery, "Score resolution": 100, "Source": "test"},
+        filtered_by_vat=False,
+    )
+    assert validated["SHIPTO"] == "15019298"
+    assert validated["SOLDTO"] == "15021368"
+    assert validated["Client"] == "REXEL FRANCE S.A.S.U."
+    assert "GIRAFE" in (validated.get("Rue") or "").upper()
+
+
+def test_build_validated_remaps_site_soldto_when_shipto_known():
+    from app.masterdata import build_validated_delivery_result
+
+    data = _rexel_masterdata_fixture()
+    buyer = dict(data["customers_by_id"]["15900721"])  # wrong site as soldto
+    buyer["_score"] = 80
+    partner = data["partners_by_soldto"]["15021368"][0]  # Caen
+    validated = build_validated_delivery_result(
+        buyer=buyer,
+        best_partner=partner,
+        best_score=90,
+        second_score=-1,
+        best_reasons=["direct_shipto_address"],
+        best_layout_match=None,
+        layout_analysis=None,
+        scored_partners=[(90, ["direct_shipto_address"], partner, None)],
+        guided=True,
+        data=data,
+    )
+    assert validated["SOLDTO"] == "15021368"
+    assert validated["Client"] == "REXEL FRANCE S.A.S.U."
+    assert validated["SHIPTO"] == "15019298"
+
+
 def test_filter_candidates_keeps_primary_detected_address():
     from app.masterdata import filter_candidates_to_primary_detection
 

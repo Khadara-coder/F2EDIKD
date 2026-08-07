@@ -17,7 +17,7 @@ from .mapper import (
     engine_to_order_review,
 )
 from .store import get_store
-from .request_auth import ensure_admin, resolve_actor, resolve_role
+from .request_auth import ensure_admin, resolve_actor, resolve_role, resolve_role_for_request
 from . import engine_bridge
 from src.ai_status import build_system_health_payload
 from src.health_probe import build_proxy_health
@@ -305,6 +305,7 @@ def create_router() -> APIRouter:
     # ── Order workflow actions ─────────────────────────────────────────────────
     @router.post("/orders/{order_id}/hold")
     async def hold_order(order_id: str, req: Request):
+        _require_mutable_order(order_id)
         body = await req.json()
         reason = str(body.get("reason") or "").strip()
         if not reason:
@@ -316,8 +317,23 @@ def create_router() -> APIRouter:
             raise HTTPException(404)
         return {"ok": True, "status": "En attente", "reason": reason}
 
+    @router.post("/orders/{order_id}/reject")
+    async def reject_order(order_id: str, req: Request):
+        _require_mutable_order(order_id)
+        body = await req.json()
+        reason = str(body.get("reason") or "").strip()
+        if not reason:
+            raise HTTPException(400, "Motif de rejet requis")
+        user = _get_current_user(req)
+        actor = user["username"] if user else "operator"
+        result = get_store().reject_order(order_id, reason, actor)
+        if not result:
+            raise HTTPException(404)
+        return {"ok": True, "status": "Rejeté", "reason": reason}
+
     @router.post("/orders/{order_id}/transfer")
     async def transfer_order(order_id: str, req: Request):
+        _require_mutable_order(order_id)
         body = await req.json()
         to_username = str(body.get("to") or "").strip()
         note = str(body.get("note") or "").strip()
@@ -707,23 +723,30 @@ def create_router() -> APIRouter:
         # Align runtime SFTP env with persisted app settings before sending.
         _apply_runtime_sftp_config(store.load_app_settings())
         sent_by = resolve_actor(req)
+        actor_role = resolve_role_for_request(sent_by, req)
 
         try:
             force_resend = bool((payload or {}).get("force"))
             already_sent = False
             try:
                 review = store.load_order_review(order_id) or {}
-                status = str((review.get("order") or {}).get("status") or "").strip()
-                already_sent = status in {"Envoyé SAP", "SFTP_DELIVERED"}
+                already_sent = _order_sent_to_sap(review.get("order") or {})
             except Exception:
                 already_sent = False
-            if already_sent and not force_resend:
-                return {
-                    "success": False,
-                    "alreadySent": True,
-                    "requiresConfirmation": True,
-                    "message": "Cette commande a déjà été envoyée vers SAP. Confirmez pour renvoyer.",
-                }
+            if already_sent:
+                if actor_role != "admin":
+                    return {
+                        "success": False,
+                        "alreadySent": True,
+                        "message": "Cette commande a déjà été envoyée vers SAP.",
+                    }
+                if not force_resend:
+                    return {
+                        "success": False,
+                        "alreadySent": True,
+                        "requiresConfirmation": True,
+                        "message": "Cette commande a déjà été envoyée vers SAP. Confirmez pour renvoyer.",
+                    }
 
             host = (os.environ.get("SFTP_HOST") or "").strip()
             username = (os.environ.get("SFTP_USERNAME") or "").strip()
@@ -1471,6 +1494,25 @@ def _to_iso_utc(value: str | None) -> str | None:
     """Normalize mixed timestamp inputs to ISO-8601 UTC for frontend consistency."""
     parsed = _parse_timestamp(value)
     return parsed.isoformat() if parsed else None
+
+
+def _order_sent_to_sap(order: dict) -> bool:
+    status = str(order.get("status") or "").strip()
+    if status == "Envoyé SAP":
+        return True
+    return bool(str(order.get("sapSentAt") or order.get("sap_sent_at") or "").strip())
+
+
+def _require_mutable_order(order_id: str) -> dict:
+    review = get_store().load_order_review(order_id)
+    if not review:
+        raise HTTPException(404)
+    if _order_sent_to_sap(review.get("order") or {}):
+        raise HTTPException(
+            409,
+            "Cette commande a déjà été envoyée vers SAP et ne peut plus être modifiée.",
+        )
+    return review
 
 
 def _order_list_item(o: dict) -> dict:

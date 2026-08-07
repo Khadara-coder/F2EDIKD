@@ -104,6 +104,7 @@ export interface ReviewQueueItem {
   processedBy?: string;
   assignedTo?: string;       // username du gestionnaire assigné
   holdReason?: string;       // motif mise en attente
+  rejectionMessage?: string; // motif de rejet manuel
   transferredFrom?: string;  // username de celui qui a transféré
   transferredTo?: string;    // username du destinataire
   transferNote?: string;     // note de transfert
@@ -222,6 +223,11 @@ export interface Order {
   lineCount: number;
   createdAt: string;
   updatedAt: string;
+  holdReason?: string;
+  rejectionMessage?: string;
+  rejectedBy?: string;
+  sapSentAt?: string;
+  sapSentBy?: string;
   manuallyEditedFields?: string[];
 }
 

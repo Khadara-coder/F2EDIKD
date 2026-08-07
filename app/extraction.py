@@ -660,12 +660,29 @@ def extract_structured_fields(
     # Each SHIPTO candidate gets points based on evidence found in the PDF.
     # LLM is only used as fallback on top 3 candidates if score < 95 or gap < 15.
     resolved_soldto = master_delivery_address.get("SOLDTO", "")
+    resolved_shipto = str(master_delivery_address.get("SHIPTO") or "").strip()
 
     # Always run scoring engine when SOLDTO has multiple SHIPTOs
     if resolved_soldto:
         try:
             from app.engines.shipto_scoring import resolve_shipto_with_scoring
+            from app.masterdata import resolve_commercial_party
+
             md = get_master_data()
+            # Remap site Customers id → commercial AG before scoring the SH family
+            remapped_soldto, remapped_shipto, buyer = resolve_commercial_party(
+                md,
+                soldto_id=resolved_soldto,
+                shipto_id=resolved_shipto or None,
+            )
+            if remapped_soldto:
+                resolved_soldto = remapped_soldto
+                master_delivery_address["SOLDTO"] = remapped_soldto
+                if buyer.get("name"):
+                    master_delivery_address["Client"] = buyer["name"]
+            if remapped_shipto and not resolved_shipto:
+                resolved_shipto = remapped_shipto
+
             partners = md.get("partners_by_soldto", {}).get(resolved_soldto, [])
 
             if len(partners) > 1:
@@ -685,6 +702,16 @@ def extract_structured_fields(
                     master_delivery_address["Rue"] = best.street
                     master_delivery_address["Code postal"] = best.postal
                     master_delivery_address["Ville"] = best.city
+                    # Re-assert commercial AG from chosen SHIPTO
+                    final_soldto, _, final_buyer = resolve_commercial_party(
+                        md,
+                        soldto_id=resolved_soldto,
+                        shipto_id=best.shipto_id,
+                    )
+                    if final_soldto:
+                        master_delivery_address["SOLDTO"] = final_soldto
+                    if final_buyer.get("name"):
+                        master_delivery_address["Client"] = final_buyer["name"]
                     master_delivery_address["Confiance"] = scoring_result.shipto_confidence
                     master_delivery_address["Disambiguation"] = (
                         f"SCORING:{best.score}pts "
@@ -708,6 +735,17 @@ def extract_structured_fields(
                     master_delivery_address["Statut"] = "Aucun SHIPTO ne correspond aux preuves du document"
                     master_delivery_address["reason_codes"] = scoring_result.reason_codes
                     master_delivery_address["scoring_decision"] = scoring_result.decision or "REJECTED"
+            elif resolved_shipto:
+                # Single/no scoring path: still force AG from known SHIPTO
+                final_soldto, _, final_buyer = resolve_commercial_party(
+                    md,
+                    soldto_id=resolved_soldto,
+                    shipto_id=resolved_shipto,
+                )
+                if final_soldto:
+                    master_delivery_address["SOLDTO"] = final_soldto
+                if final_buyer.get("name"):
+                    master_delivery_address["Client"] = final_buyer["name"]
         except Exception:
             pass  # Scoring is non-blocking; keep existing master_delivery_address
 
