@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   AlertTriangle,
@@ -32,25 +32,45 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { confidenceColor, formatDateTime } from "@/lib/utils";
-import type { HistoryFilters, OrderStatus } from "@/types";
+import {
+  businessGroupToTechnicalStatuses,
+  businessStatusLabel,
+  type ReviewStatusFilter,
+} from "@/lib/orderBusinessStatus";
+import type { HistoryFilters } from "@/types";
 
-const STATUS_OPTIONS: (OrderStatus | "all")[] = [
+const STATUS_OPTIONS: ReviewStatusFilter[] = [
   "all",
-  "Généré",
-  "Revue requise",
-  "Rejeté",
+  "toProcess",
+  "inProgress",
+  "sentSap",
+  "rejected",
+  "deliveryFailed",
 ];
 
 export function HistoriquePage() {
   const navigate = useNavigate();
   const displayTimeZone = useDisplayTimeZone();
-  const [filters, setFilters] = useState<HistoryFilters>({
+  const [filters, setFilters] = useState<HistoryFilters & { statusGroup?: ReviewStatusFilter }>({
     page: 1,
     pageSize: 10,
     search: "",
     status: "",
+    statusGroup: "all",
   });
-  const { data, isLoading } = useHistory(filters);
+
+  const apiFilters = useMemo<HistoryFilters>(() => {
+    const { statusGroup, ...rest } = filters;
+    if (!statusGroup || statusGroup === "all") {
+      return rest;
+    }
+    return {
+      ...rest,
+      status: businessGroupToTechnicalStatuses(statusGroup).join(",") as HistoryFilters["status"],
+    };
+  }, [filters]);
+
+  const { data, isLoading } = useHistory(apiFilters);
 
   return (
     <>
@@ -103,11 +123,12 @@ export function HistoriquePage() {
           <Input type="date" className="w-40" />
           <Input type="date" className="w-40" />
           <Select
-            value={filters.status || "all"}
+            value={filters.statusGroup || "all"}
             onValueChange={(v) =>
               setFilters((f) => ({
                 ...f,
-                status: v === "all" ? "" : (v as OrderStatus),
+                statusGroup: v as ReviewStatusFilter,
+                status: "",
                 page: 1,
               }))
             }
@@ -118,7 +139,7 @@ export function HistoriquePage() {
             <SelectContent>
               {STATUS_OPTIONS.map((s) => (
                 <SelectItem key={s} value={s}>
-                  {s === "all" ? "Tous les statuts" : s}
+                  {s === "all" ? "Tous les statuts" : businessStatusLabel(s)}
                 </SelectItem>
               ))}
             </SelectContent>

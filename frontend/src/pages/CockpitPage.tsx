@@ -34,7 +34,7 @@ export function CockpitPage() {
     { label: "Aujourd'hui", value: m?.today ?? "—", sub: "Importés ce jour", icon: Calendar },
     { label: "Total", value: m?.total ?? "—", sub: "Tous statuts, toutes dates", icon: Sigma, iconCls: "bg-slate-500/10 [&_svg]:text-slate-600" },
     { label: "Générés", value: m?.generated ?? "—", sub: "EDIFACT produits", icon: FileText, iconCls: "bg-blue-500/10 [&_svg]:text-blue-600" },
-    { label: "Revue requise", value: m?.reviewRequired ?? "—", sub: "En attente de validation", icon: CheckCircle, iconCls: "bg-amber-500/10 [&_svg]:text-amber-600" },
+    { label: "À traiter", value: m?.reviewRequired ?? "—", sub: "En attente de validation", icon: CheckCircle, iconCls: "bg-amber-500/10 [&_svg]:text-amber-600" },
     { label: "Rejetés", value: m?.rejected ?? "—", sub: "Commandes échouées", icon: XCircle, iconCls: "bg-red-500/10 [&_svg]:text-red-600" },
     { label: "SFTP échoué", value: m?.sftpFailed ?? "—", sub: "Exports en échec", icon: Upload, iconCls: "bg-rose-500/10 [&_svg]:text-rose-600" },
   ];
@@ -62,7 +62,7 @@ export function CockpitPage() {
       <Card className="mb-6">
         <CardHeader className="flex flex-row items-center justify-between border-b pb-4">
           <CardTitle className="text-base">
-            File d'attente — revue requise
+            File d'attente — à traiter
             <span className="ml-2 rounded-full bg-red-100 px-2 py-0.5 text-xs font-bold text-red-600">
               {reviewQueue.data?.length ?? 0}
             </span>
@@ -108,7 +108,7 @@ export function CockpitPage() {
           </Table>
           <div className="border-t p-3">
             <Button variant="link" className="text-primary" onClick={() => navigate("/revue")}>
-              Voir toutes les revues requises →
+              Ouvrir Gérer les commandes →
             </Button>
           </div>
         </CardContent>

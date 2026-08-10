@@ -78,6 +78,18 @@ export function displayStatusLabel(status: OrderStatus): string {
   return businessStatusLabel(statusToBusinessGroup(status));
 }
 
+const BUSINESS_GROUP_STATUSES: Record<BusinessStatusGroup, OrderStatus[]> = {
+  toProcess: ["Revue requise", "À revoir", "À vérifier", "Bloqué", "À traiter"],
+  inProgress: ["En attente", "Transféré", "Généré", "Validé"],
+  sentSap: ["Envoyé SAP"],
+  rejected: ["Rejeté", "Doublon"],
+  deliveryFailed: ["SFTP échoué", "Échec SAP"],
+};
+
+export function businessGroupToTechnicalStatuses(group: BusinessStatusGroup): OrderStatus[] {
+  return BUSINESS_GROUP_STATUSES[group];
+}
+
 export function workflowMotif(row: Pick<
   ReviewQueueItem,
   "status" | "holdReason" | "issue" | "transferredFrom" | "transferNote"

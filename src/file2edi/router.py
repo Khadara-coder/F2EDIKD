@@ -851,8 +851,10 @@ def create_router() -> APIRouter:
         for o in rows_raw:
             if search and search.lower() not in (o.get("file_name") or "").lower() and search.lower() not in (o.get("client_name") or "").lower():
                 continue
-            if status and o.get("status") != status:
-                continue
+            if status:
+                allowed = {s.strip() for s in status.split(",") if s.strip()}
+                if allowed and o.get("status") not in allowed:
+                    continue
             rows.append({
                 "conversionId": f"conv-{o['order_id']}",
                 "orderId": o["order_id"],
