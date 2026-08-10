@@ -61,11 +61,15 @@ def test_list_orders_summary_hides_done_statuses(tmp_path: Path):
     store.save_order_review(_minimal_review("ord-open", "upl-open", "Revue requise"))
     store.save_order_review(_minimal_review("ord-gen", "upl-gen", "Généré"))
     store.save_order_review(_minimal_review("ord-tr", "upl-tr", "Transféré"))
+    store.save_order_review(_minimal_review("ord-hold", "upl-hold", "En attente"))
+    store.save_order_review(_minimal_review("ord-sap", "upl-sap", "Envoyé SAP"))
 
     ids = {r["order_id"] for r in store.list_orders_summary()}
     assert "ord-open" in ids
-    assert "ord-gen" not in ids
-    assert "ord-tr" not in ids
+    assert "ord-gen" in ids
+    assert "ord-tr" in ids
+    assert "ord-hold" in ids
+    assert "ord-sap" not in ids
 
 
 def test_delete_upload_cascades_orders_and_file(tmp_path: Path):

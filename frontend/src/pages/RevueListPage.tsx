@@ -20,6 +20,13 @@ import {
 } from "@/components/ui/table";
 import { confidenceColor, formatDateTime, cn } from "@/lib/utils";
 import type { OrderStatus } from "@/types";
+import {
+  businessStatusLabel,
+  businessStatusVariant,
+  statusToBusinessGroup,
+  workflowMotif,
+  type ReviewStatusFilter,
+} from "@/lib/orderBusinessStatus";
 
 function SourceBadge({ source }: { source?: string }) {
   const map: Record<string, { label: string; className: string }> = {
@@ -37,8 +44,6 @@ function SourceBadge({ source }: { source?: string }) {
   );
 }
 
-type ReviewStatusFilter = "all" | "toProcess" | "onHold" | "processed" | "sentSap" | "transferred" | "rejected" | "deliveryFailed";
-type BusinessStatusGroup = Exclude<ReviewStatusFilter, "all">;
 type ReviewSortKey =
   | "fileName"
   | "clientName"
@@ -51,38 +56,13 @@ type ReviewSortKey =
 type SortDirection = "asc" | "desc";
 
 const STATUS_FILTERS: Array<{ value: ReviewStatusFilter; label: string; className: string }> = [
-  { value: "all",           label: "Tous",          className: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100" },
-  { value: "toProcess",     label: "À traiter",     className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
-  { value: "onHold",        label: "En attente",    className: "border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100" },
-  { value: "processed",     label: "Traité",         className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
-  { value: "sentSap",       label: "Envoyé SAP",    className: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" },
-  { value: "transferred",   label: "Transféré",      className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
-  { value: "rejected",      label: "Rejeté",         className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
-  { value: "deliveryFailed",label: "Échec d'envoi",  className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
+  { value: "all",            label: "Tous",          className: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100" },
+  { value: "toProcess",      label: "À traiter",     className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
+  { value: "inProgress",     label: "En cours",      className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
+  { value: "sentSap",        label: "Envoyé SAP",    className: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" },
+  { value: "rejected",       label: "Rejeté",         className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
+  { value: "deliveryFailed", label: "Échec d'envoi",  className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
 ];
-
-const GROUP_STATUS_BADGE: Record<BusinessStatusGroup, { label: string; variant: "warning" | "success" | "info" | "destructive" | "orange" }> = {
-  toProcess:     { label: "À traiter",   variant: "warning" },
-  onHold:        { label: "En attente",  variant: "orange" },
-  processed:     { label: "Traité",       variant: "success" },
-  sentSap:       { label: "Envoyé SAP",  variant: "success" },
-  transferred:   { label: "Transféré",    variant: "info" },
-  rejected:      { label: "Rejeté",       variant: "destructive" },
-  deliveryFailed:{ label: "Échec d'envoi",variant: "destructive" },
-};
-
-function statusToFilterGroup(status: OrderStatus): BusinessStatusGroup {
-  if (status === "Revue requise" || status === "À revoir" || status === "À vérifier" || status === "Bloqué" || status === "À traiter") {
-    return "toProcess";
-  }
-  if (status === "En attente") return "onHold";
-  if (status === "Généré" || status === "Validé") return "processed";
-  if (status === "Envoyé SAP") return "sentSap";
-  if (status === "Transféré") return "transferred";
-  if (status === "Rejeté" || status === "Doublon") return "rejected";
-  if (status === "SFTP échoué" || status === "Échec SAP") return "deliveryFailed";
-  return "toProcess";
-}
 
 export function RevueListPage() {
   const navigate = useNavigate();
@@ -120,7 +100,7 @@ export function RevueListPage() {
     () => Object.fromEntries(gestionnaires.map(u => [u.username.toLowerCase(), u.displayName])),
     [gestionnaires]
   );
-  const getDisplayName = (username: string | undefined) => {
+  const getDisplayName = (username?: string | null) => {
     if (!username) return null;
     const lc = username.toLowerCase();
     if (lc === "operator" || lc === "system") return "Système";
@@ -150,7 +130,7 @@ export function RevueListPage() {
       case "processedBy":
         return (row.processedBy || "").toLowerCase();
       case "status":
-        return statusToFilterGroup(row.status);
+        return businessStatusLabel(statusToBusinessGroup(row.status as OrderStatus));
       case "issue":
         return row.issue || "";
       case "clientName":
@@ -169,7 +149,7 @@ export function RevueListPage() {
         [row.fileName, row.clientName, row.issue, row.status, row.processedBy, row.date, row.createdAt, row.processedAt]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
-      const matchesStatus = statusFilter === "all" || statusToFilterGroup(row.status) === statusFilter;
+      const matchesStatus = statusFilter === "all" || statusToBusinessGroup(row.status as OrderStatus) === statusFilter;
       // "Mes dossiers" filter — match if user is assignee OR processor
       const rowAssignee = row.assignedTo?.toLowerCase() || "";
       const rowProcessor = (row.processedBy || "").toLowerCase();
@@ -435,24 +415,14 @@ export function RevueListPage() {
                       {row.processedAt ? formatDateTime(row.processedAt, displayTimeZone) : <span className="text-muted-foreground">—</span>}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].variant}>
-                        {GROUP_STATUS_BADGE[statusToFilterGroup(row.status as OrderStatus)].label}
+                      <Badge variant={businessStatusVariant(statusToBusinessGroup(row.status as OrderStatus))}>
+                        {businessStatusLabel(statusToBusinessGroup(row.status as OrderStatus))}
                       </Badge>
                     </TableCell>
                     <TableCell className="max-w-[200px] text-xs text-muted-foreground">
-                      {row.status === "En attente" && row.holdReason && (
-                        <span className="text-orange-700">{row.holdReason}</span>
-                      )}
-                      {row.status === "Rejeté" && row.issue && (
-                        <span className="text-destructive">{row.issue}</span>
-                      )}
-                      {row.status === "Transféré" && (
-                        <span className="text-sky-700">
-                          Transféré par {getDisplayName(row.transferredFrom) || row.transferredFrom || "—"}
-                          {row.transferNote ? ` — ${row.transferNote}` : ""}
-                        </span>
-                      )}
-                      {!["En attente", "Rejeté", "Transféré"].includes(row.status) && (
+                      {workflowMotif(row, getDisplayName) ? (
+                        <span className="text-sky-700">{workflowMotif(row, getDisplayName)}</span>
+                      ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>

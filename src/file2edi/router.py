@@ -1449,7 +1449,7 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None, inc
                 rows_by_id[conv_id] = conv_row
     except Exception:
         pass
-    _DONE_STATUSES = {"Généré", "Transféré", "Envoyé SAP"}
+    _DONE_STATUSES = {"Envoyé SAP"}
     rows = list(rows_by_id.values()) if include_done else [r for r in rows_by_id.values() if r.get("status") not in _DONE_STATUSES]
     rows.sort(key=_row_sort_timestamp, reverse=True)
     return rows[:200]
