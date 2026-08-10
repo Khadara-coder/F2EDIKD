@@ -1816,75 +1816,117 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
         n8n_cfg = {}
 
     if n8n_cfg.get("enabled") and str(n8n_cfg.get("webhookUrl") or "").strip() and not from_repo:
-        from src.masterdata_n8n import trigger_masterdata_sync_workflow
-
-        actor = "operator"
-        try:
-            actor = _resolve_actor(req) or "operator"
-        except Exception:
-            actor = "operator"
-
-        save_audit_event(
-            "__masterdata__",
-            "masterdata_sync_attempted",
-            actor,
-            {"source": "n8n_webhook", "manual": True, "webhookUrl": n8n_cfg.get("webhookUrl")},
-        )
-        try:
-            n8n_payload = trigger_masterdata_sync_workflow(
-                n8n_cfg,
-                actor=actor,
-                reason="manual_ui",
+        webhook_url = str(n8n_cfg.get("webhookUrl") or "").strip()
+        # Local Docker webhook is often unreachable outside compose — use Git sync instead.
+        if "host.docker.internal" in webhook_url and (os.environ.get("MASTERDATA_REPO_URL") or "").strip():
+            log.info(
+                "masterdata sync: skip local n8n webhook (%s), using git repo sync",
+                webhook_url,
             )
-        except Exception as exc:
-            err = str(exc)[:400]
-            log.warning("masterdata sync (n8n) failed: %s", err)
+            from_repo = True
+        else:
+            from src.masterdata_n8n import trigger_masterdata_sync_workflow
+
+            actor = "operator"
+            try:
+                actor = _resolve_actor(req) or "operator"
+            except Exception:
+                actor = "operator"
+
             save_audit_event(
                 "__masterdata__",
-                "masterdata_sync_failed",
+                "masterdata_sync_attempted",
                 actor,
-                {"source": "n8n_webhook", "error": err},
+                {"source": "n8n_webhook", "manual": True, "webhookUrl": n8n_cfg.get("webhookUrl")},
             )
+            try:
+                n8n_payload = trigger_masterdata_sync_workflow(
+                    n8n_cfg,
+                    actor=actor,
+                    reason="manual_ui",
+                )
+            except Exception as exc:
+                err = str(exc)[:400]
+                log.warning("masterdata sync (n8n) failed: %s", err)
+                save_audit_event(
+                    "__masterdata__",
+                    "masterdata_sync_failed",
+                    actor,
+                    {"source": "n8n_webhook", "error": err},
+                )
+                # Local / no-n8n: try Git snapshot sync so "Dernière synchronisation" advances.
+                repo_payload = None
+                repo_error = None
+                try:
+                    from src.masterdata_autosync import run_repo_sync
+
+                    repo_payload = run_repo_sync(
+                        target_dir=MASTER_DATA_RUNTIME,
+                        notify_api_url="",
+                    )
+                except Exception as repo_exc:
+                    repo_error = str(repo_exc)[:300]
+                    log.warning("masterdata sync git fallback after n8n failure: %s", repo_error)
+
+                now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+                if repo_payload is not None:
+                    _mdr.bump_sync_metadata(
+                        synced_at_utc=str(repo_payload.get("synced_at_utc") or now_iso),
+                        commit=str(repo_payload.get("commit") or "") or None,
+                        source="api_sync_n8n_fallback_git",
+                        files=repo_payload.get("files") if isinstance(repo_payload.get("files"), dict) else None,
+                        repo_url=str(repo_payload.get("repo_url") or "") or None,
+                        branch=str(repo_payload.get("branch") or "") or None,
+                    )
+                else:
+                    _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_fallback_reload")
+                for key in _MD_FILES:
+                    _MD_LAST_SYNC[key] = now_iso
+                _apply_masterdata_sync_metadata_to_cache_state()
+                _load_masterdata_cache()
+                return {
+                    "synced": len(repo_payload.get("files") or {}) if isinstance(repo_payload, dict) else 0,
+                    "failed": 0 if repo_payload is not None else 1,
+                    "files": [],
+                    "cache_reloaded": True,
+                    "source": "git" if repo_payload is not None else "n8n",
+                    "fallback": True,
+                    "sync": _masterdata_sync_freshness(),
+                    "message": (
+                        f"Échec n8n — sync git OK (commit {str((repo_payload or {}).get('commit') or '')[:12]})"
+                        if repo_payload is not None
+                        else f"Échec déclenchement n8n — cache local rechargé ({err}"
+                        + (f" ; git: {repo_error}" if repo_error else "")
+                        + ")"
+                    ),
+                }
+
             now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
             for key in _MD_FILES:
                 _MD_LAST_SYNC[key] = now_iso
+            # n8n workflow updates files asynchronously; stamp UI now, refresh again on reload-cache.
+            _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_trigger")
             _apply_masterdata_sync_metadata_to_cache_state()
             _load_masterdata_cache()
+            save_audit_event(
+                "__masterdata__",
+                "masterdata_sync_succeeded",
+                actor,
+                {"source": "n8n_webhook", "result": n8n_payload},
+            )
+            message = ""
+            if isinstance(n8n_payload, dict):
+                message = str(n8n_payload.get("message") or n8n_payload.get("status") or "")
             return {
-                "synced": 0,
-                "failed": 1,
-                "files": [],
+                "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
+                "failed": 0,
+                "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
                 "cache_reloaded": True,
                 "source": "n8n",
-                "fallback": True,
+                "n8n": n8n_payload,
                 "sync": _masterdata_sync_freshness(),
-                "message": f"Échec déclenchement n8n — cache local rechargé ({err})",
+                "message": message or "Workflow n8n masterdata déclenché et terminé",
             }
-
-        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        for key in _MD_FILES:
-            _MD_LAST_SYNC[key] = now_iso
-        _apply_masterdata_sync_metadata_to_cache_state()
-        _load_masterdata_cache()
-        save_audit_event(
-            "__masterdata__",
-            "masterdata_sync_succeeded",
-            actor,
-            {"source": "n8n_webhook", "result": n8n_payload},
-        )
-        message = ""
-        if isinstance(n8n_payload, dict):
-            message = str(n8n_payload.get("message") or n8n_payload.get("status") or "")
-        return {
-            "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
-            "failed": 0,
-            "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
-            "cache_reloaded": True,
-            "source": "n8n",
-            "n8n": n8n_payload,
-            "sync": _masterdata_sync_freshness(),
-            "message": message or "Workflow n8n masterdata déclenché et terminé",
-        }
 
     if from_repo:
         from src.masterdata_autosync import run_repo_sync
@@ -1909,6 +1951,17 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
         now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         for key in _MD_FILES:
             _MD_LAST_SYNC[key] = now_iso
+        if repo_payload is not None:
+            _mdr.bump_sync_metadata(
+                synced_at_utc=str(repo_payload.get("synced_at_utc") or now_iso),
+                commit=str(repo_payload.get("commit") or "") or None,
+                source="api_sync_git",
+                files=repo_payload.get("files") if isinstance(repo_payload.get("files"), dict) else None,
+                repo_url=str(repo_payload.get("repo_url") or "") or None,
+                branch=str(repo_payload.get("branch") or "") or None,
+            )
+        else:
+            _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_git_reload_fallback")
         _apply_masterdata_sync_metadata_to_cache_state()
         _load_masterdata_cache()
         md_sync = _masterdata_sync_freshness()
@@ -1974,6 +2027,7 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
         for key, fname in _MD_FILES.items():
             if fname in ok_files:
                 _MD_LAST_SYNC[key] = now_iso
+        _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_local_copy")
         _apply_masterdata_sync_metadata_to_cache_state()
         _load_masterdata_cache()
         save_audit_event("__masterdata__", "masterdata_sync_succeeded", "system",
@@ -4067,6 +4121,8 @@ def api_md_reload_cache():
     Called by the host daily sync job after publishing CSVs into MASTERDATA_RUNTIME_DIR.
     Then reconciles Envoyé SAP orders against DB_Salesorder for SAP feedback.
     """
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_reload_cache")
     _apply_masterdata_sync_metadata_to_cache_state()
     _load_masterdata_cache()
     stats = _masterdata_stats()

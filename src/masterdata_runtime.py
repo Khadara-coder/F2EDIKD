@@ -404,6 +404,10 @@ def read_sync_metadata() -> dict:
 def sync_freshness() -> dict:
     meta = read_sync_metadata()
     sync_at = str(meta.get("synced_at_utc") or meta.get("synced_at") or "").strip()
+    mem_sync = max(MD_LAST_SYNC.values()) if MD_LAST_SYNC else ""
+    # Prefer the newest timestamp between metadata file and in-memory sync markers.
+    if mem_sync and (not sync_at or str(mem_sync) > str(sync_at)):
+        sync_at = str(mem_sync)
     stale_hours = float(_CFG.get("stale_hours") or 25)
     age_hours: float | None = None
     stale = None
@@ -437,6 +441,42 @@ def sync_freshness() -> dict:
         "files": meta.get("files") if isinstance(meta.get("files"), dict) else {},
         "metadata_path": meta.get("_metadata_path"),
     }
+
+
+def bump_sync_metadata(
+    *,
+    synced_at_utc: str | None = None,
+    commit: str | None = None,
+    source: str | None = None,
+    files: dict | None = None,
+    repo_url: str | None = None,
+    branch: str | None = None,
+) -> dict:
+    """Update ``.masterdata_sync_metadata.json`` so the UI last-sync stamp advances."""
+    meta = dict(read_sync_metadata() or {})
+    meta.pop("_metadata_path", None)
+    now = (synced_at_utc or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")).strip()
+    meta["synced_at_utc"] = now
+    if commit:
+        meta["commit"] = str(commit)
+    if source:
+        meta["sync_runner"] = str(source)
+    if files is not None:
+        meta["files"] = files
+    if repo_url:
+        meta["repo_url"] = str(repo_url)
+    if branch:
+        meta["branch"] = str(branch)
+
+    path = runtime_dir() / str(_CFG.get("metadata_filename") or ".masterdata_sync_metadata.json")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(meta, indent=2, ensure_ascii=True) + "\n", encoding="utf-8")
+    tmp.replace(path)
+
+    for key in MD_FILES:
+        MD_LAST_SYNC[key] = now
+    return {**meta, "_metadata_path": str(path)}
 
 
 def apply_sync_metadata_to_cache_state() -> None:
