@@ -125,7 +125,11 @@ def _parse_custom_headers(raw: str) -> dict[str, str]:
 
 
 def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
-    """Apply SFTP settings to runtime env used by legacy send/test helpers."""
+    """Apply SFTP settings to runtime env used by legacy send/test helpers.
+
+    Non-empty settings override env. Empty settings never wipe values already
+    provided by ``.env.local`` / process environment.
+    """
     if not isinstance(settings_payload, dict):
         return
     sftp = settings_payload.get("sftpConfig")
@@ -138,25 +142,22 @@ def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
 
     if host:
         os.environ["SFTP_HOST"] = host
-    else:
-        os.environ.pop("SFTP_HOST", None)
 
     if username:
         os.environ["SFTP_USERNAME"] = username
-    else:
-        os.environ.pop("SFTP_USERNAME", None)
 
     if remote:
         os.environ["SFTP_REMOTE_DIR"] = remote
-    else:
-        os.environ.pop("SFTP_REMOTE_DIR", None)
 
-    try:
-        port = int(sftp.get("port") or 22)
-    except (TypeError, ValueError):
-        port = 22
-    os.environ["SFTP_PORT"] = str(max(1, min(65535, port)))
-
+    raw_port = sftp.get("port")
+    if raw_port is not None and str(raw_port).strip() != "":
+        try:
+            port = int(raw_port)
+        except (TypeError, ValueError):
+            port = 22
+        os.environ["SFTP_PORT"] = str(max(1, min(65535, port)))
+    elif host:
+        os.environ["SFTP_PORT"] = "22"
 
 def create_router() -> APIRouter:
     router = APIRouter(tags=["file2edi"])
@@ -968,7 +969,7 @@ def create_router() -> APIRouter:
             persisted = get_store().load_app_settings()
             md = masterdata_stats() or {}
             csv_rows = int((md.get("customers") or {}).get("rows", 0) or 0)
-            return {
+            result = {
                 "ediProfile": "ELM_STANDARD",
                 "standard": "UN/EDIFACT",
                 "version": "D.96A",
@@ -1014,6 +1015,19 @@ def create_router() -> APIRouter:
                 "security": persisted.get("security", _default_settings().get("security", {})),
                 "options": persisted.get("options", _default_settings().get("options", {})),
             }
+            # Overlay process env (.env.local) when UI settings left host empty.
+            sftp_out = result.get("sftpConfig") or {}
+            if not str(sftp_out.get("host") or "").strip() and (os.environ.get("SFTP_HOST") or "").strip():
+                result["sftpConfig"] = {
+                    **sftp_out,
+                    "enabled": True,
+                    "host": (os.environ.get("SFTP_HOST") or "").strip(),
+                    "port": int(os.environ.get("SFTP_PORT") or sftp_out.get("port") or 22),
+                    "username": (os.environ.get("SFTP_USERNAME") or "").strip() or sftp_out.get("username") or "",
+                    "remotePath": (os.environ.get("SFTP_REMOTE_DIR") or "").strip() or sftp_out.get("remotePath") or "",
+                    "hasPassword": bool(os.environ.get("SFTP_PASSWORD", "")),
+                }
+            return result
         except Exception:
             return _default_settings()
 
