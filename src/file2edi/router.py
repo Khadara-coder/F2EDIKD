@@ -5,7 +5,7 @@ import json
 import os
 import re
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Body, File, HTTPException, Request, UploadFile
@@ -577,7 +577,7 @@ def create_router() -> APIRouter:
                 pass
         if not review:
             raise HTTPException(404, "Commande introuvable")
-        return review
+        return _with_sap_resend_cooldown(review)
 
     def _serve_order_pdf(order_id: str):
         store = get_store()
@@ -745,10 +745,20 @@ def create_router() -> APIRouter:
 
         try:
             force_resend = bool((payload or {}).get("force"))
+            ignore_cooldown = bool((payload or {}).get("ignoreCooldown"))
             already_sent = False
+            cooldown = {
+                "active": False,
+                "remainingSeconds": 0,
+                "cooldownSeconds": _sap_resend_cooldown_seconds(),
+                "resendAvailableAt": None,
+            }
             try:
                 review = store.load_order_review(order_id) or {}
-                already_sent = _order_sent_to_sap(review.get("order") or {})
+                order_meta = review.get("order") or {}
+                already_sent = _order_sent_to_sap(order_meta)
+                if already_sent:
+                    cooldown = _sap_resend_cooldown_info(order_meta)
             except Exception:
                 already_sent = False
             if already_sent:
@@ -756,13 +766,35 @@ def create_router() -> APIRouter:
                     return {
                         "success": False,
                         "alreadySent": True,
+                        "cooldownActive": cooldown["active"],
+                        "remainingSeconds": cooldown["remainingSeconds"],
+                        "cooldownSeconds": cooldown["cooldownSeconds"],
+                        "resendAvailableAt": cooldown["resendAvailableAt"],
                         "message": "Cette commande a déjà été envoyée vers SAP.",
+                    }
+                if cooldown["active"] and not ignore_cooldown:
+                    return {
+                        "success": False,
+                        "alreadySent": True,
+                        "requiresConfirmation": True,
+                        "cooldownActive": True,
+                        "remainingSeconds": cooldown["remainingSeconds"],
+                        "cooldownSeconds": cooldown["cooldownSeconds"],
+                        "resendAvailableAt": cooldown["resendAvailableAt"],
+                        "message": (
+                            f"Renvoi possible dans {_format_cooldown_mmss(int(cooldown['remainingSeconds']))}. "
+                            "Un administrateur peut ignorer ce délai."
+                        ),
                     }
                 if not force_resend:
                     return {
                         "success": False,
                         "alreadySent": True,
                         "requiresConfirmation": True,
+                        "cooldownActive": False,
+                        "remainingSeconds": 0,
+                        "cooldownSeconds": cooldown["cooldownSeconds"],
+                        "resendAvailableAt": cooldown["resendAvailableAt"],
                         "message": "Cette commande a déjà été envoyée vers SAP. Confirmez pour renvoyer.",
                     }
 
@@ -1521,6 +1553,46 @@ def _order_sent_to_sap(order: dict) -> bool:
     if status == "Envoyé SAP":
         return True
     return bool(str(order.get("sapSentAt") or order.get("sap_sent_at") or "").strip())
+
+
+def _sap_resend_cooldown_seconds() -> int:
+    try:
+        return max(0, int(os.environ.get("SAP_RESEND_COOLDOWN_SECONDS", "300")))
+    except Exception:
+        return 300
+
+
+def _format_cooldown_mmss(seconds: int) -> str:
+    total = max(0, int(seconds))
+    return f"{total // 60}:{total % 60:02d}"
+
+
+def _sap_resend_cooldown_info(order: dict) -> dict:
+    """Server-side cooldown after a successful SAP send (default 5 minutes)."""
+    cooldown = _sap_resend_cooldown_seconds()
+    sap_sent_at = order.get("sapSentAt") or order.get("sap_sent_at")
+    sent_at = _parse_timestamp(str(sap_sent_at) if sap_sent_at else None)
+    if not sent_at or cooldown <= 0:
+        return {
+            "active": False,
+            "remainingSeconds": 0,
+            "cooldownSeconds": cooldown,
+            "resendAvailableAt": None,
+        }
+    available_at = sent_at + timedelta(seconds=cooldown)
+    remaining = max(0, int((available_at - datetime.now(timezone.utc)).total_seconds()))
+    return {
+        "active": remaining > 0,
+        "remainingSeconds": remaining,
+        "cooldownSeconds": cooldown,
+        "resendAvailableAt": available_at.isoformat(),
+    }
+
+
+def _with_sap_resend_cooldown(review: dict) -> dict:
+    order = dict(review.get("order") or {})
+    order["sapResendCooldown"] = _sap_resend_cooldown_info(order)
+    return {**review, "order": order}
 
 
 def _require_mutable_order(order_id: str) -> dict:

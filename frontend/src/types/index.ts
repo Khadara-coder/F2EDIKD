@@ -228,6 +228,12 @@ export interface Order {
   rejectedBy?: string;
   sapSentAt?: string;
   sapSentBy?: string;
+  sapResendCooldown?: {
+    active: boolean;
+    remainingSeconds: number;
+    cooldownSeconds: number;
+    resendAvailableAt?: string | null;
+  };
   manuallyEditedFields?: string[];
 }
 

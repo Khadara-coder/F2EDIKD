@@ -254,8 +254,17 @@ export const api = {
       { method: "POST" },
     ),
 
-  sendToSap: (orderId: string, payload?: { force?: boolean }) =>
-    request<{ success: boolean; message?: string; alreadySent?: boolean; requiresConfirmation?: boolean }>(`/orders/${orderId}/send-sap`, {
+  sendToSap: (orderId: string, payload?: { force?: boolean; ignoreCooldown?: boolean }) =>
+    request<{
+      success: boolean;
+      message?: string;
+      alreadySent?: boolean;
+      requiresConfirmation?: boolean;
+      cooldownActive?: boolean;
+      remainingSeconds?: number;
+      cooldownSeconds?: number;
+      resendAvailableAt?: string | null;
+    }>(`/orders/${orderId}/send-sap`, {
       method: "POST",
       body: payload ? JSON.stringify(payload) : undefined,
     }),

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
 import { Download, Send, PauseCircle, UserCheck, XCircle, Save } from "lucide-react";
 import { api } from "@/lib/api";
@@ -24,6 +24,34 @@ import { formatCurrency, formatDate, formatDateTime, downloadTextFile } from "@/
 import { collectReviewBlockers, countPendingAnomalies, isAnomalyPending } from "@/lib/reviewValidation";
 import type { GestionnaireUser } from "@/types";
 
+function formatCooldownMmSs(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function useSapResendCooldown(sapSentAt?: string, cooldownSeconds = 300): number {
+  const [remaining, setRemaining] = useState(0);
+  useEffect(() => {
+    if (!sapSentAt || cooldownSeconds <= 0) {
+      setRemaining(0);
+      return;
+    }
+    const tick = () => {
+      const sent = new Date(sapSentAt).getTime();
+      if (Number.isNaN(sent)) {
+        setRemaining(0);
+        return;
+      }
+      const availableAt = sent + cooldownSeconds * 1000;
+      setRemaining(Math.max(0, Math.ceil((availableAt - Date.now()) / 1000)));
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [sapSentAt, cooldownSeconds]);
+  return remaining;
+}
+
 export function RevuePage() {
   const { orderId } = useParams();
   if (!orderId) {
@@ -32,6 +60,8 @@ export function RevuePage() {
   const queryClient = useQueryClient();
   const meQuery = useCurrentUser();
   const { data, isLoading, isError, error, refetch } = useOrderReview(orderId);
+  const cooldownSeconds = data?.order?.sapResendCooldown?.cooldownSeconds ?? 300;
+  const cooldownRemaining = useSapResendCooldown(data?.order?.sapSentAt, cooldownSeconds);
   const [infoDialog, setInfoDialog] = useState<{ title: string; message: string } | null>(null);
   const [confirmSendOpen, setConfirmSendOpen] = useState(false);
   const [confirmResendOpen, setConfirmResendOpen] = useState(false);
@@ -98,18 +128,14 @@ export function RevuePage() {
     mutationFn: async () => {
       const result = await api.generateEdifact(orderId);
       if (!result.success) {
-        const detail = result.errors?.length
-          ? result.errors.join("\n")
-          : result.message ?? "Génération échouée";
-        throw new Error(detail);
-      }
-      if (!result.content || !result.fileName) {
-        throw new Error("Contenu EDIFACT indisponible après génération");
+        throw new Error(result.errors?.join("\n") || result.message || "Génération échouée");
       }
       return result;
     },
     onSuccess: (result) => {
-      downloadTextFile(result.content!, result.fileName!);
+      if (result.content && result.fileName) {
+        downloadTextFile(result.content, result.fileName);
+      }
       invalidate();
     },
     onError: (err) => {
@@ -121,7 +147,7 @@ export function RevuePage() {
   });
 
   const sendToSap = useMutation({
-    mutationFn: (payload?: { force?: boolean }) => api.sendToSap(orderId, payload),
+    mutationFn: (payload?: { force?: boolean; ignoreCooldown?: boolean }) => api.sendToSap(orderId, payload),
   });
 
   // Users list for transfer
@@ -285,13 +311,23 @@ export function RevuePage() {
         });
         return;
       }
-      const forced = await sendToSap.mutateAsync({ force: true });
+      const forced = await sendToSap.mutateAsync({
+        force: true,
+        ignoreCooldown: cooldownRemaining > 0,
+      });
       if (forced.success) {
         setInfoDialog({
           title: "Succès",
           message: forced.message || "Commande renvoyée vers SAP",
         });
         invalidate();
+        return;
+      }
+      if (forced.cooldownActive) {
+        setInfoDialog({
+          title: "Délai de renvoi actif",
+          message: forced.message || `Renvoi possible dans ${formatCooldownMmSs(forced.remainingSeconds || cooldownRemaining)}.`,
+        });
         return;
       }
       setInfoDialog({
@@ -333,10 +369,18 @@ export function RevuePage() {
   const isRejected = order.status === "Rejeté";
   const isOnHold = order.status === "En attente";
   const isSentToSap = order.status === "Envoyé SAP" || Boolean(order.sapSentAt);
+  const cooldownActive = isSentToSap && cooldownRemaining > 0;
   const workflowLocked = isRejected || isSentToSap;
   const canSendToSap = !isRejected && !edifactBusy && (
     (!isSentToSap && canValidate) || (isSentToSap && isAdmin)
   );
+  const sendSapLabel = !isSentToSap
+    ? "Envoyer vers SAP"
+    : !isAdmin
+      ? "Envoyé vers SAP"
+      : cooldownActive
+        ? `Renvoyer (${formatCooldownMmSs(cooldownRemaining)})`
+        : "Renvoyer vers SAP";
 
   return (
     <>
@@ -413,7 +457,7 @@ export function RevuePage() {
               onClick={handleSendClick}
               disabled={!canSendToSap}
             >
-              <Send className="h-4 w-4" /> {isSentToSap && isAdmin ? "Renvoyer vers SAP" : "Envoyer vers SAP"}
+              <Send className="h-4 w-4" /> {sendSapLabel}
             </Button>
           </div>
         }
@@ -437,6 +481,11 @@ export function RevuePage() {
             Envoyé vers SAP
             {order.sapSentAt ? ` le ${formatDateTime(order.sapSentAt)}` : ""}
             {order.sapSentBy ? ` par ${order.sapSentBy}` : ""}
+          </Badge>
+        )}
+        {cooldownActive && (
+          <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
+            Renvoi possible dans {formatCooldownMmSs(cooldownRemaining)}
           </Badge>
         )}
       </div>
@@ -638,7 +687,7 @@ export function RevuePage() {
             onClick={handleSendClick}
             disabled={!canSendToSap}
           >
-            <Send className="h-4 w-4" /> {isSentToSap && isAdmin ? "Renvoyer vers SAP" : "Envoyer vers SAP"}
+            <Send className="h-4 w-4" /> {sendSapLabel}
           </Button>
         </div>
       </div>
@@ -673,12 +722,21 @@ export function RevuePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <Card className="w-full max-w-md">
             <CardHeader>
-              <CardTitle className="text-base">Commande déjà envoyée</CardTitle>
+              <CardTitle className="text-base">
+                {cooldownActive ? "Délai de renvoi actif" : "Commande déjà envoyée"}
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm">
-                Cette commande a déjà été envoyée vers SAP. En tant qu&apos;administrateur, vous pouvez la renvoyer.
-              </p>
+              {cooldownActive ? (
+                <p className="text-sm">
+                  Renvoi possible dans {formatCooldownMmSs(cooldownRemaining)}.
+                  En tant qu&apos;administrateur, vous pouvez ignorer ce délai et renvoyer maintenant.
+                </p>
+              ) : (
+                <p className="text-sm">
+                  Cette commande a déjà été envoyée vers SAP. En tant qu&apos;administrateur, vous pouvez la renvoyer.
+                </p>
+              )}
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setConfirmResendOpen(false)}>
                   Annuler
@@ -689,7 +747,7 @@ export function RevuePage() {
                     await handleForceResendToSap();
                   }}
                 >
-                  Renvoyer
+                  {cooldownActive ? "Ignorer le délai et renvoyer" : "Renvoyer"}
                 </Button>
               </div>
             </CardContent>
