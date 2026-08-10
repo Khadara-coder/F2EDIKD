@@ -42,7 +42,7 @@ def _inject_resubmission_anomaly(store, order_id: str, review: dict) -> None:
             "anomalyId": f"resubmit-{order_id[:12]}",
             "orderId": order_id,
             "severity": "info",
-            "fieldName": "resubmission",
+            "fieldName": "RESUBMISSION_DETECTED",
             "message": (
                 f"Ce PDF a déjà été soumis (première soumission: {prev_created or '—'}). "
                 f"État précédent: {prev_status} — {prev_lines} ligne(s) — {prev_total:,.2f} €. "

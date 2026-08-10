@@ -244,10 +244,11 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
         seen_anomaly_ids.add(aid)
         anomalies.append(entry)
 
+    from src.rejection_catalog import format_rejection_message, normalize_code
+
     for i, d in enumerate(rej.get("details") or []):
         sev = "error" if d.get("severity") == "blocking" else "warning"
-        code = d.get("code") or f"rej-{i}"
-        from src.rejection_catalog import format_rejection_message
+        code = normalize_code(str(d.get("code") or f"rej-{i}"))
         message = format_rejection_message(
             code,
             d.get("details") if isinstance(d.get("details"), dict) else None,
@@ -257,7 +258,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "anomalyId": f"{order_id}-{code}",
             "orderId": order_id,
             "severity": sev,
-            "fieldName": d.get("code"),
+            "fieldName": code,
             "message": message,
             "status": "Bloquante" if sev == "error" else "Ouverte",
             "createdAt": _now(),
@@ -267,8 +268,8 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "anomalyId": f"an-date-{order_id}",
             "orderId": order_id,
             "severity": "error",
-            "fieldName": "orderDate",
-            "message": "La date de commande extraite n'est pas valide",
+            "fieldName": "ORDER_DATE_INVALID",
+            "message": format_rejection_message("ORDER_DATE_INVALID"),
             "status": "Ouverte",
             "createdAt": _now(),
         })
@@ -279,9 +280,10 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 "orderId": order_id,
                 "lineId": ln.get("lineId"),
                 "severity": "warning",
-                "fieldName": "deliveryDate",
+                "fieldName": "DELIVERY_DATE_INVALID",
                 "message": (
-                    f"Ligne {ln.get('lineNumber')} : date de livraison extraite invalide "
+                    f"Ligne {ln.get('lineNumber')} : "
+                    f"{format_rejection_message('DELIVERY_DATE_INVALID')} "
                     f"({ln.get('deliveryDate')})"
                 ),
                 "status": "Ouverte",
@@ -355,7 +357,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 "orderId": order_id,
                 "lineId": ln.get("lineId"),
                 "severity": severity,
-                "fieldName": "boschArticle",
+                "fieldName": "MATERIAL_STATUS_INVALID",
                 "message": msg,
                 "status": "Bloquante" if severity == "error" else "Ouverte",
                 "createdAt": _now(),

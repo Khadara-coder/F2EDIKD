@@ -127,7 +127,7 @@ def _check_po_number(document: dict) -> list[dict]:
     po = document.get("Numero de commande", "")
     if not po or po == "-" or po.strip() == "":
         return [{
-            "code": "PO_NUMBER_MISSING",
+            "code": "ORDER_KEY_MISSING",
             "message": format_rejection_message("ORDER_KEY_MISSING"),
             "severity": "blocking",
             "details": {},

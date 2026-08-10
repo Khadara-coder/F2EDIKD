@@ -18,6 +18,23 @@ class RejectionEntry(TypedDict):
     message_en: str
 
 
+# Legacy / alternate codes → canonical catalog key
+CODE_ALIASES: dict[str, str] = {
+    "PO_NUMBER_MISSING": "ORDER_KEY_MISSING",
+    "ORDER_NUMBER_MISSING": "ORDER_KEY_MISSING",
+    "NO_ORDER_LINES": "NO_LINE_ITEMS",
+    "ORDER_DATE_MISSING": "ORDER_DATE_INVALID",
+    "INVALID_QUANTITY": "ARTICLE_QUANTITY_INVALID",
+    "SHIPTO_MISSING": "SHIPTO_NO_STRONG_MATCH",
+}
+
+
+def normalize_code(code: str) -> str:
+    """Resolve legacy aliases to the canonical catalog code."""
+    raw = (code or "").strip()
+    return CODE_ALIASES.get(raw, raw)
+
+
 REJECTION_CATALOG: dict[str, RejectionEntry] = {
     "PDF_PARSE_FAILURE": {
         "severity": "BLOCKER",
@@ -42,6 +59,62 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "manual_review_required": True,
         "message_fr": "Le numéro de commande client est manquant.",
         "message_en": "The customer purchase order number is missing.",
+    },
+    "ORDER_DATE_INVALID": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
+        "manual_review_required": True,
+        "message_fr": "La date de commande est manquante ou invalide.",
+        "message_en": "The order date is missing or invalid.",
+    },
+    "DELIVERY_DATE_INVALID": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
+        "manual_review_required": True,
+        "message_fr": "Une date de livraison de ligne est manquante ou invalide.",
+        "message_en": "A line delivery date is missing or invalid.",
+    },
+    "ORDER_CHANGE": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "REJECTED",
+        "retry_allowed": False,
+        "manual_review_required": True,
+        "message_fr": "Le document est une modification de commande, pas un bon de commande initial.",
+        "message_en": "The document is an order change, not an initial purchase order.",
+    },
+    "MASTERDATA_MISSING": {
+        "severity": "TECHNICAL",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
+        "manual_review_required": True,
+        "message_fr": "Les données maîtres sont absentes ou vides — synchronisation requise.",
+        "message_en": "Master data is missing or empty — synchronization required.",
+    },
+    "MASTERDATA_SCHEMA_INVALID": {
+        "severity": "TECHNICAL",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
+        "manual_review_required": True,
+        "message_fr": "Le schéma des données maîtres est invalide (colonnes manquantes).",
+        "message_en": "Master data schema is invalid (missing columns).",
+    },
+    "MATERIAL_STATUS_INVALID": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
+        "manual_review_required": True,
+        "message_fr": "Le statut matière bloque la vente (arrêté, remplacement ou introuvable).",
+        "message_en": "Material status blocks sales (discontinued, replacement, or not found).",
+    },
+    "RESUBMISSION_DETECTED": {
+        "severity": "TECHNICAL",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
+        "manual_review_required": True,
+        "message_fr": "Ce PDF a déjà été soumis — la commande est recalculée.",
+        "message_en": "This PDF was already submitted — the order is recalculated.",
     },
     "NO_VALID_ARTICLE": {
         "severity": "BUSINESS_REJECT",
@@ -309,15 +382,35 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
 # Action text shown in rejection emails (French)
 REJECTION_ACTION_TEXT: dict[str, str] = {
     "PDF_PARSE_FAILURE": "Merci de vérifier la lisibilité du PDF ou de déposer un PDF non scanné si disponible.",
+    "NOT_A_PDF": "Merci de déposer un fichier PDF valide.",
     "ORDER_KEY_MISSING": "Merci de renseigner le numéro de commande client.",
+    "ORDER_DATE_INVALID": "Merci de corriger la date de commande (format JJ/MM/AAAA).",
+    "DELIVERY_DATE_INVALID": "Merci de corriger la date de livraison sur la ligne concernée.",
+    "ORDER_CHANGE": "Merci de soumettre un bon de commande initial, pas une modification.",
+    "MASTERDATA_MISSING": "Merci de synchroniser les données maîtres (Clients / Articles) puis de relancer.",
+    "MASTERDATA_SCHEMA_INVALID": "Merci de vérifier le fichier masterdata et de resynchroniser.",
+    "MATERIAL_STATUS_INVALID": "Merci de vérifier le code matière Bosch (statut vente / remplacement).",
+    "RESUBMISSION_DETECTED": "Vérifier si le retraitement est intentionnel avant validation.",
     "NO_VALID_ARTICLE": "Merci de fournir les codes articles Bosch valides ou de corriger les codes client.",
     "CONTRACT_KEYWORD": "Merci de soumettre uniquement des bons de commande, pas des contrats ou devis.",
+    "CONTRACT_BREAK_ADDRESSES_MISSING": "Merci de vérifier l'adresse de livraison dans le document.",
+    "CONTRACT_BREAK_ARTICLES_MISSING": "Merci de vérifier que le bon de commande contient des lignes articles.",
+    "CONTRACT_BREAK_SOLDTO_MISSING": "Merci de vérifier le client (TVA, nom) dans les données maîtres.",
+    "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING": "Merci de vérifier l'adresse de livraison et les partenaires WE/SH.",
     "SOLDTO_NOT_FOUND": "Merci de vérifier la TVA / le client SOLD-TO dans les données maîtres.",
+    "SOLDTO_AMBIGUOUS_MATCH": "Merci de choisir le bon SOLD-TO parmi les candidats proposés.",
     "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": "Merci de vérifier l'adresse de livraison et les données partenaires WE/SH.",
     "SHIPTO_NO_STRONG_MATCH": "Merci de vérifier le code postal ou la ville du lieu de livraison.",
     "SHIPTO_AMBIGUOUS_MATCH": "Merci de choisir le bon SHIP-TO parmi les candidats proposés.",
+    "EDIFACT_MISSING_BGM": "Merci de renseigner la référence de commande avant génération EDIFACT.",
+    "EDIFACT_MISSING_DTM_137": "Merci de corriger la date document avant génération EDIFACT.",
+    "EDIFACT_MISSING_NAD_BY": "Merci de corriger le SOLD-TO / acheteur avant génération EDIFACT.",
     "EDIFACT_MISSING_NAD_DP": "Merci de corriger la résolution SHIP-TO avant génération EDIFACT.",
     "EDIFACT_MISSING_LIN": "Merci de vérifier les lignes articles détectées.",
+    "ARTICLE_QUANTITY_INVALID": "Merci de corriger la quantité sur la ligne concernée.",
+    "UNIT_PRICE_MISSING": "Merci de renseigner le prix unitaire sur la ligne concernée.",
+    "EDIFACT_LINE_INTEGRITY_MISMATCH": "Merci de réconcilier les lignes avant génération EDIFACT.",
+    "EDIFACT_NAD_DP_MISMATCH": "Merci d'aligner le SHIP-TO sélectionné avec NAD+DP.",
     "DUPLICATE_ALREADY_SENT": "Merci de confirmer si la commande doit être retraitée ou ignorée.",
     "DELIVERY_ADDRESS_INVALID": "Merci de vérifier l'adresse de livraison ou de la corriger dans le document.",
     "NO_DELIVERY_ADDRESS": "Merci de vous assurer que l'adresse de livraison est clairement indiquée dans le bon de commande.",
@@ -329,6 +422,7 @@ REJECTION_ACTION_TEXT: dict[str, str] = {
     "QUANTITY_MISSING": "Merci de vérifier les quantités sur chaque ligne article du bon de commande.",
     "PRICE_MISSING": "Merci de vérifier les prix unitaires sur chaque ligne article du bon de commande.",
     "DELIVERY_SFTP_FAILED": "Merci de vérifier la configuration SFTP ou de relancer uniquement l'envoi.",
+    "DELIVERY_EMAIL_FAILED": "Merci de vérifier la configuration email ou de relancer uniquement l'envoi.",
 }
 
 # Required rejection codes (used by tests)
@@ -353,6 +447,55 @@ DEFAULT_REVIEW_ACTIONS: ReviewActions = {
 
 # UI labels + future automatic actions for each rejection code (manual review buttons).
 REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
+    "ORDER_DATE_INVALID": {
+        "button_accept": "Date commande corrigée",
+        "button_reject": "Date commande invalide",
+        "auto_action_accept": "Continuer avec la date saisie",
+        "auto_action_reject": "Mettre en attente de saisie",
+        "mode": "Manuel",
+    },
+    "DELIVERY_DATE_INVALID": {
+        "button_accept": "Date livraison corrigée",
+        "button_reject": "Date livraison invalide",
+        "auto_action_accept": "Continuer avec la date saisie",
+        "auto_action_reject": "Mettre la ligne en attente",
+        "mode": "Manuel",
+    },
+    "ORDER_CHANGE": {
+        "button_accept": "Traiter comme commande initiale",
+        "button_reject": "Ce n'est pas une commande initiale",
+        "auto_action_accept": "Continuer le traitement",
+        "auto_action_reject": "Clôturer comme modification de commande",
+        "mode": "Manuel",
+    },
+    "MASTERDATA_MISSING": {
+        "button_accept": "Masterdata synchronisée, relancer",
+        "button_reject": "Impossible de synchroniser",
+        "auto_action_accept": "Relancer après sync masterdata",
+        "auto_action_reject": "Bloquer la génération",
+        "mode": "Semi-auto",
+    },
+    "MASTERDATA_SCHEMA_INVALID": {
+        "button_accept": "Schéma corrigé, relancer",
+        "button_reject": "Schéma toujours invalide",
+        "auto_action_accept": "Relancer après correction schéma",
+        "auto_action_reject": "Bloquer la génération",
+        "mode": "Semi-auto",
+    },
+    "MATERIAL_STATUS_INVALID": {
+        "button_accept": "Matière acceptée / corrigée",
+        "button_reject": "Rejeter la ligne matière",
+        "auto_action_accept": "Continuer avec la matière validée",
+        "auto_action_reject": "Retirer ou bloquer la ligne",
+        "mode": "Manuel",
+    },
+    "RESUBMISSION_DETECTED": {
+        "button_accept": "Retraitement intentionnel",
+        "button_reject": "Ignorer l'alerte",
+        "auto_action_accept": "Continuer le recalcul",
+        "auto_action_reject": "Clôturer l'alerte de resoumission",
+        "mode": "Manuel",
+    },
     "PDF_PARSE_FAILURE": {
         "button_accept": "PDF relu, relancer l'extraction",
         "button_reject": "Rejeter le fichier",
@@ -603,7 +746,8 @@ REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
 
 def get(code: str) -> RejectionEntry:
     """Return the catalog entry for *code*, or a fallback entry if unknown."""
-    return REJECTION_CATALOG.get(code, {
+    canonical = normalize_code(code)
+    return REJECTION_CATALOG.get(canonical, {
         "severity": "UNKNOWN",
         "business_status": "REJECTED",
         "retry_allowed": False,
@@ -619,6 +763,7 @@ def format_rejection_message(
     fallback: str = "",
 ) -> str:
     """Return a French user-facing message for a rejection code."""
+    code = normalize_code(code)
     entry = get(code)
     base = (entry.get("message_fr") or fallback or code).strip()
     details = details or {}
@@ -671,7 +816,8 @@ def format_rejection_message(
 
 def review_actions(code: str) -> ReviewActions:
     """Return button labels and future auto-actions for a rejection code."""
-    override = REJECTION_REVIEW_ACTIONS.get(code)
+    canonical = normalize_code(code)
+    override = REJECTION_REVIEW_ACTIONS.get(canonical)
     if not override:
         return dict(DEFAULT_REVIEW_ACTIONS)
     return {**DEFAULT_REVIEW_ACTIONS, **override}
@@ -679,6 +825,7 @@ def review_actions(code: str) -> ReviewActions:
 
 def action_text(code: str, lang: str = "fr") -> str:
     """Return the recommended action text for a rejection code."""
+    canonical = normalize_code(code)
     default = "Merci de contacter l'équipe BI pour assistance." if lang == "fr" \
               else "Please contact the BI team for assistance."
-    return REJECTION_ACTION_TEXT.get(code, default)
+    return REJECTION_ACTION_TEXT.get(canonical, default)

@@ -104,23 +104,23 @@ def validate_order_data(order: dict[str, Any]) -> None:
         ValidationError: If any mandatory field is absent or invalid.
     """
     if not order.get("order_number"):
-        raise ValidationError("ORDER_NUMBER_MISSING: No order number found in PDF.")
+        raise ValidationError("ORDER_KEY_MISSING: No order number found in PDF.")
     if not order.get("order_date"):
-        raise ValidationError("ORDER_DATE_MISSING: No order date found in PDF.")
+        raise ValidationError("ORDER_DATE_INVALID: No order date found in PDF.")
     lines = order.get("lines", [])
     if not lines:
-        raise ValidationError("NO_ORDER_LINES: No order lines extracted from PDF.")
+        raise ValidationError("NO_LINE_ITEMS: No order lines extracted from PDF.")
     for idx, line in enumerate(lines, 1):
         qty_raw = line.get("quantity", "")
         try:
             qty = float(str(qty_raw).replace(",", "."))
         except (ValueError, TypeError):
             raise ValidationError(
-                f"INVALID_QUANTITY: Line {idx} has non-numeric quantity: {qty_raw!r}"
+                f"ARTICLE_QUANTITY_INVALID: Line {idx} has non-numeric quantity: {qty_raw!r}"
             )
         if qty <= 0:
             raise ValidationError(
-                f"INVALID_QUANTITY: Line {idx} has non-positive quantity: {qty}"
+                f"ARTICLE_QUANTITY_INVALID: Line {idx} has non-positive quantity: {qty}"
             )
     log.info(
         "Order pre-validation passed: order_number=%s lines=%d",

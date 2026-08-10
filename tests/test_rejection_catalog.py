@@ -28,6 +28,14 @@ REQUIRED_CODES = {
     "ARTICLE_QUANTITY_INVALID", "UNIT_PRICE_MISSING",
     "EDIFACT_LINE_INTEGRITY_MISMATCH", "EDIFACT_NAD_DP_MISMATCH",
     "DUPLICATE_ALREADY_SENT", "DELIVERY_SFTP_FAILED", "DELIVERY_EMAIL_FAILED",
+    # Completeness alignment (2026-08)
+    "ORDER_DATE_INVALID", "DELIVERY_DATE_INVALID", "ORDER_CHANGE",
+    "MASTERDATA_MISSING", "MASTERDATA_SCHEMA_INVALID",
+    "MATERIAL_STATUS_INVALID", "RESUBMISSION_DETECTED",
+    # Esker runtime codes
+    "DELIVERY_ADDRESS_INVALID", "NO_DELIVERY_ADDRESS", "ARTICLE_NOT_FOUND",
+    "PO_NUMBER_DUPLICATE", "CUSTOMER_NOT_DEFINED", "NOT_AN_ORDER",
+    "NO_LINE_ITEMS", "QUANTITY_MISSING", "PRICE_MISSING",
 }
 
 
@@ -108,6 +116,26 @@ def test_po_duplicate_review_buttons():
     actions = rc.review_actions("PO_NUMBER_DUPLICATE")
     assert "nouvelle commande" in actions["button_accept"].lower()
     assert "existe déjà" in actions["button_reject"].lower()
+
+
+def test_code_aliases_resolve_to_canonical():
+    assert rc.normalize_code("PO_NUMBER_MISSING") == "ORDER_KEY_MISSING"
+    assert rc.normalize_code("ORDER_NUMBER_MISSING") == "ORDER_KEY_MISSING"
+    assert rc.normalize_code("NO_ORDER_LINES") == "NO_LINE_ITEMS"
+    assert rc.normalize_code("ORDER_DATE_MISSING") == "ORDER_DATE_INVALID"
+    assert rc.normalize_code("INVALID_QUANTITY") == "ARTICLE_QUANTITY_INVALID"
+    assert rc.normalize_code("SHIPTO_MISSING") == "SHIPTO_NO_STRONG_MATCH"
+    # Alias must inherit canonical entry + buttons
+    entry = rc.get("PO_NUMBER_MISSING")
+    assert entry["message_fr"] == rc.get("ORDER_KEY_MISSING")["message_fr"]
+    actions = rc.review_actions("PO_NUMBER_MISSING")
+    assert actions["button_accept"] == rc.review_actions("ORDER_KEY_MISSING")["button_accept"]
+
+
+def test_action_text_covers_all_catalog_codes():
+    for code in rc.REJECTION_CATALOG:
+        text = rc.action_text(code, lang="fr")
+        assert isinstance(text, str) and len(text) > 5, f"{code} action_text empty"
 
 
 def test_format_rejection_message_po_duplicate_french():

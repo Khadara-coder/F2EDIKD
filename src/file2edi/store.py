@@ -988,10 +988,15 @@ class File2EdiStore:
         }
 
     def _anomaly_to_api(self, anomaly: dict, mapping: dict, order: dict | None = None) -> dict:
-        from src.rejection_catalog import REJECTION_CATALOG, format_rejection_message, review_actions
+        from src.rejection_catalog import (
+            REJECTION_CATALOG,
+            format_rejection_message,
+            normalize_code,
+            review_actions,
+        )
 
         mapped = {mapping.get(k, k): v for k, v in anomaly.items()}
-        code = str(mapped.get("fieldName") or "").strip()
+        code = normalize_code(str(mapped.get("fieldName") or "").strip())
         if code and code in REJECTION_CATALOG:
             details = None
             if code == "PO_NUMBER_DUPLICATE" and order:

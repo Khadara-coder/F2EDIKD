@@ -423,7 +423,7 @@ def build_order_from_extraction(structured: dict) -> tuple[Optional[Order], list
         errors.append("SOLDTO_MISSING")
         return None, errors
     if not shipto or shipto == "-":
-        errors.append("SHIPTO_MISSING")
+        errors.append("SHIPTO_NO_STRONG_MATCH")
         return None, errors
 
     buyer = Party(
