@@ -368,7 +368,11 @@ export function RevuePage() {
   const isAdmin = meQuery.data?.role === "admin";
   const isRejected = order.status === "Rejeté";
   const isOnHold = order.status === "En attente";
-  const isSentToSap = order.status === "Envoyé SAP" || Boolean(order.sapSentAt);
+  const isSentToSap =
+    order.status === "Envoyé SAP"
+    || order.status === "Confirmé SAP"
+    || Boolean(order.sapSentAt);
+  const isConfirmedSap = order.status === "Confirmé SAP" || Boolean(order.sapVbeln);
   const cooldownActive = isSentToSap && cooldownRemaining > 0;
   const workflowLocked = isRejected || isSentToSap;
   const canSendToSap = !isRejected && !edifactBusy && (
@@ -478,12 +482,18 @@ export function RevuePage() {
         )}
         {isSentToSap && (
           <Badge variant="success" className="max-w-xl truncate">
-            Envoyé vers SAP
+            {isConfirmedSap ? "Confirmé SAP" : "Envoyé vers SAP"}
             {order.sapSentAt ? ` le ${formatDateTime(order.sapSentAt)}` : ""}
             {order.sapSentBy ? ` par ${order.sapSentBy}` : ""}
           </Badge>
         )}
-        {cooldownActive && (
+        {isConfirmedSap && order.sapVbeln && (
+          <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
+            SAP {order.sapVbeln}
+            {order.sapConfirmedAt ? ` — ${formatDateTime(order.sapConfirmedAt)}` : ""}
+          </Badge>
+        )}
+        {cooldownActive && !isConfirmedSap && (
           <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
             Renvoi possible dans {formatCooldownMmSs(cooldownRemaining)}
           </Badge>

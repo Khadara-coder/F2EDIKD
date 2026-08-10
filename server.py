@@ -4065,11 +4065,20 @@ def api_md_reload_cache():
     """Force reload of all masterdata caches (Req 13).
 
     Called by the host daily sync job after publishing CSVs into MASTERDATA_RUNTIME_DIR.
+    Then reconciles Envoyé SAP orders against DB_Salesorder for SAP feedback.
     """
     _apply_masterdata_sync_metadata_to_cache_state()
     _load_masterdata_cache()
     stats = _masterdata_stats()
     md_sync = _masterdata_sync_freshness()
+    sap_feedback: dict = {}
+    try:
+        from src.sap_feedback import reconcile_sent_orders_with_sap
+
+        sap_feedback = reconcile_sent_orders_with_sap()
+    except Exception as exc:
+        log.warning("SAP feedback reconcile after masterdata reload failed: %s", exc)
+        sap_feedback = {"ok": False, "error": str(exc)}
     return {
         "status": "ok",
         "sync": md_sync,
@@ -4082,9 +4091,15 @@ def api_md_reload_cache():
             }
             for k, v in stats.items()
         },
+        "sapFeedback": sap_feedback,
         "message": (
             f"Cache rechargé — sync={md_sync.get('status')}"
             + (f" commit={(md_sync.get('commit') or '')[:12]}" if md_sync.get("commit") else "")
+            + (
+                f" — SAP confirmées={sap_feedback.get('confirmed', 0)}"
+                if sap_feedback.get("ok")
+                else ""
+            )
         ),
     }
 

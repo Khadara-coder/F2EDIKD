@@ -869,6 +869,14 @@ def create_router() -> APIRouter:
                 pass
             return {"success": False, "message": f"Échec envoi SFTP: {exc}"}
 
+    @router.post("/orders/reconcile-sap")
+    def reconcile_sap_feedback(req: Request):
+        """Confirm Envoyé SAP orders found in refreshed DB_Salesorder (admin/system)."""
+        ensure_admin(req)
+        from src.sap_feedback import reconcile_sent_orders_with_sap
+
+        return reconcile_sent_orders_with_sap()
+
     @router.get("/orders/{order_id}/edifact")
     def download_edifact(order_id: str):
         export = get_store().get_edifact_export(order_id)
@@ -1501,7 +1509,7 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None, inc
                 rows_by_id[conv_id] = conv_row
     except Exception:
         pass
-    _DONE_STATUSES = {"Envoyé SAP"}
+    _DONE_STATUSES = {"Envoyé SAP", "Confirmé SAP"}
     rows = list(rows_by_id.values()) if include_done else [r for r in rows_by_id.values() if r.get("status") not in _DONE_STATUSES]
     rows.sort(key=_row_sort_timestamp, reverse=True)
     return rows[:200]
@@ -1550,7 +1558,7 @@ def _to_iso_utc(value: str | None) -> str | None:
 
 def _order_sent_to_sap(order: dict) -> bool:
     status = str(order.get("status") or "").strip()
-    if status == "Envoyé SAP":
+    if status in {"Envoyé SAP", "Confirmé SAP"}:
         return True
     return bool(str(order.get("sapSentAt") or order.get("sap_sent_at") or "").strip())
 
@@ -1612,6 +1620,7 @@ def _order_list_item(o: dict) -> dict:
     updated_at = _to_iso_utc(o.get("updated_at"))
     processed_at = _to_iso_utc(o.get("processed_at"))
     sap_sent_at = _to_iso_utc(o.get("sap_sent_at"))
+    sap_confirmed_at = _to_iso_utc(o.get("sap_confirmed_at"))
     return {
         "orderId": o["order_id"],
         "fileName": o["file_name"],
@@ -1622,9 +1631,11 @@ def _order_list_item(o: dict) -> dict:
         "createdAt": created_at,
         "updatedAt": updated_at,
         "status": o.get("status", "À revoir"),
-        "processedAt": sap_sent_at or processed_at,
+        "processedAt": sap_confirmed_at or sap_sent_at or processed_at,
         "sapSentAt": sap_sent_at,
         "sapSentBy": o.get("sap_sent_by") or None,
+        "sapVbeln": o.get("sap_vbeln") or None,
+        "sapConfirmedAt": sap_confirmed_at,
         "processedBy": o.get("processed_by") or o.get("uploaded_by"),
         "assignedTo": o.get("assigned_to"),
         "holdReason": o.get("hold_reason"),
@@ -1640,6 +1651,11 @@ def _issue_label(o: dict) -> str:
     if o.get("rejection_message"):
         return o["rejection_message"]
     status = o.get("status") or ""
+    if status == "Confirmé SAP":
+        vbeln = o.get("sap_vbeln") or ""
+        return f"Confirmé SAP{f' — {vbeln}' if vbeln else ''}"
+    if status == "Envoyé SAP":
+        return "Envoyé SAP — en attente de confirmation"
     if status == "Rejeté":
         return "Commande rejetée par le moteur"
     if status == "Généré":

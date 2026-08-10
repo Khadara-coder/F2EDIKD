@@ -13,6 +13,7 @@ export const orderStatusSchema = z.enum([
   "À traiter",
   "En attente",
   "Envoyé SAP",
+  "Confirmé SAP",
   "Transféré",
   "Échec SAP",
 ]);

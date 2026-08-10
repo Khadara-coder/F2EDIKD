@@ -5,6 +5,7 @@ export type BusinessStatusGroup =
   | "toProcess"
   | "inProgress"
   | "sentSap"
+  | "confirmedSap"
   | "rejected"
   | "deliveryFailed";
 
@@ -33,6 +34,9 @@ export function statusToBusinessGroup(status: OrderStatus): BusinessStatusGroup 
   if (status === "Envoyé SAP") {
     return "sentSap";
   }
+  if (status === "Confirmé SAP") {
+    return "confirmedSap";
+  }
   if (status === "Rejeté" || status === "Doublon") {
     return "rejected";
   }
@@ -50,6 +54,8 @@ export function businessStatusLabel(group: BusinessStatusGroup): string {
       return "En cours";
     case "sentSap":
       return "Envoyé SAP";
+    case "confirmedSap":
+      return "Confirmé SAP";
     case "rejected":
       return "Rejeté";
     case "deliveryFailed":
@@ -67,6 +73,8 @@ export function businessStatusVariant(
       return "info";
     case "sentSap":
       return "success";
+    case "confirmedSap":
+      return "success";
     case "rejected":
       return "destructive";
     case "deliveryFailed":
@@ -82,6 +90,7 @@ const BUSINESS_GROUP_STATUSES: Record<BusinessStatusGroup, OrderStatus[]> = {
   toProcess: ["Revue requise", "À revoir", "À vérifier", "Bloqué", "À traiter"],
   inProgress: ["En attente", "Transféré", "Généré", "Validé"],
   sentSap: ["Envoyé SAP"],
+  confirmedSap: ["Confirmé SAP"],
   rejected: ["Rejeté", "Doublon"],
   deliveryFailed: ["SFTP échoué", "Échec SAP"],
 };
@@ -92,7 +101,7 @@ export function businessGroupToTechnicalStatuses(group: BusinessStatusGroup): Or
 
 export function workflowMotif(row: Pick<
   ReviewQueueItem,
-  "status" | "holdReason" | "issue" | "transferredFrom" | "transferNote"
+  "status" | "holdReason" | "issue" | "transferredFrom" | "transferNote" | "sapVbeln"
 > & { transferredFrom?: string | null }, getDisplayName?: (username?: string | null) => string | null): string | null {
   const status = row.status as OrderStatus;
   if (status === "En attente" && row.holdReason) {
@@ -104,6 +113,12 @@ export function workflowMotif(row: Pick<
   }
   if (status === "Généré" || status === "Validé") {
     return "Traité — EDIFACT prêt, en attente envoi SAP";
+  }
+  if (status === "Envoyé SAP") {
+    return "Envoyé SAP — en attente de confirmation";
+  }
+  if (status === "Confirmé SAP") {
+    return row.sapVbeln ? `Confirmé SAP — ${row.sapVbeln}` : "Confirmé SAP";
   }
   if (status === "Rejeté" && row.issue) {
     return row.issue;

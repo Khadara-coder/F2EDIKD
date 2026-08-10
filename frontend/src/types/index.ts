@@ -12,6 +12,7 @@ export type OrderStatus =
   | "À traiter"
   | "En attente"
   | "Envoyé SAP"
+  | "Confirmé SAP"
   | "Transféré"
   | "Échec SAP";
 
@@ -101,6 +102,8 @@ export interface ReviewQueueItem {
   processedAt?: string;
   sapSentAt?: string;
   sapSentBy?: string;
+  sapVbeln?: string;
+  sapConfirmedAt?: string;
   processedBy?: string;
   assignedTo?: string;       // username du gestionnaire assigné
   holdReason?: string;       // motif mise en attente
@@ -228,6 +231,8 @@ export interface Order {
   rejectedBy?: string;
   sapSentAt?: string;
   sapSentBy?: string;
+  sapVbeln?: string;
+  sapConfirmedAt?: string;
   sapResendCooldown?: {
     active: boolean;
     remainingSeconds: number;

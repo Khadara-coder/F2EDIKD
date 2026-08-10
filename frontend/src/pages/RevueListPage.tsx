@@ -60,6 +60,7 @@ const STATUS_FILTERS: Array<{ value: ReviewStatusFilter; label: string; classNam
   { value: "toProcess",      label: "À traiter",     className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
   { value: "inProgress",     label: "En cours",      className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
   { value: "sentSap",        label: "Envoyé SAP",    className: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" },
+  { value: "confirmedSap",   label: "Confirmé SAP",  className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
   { value: "rejected",       label: "Rejeté",         className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
   { value: "deliveryFailed", label: "Échec d'envoi",  className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
 ];

@@ -425,6 +425,8 @@ class File2EdiStore:
         _ensure_column("file2edi_orders", "transfer_at", "transfer_at TEXT")
         _ensure_column("file2edi_orders", "sap_sent_at", "sap_sent_at TEXT")
         _ensure_column("file2edi_orders", "sap_sent_by", "sap_sent_by TEXT")
+        _ensure_column("file2edi_orders", "sap_vbeln", "sap_vbeln TEXT")
+        _ensure_column("file2edi_orders", "sap_confirmed_at", "sap_confirmed_at TEXT")
         _ensure_column("file2edi_orders", "rejection_message", "rejection_message TEXT")
         _ensure_column("file2edi_orders", "rejected_by", "rejected_by TEXT")
         _ensure_column("file2edi_orders", "rejected_at", "rejected_at TEXT")
@@ -963,11 +965,17 @@ class File2EdiStore:
             "rejectedBy": row.get("rejected_by"),
             "sapSentAt": row.get("sap_sent_at"),
             "sapSentBy": row.get("sap_sent_by"),
+            "sapVbeln": row.get("sap_vbeln"),
+            "sapConfirmedAt": row.get("sap_confirmed_at"),
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
         review_required = order["globalConfidence"] < 90
-        sap_export_done = bool(row.get("sap_sent_at")) or order["status"] == "Envoyé SAP"
+        sap_export_done = (
+            bool(row.get("sap_sent_at"))
+            or order["status"] in {"Envoyé SAP", "Confirmé SAP"}
+        )
+        sap_confirmed = order["status"] == "Confirmé SAP" or bool(row.get("sap_confirmed_at"))
         trace = [
             {"id": "1", "label": "PDF reçu", "status": "completed"},
             {"id": "2", "label": "Extraction OCR", "status": "completed"},
@@ -976,6 +984,12 @@ class File2EdiStore:
             {"id": "5", "label": "Revue manuelle", "status": "current" if review_required else "completed"},
             {"id": "6", "label": "Génération EDIFACT", "status": "completed" if row.get("edifact_content") else "pending"},
             {"id": "7", "label": "Export SFTP", "status": "completed" if sap_export_done else "pending"},
+            {
+                "id": "8",
+                "label": "Confirmé SAP",
+                "status": "completed" if sap_confirmed else ("pending" if sap_export_done else "pending"),
+                "timestamp": row.get("sap_confirmed_at") if sap_confirmed else None,
+            },
         ]
         return {
             "order": order,
@@ -1063,7 +1077,7 @@ class File2EdiStore:
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
                LEFT JOIN file2edi_conversion_history h ON h.order_id = o.order_id
-               WHERE o.status NOT IN ('Envoyé SAP')
+               WHERE o.status NOT IN ('Envoyé SAP', 'Confirmé SAP')
                ORDER BY o.created_at DESC
                LIMIT 200"""
         ).fetchall()
@@ -1081,6 +1095,7 @@ class File2EdiStore:
                       o.rejection_message, o.rejected_by,
                       o.transferred_from, o.transferred_to, o.transfer_note,
                       o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
+                      o.sap_vbeln, o.sap_confirmed_at,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
@@ -1090,6 +1105,46 @@ class File2EdiStore:
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]
+
+    def list_orders_awaiting_sap_feedback(self) -> list[dict]:
+        """Orders already sent to SAP and waiting for Salesorder confirmation."""
+        conn = self._conn()
+        rows = conn.execute(
+            """SELECT order_id, customer_order_number, soldto, sap_sent_at, status
+               FROM file2edi_orders
+               WHERE status = 'Envoyé SAP'
+                 AND COALESCE(sap_sent_at, '') <> ''
+               ORDER BY sap_sent_at ASC"""
+        ).fetchall()
+        conn.close()
+        return [dict(r) for r in rows]
+
+    def mark_sap_confirmed(
+        self,
+        order_id: str,
+        vbeln: str,
+        erdat: str | None = None,
+    ) -> bool:
+        """Mark an already-sent order as confirmed in SAP. Returns False if not eligible."""
+        now = _now()
+        vbeln_clean = (vbeln or "").strip()
+        if not vbeln_clean:
+            return False
+        conn = self._conn()
+        result = conn.execute(
+            """UPDATE file2edi_orders
+               SET status=?, sap_vbeln=?, sap_confirmed_at=?, updated_at=?
+               WHERE order_id=?
+                 AND status='Envoyé SAP'
+                 AND COALESCE(sap_sent_at, '') <> ''""",
+            ["Confirmé SAP", vbeln_clean, now, now, order_id],
+        )
+        updated = int(getattr(result, "rowcount", 0) or 0)
+        conn.commit()
+        conn.close()
+        if updated:
+            self._sync_order_graph(self.load_order_review(order_id))
+        return updated > 0
 
     def update_order_header(self, order_id: str, payload: dict) -> dict | None:
         if not self.load_order_review(order_id):

@@ -23,6 +23,7 @@ const statusConfig: Record<
   "À traiter":     { variant: "warning",     label: "À traiter" },
   "En attente":    { variant: "orange",      label: "En attente" },
   "Envoyé SAP":    { variant: "success",     label: "Envoyé SAP" },
+  "Confirmé SAP":  { variant: "success",     label: "Confirmé SAP" },
   Transféré:       { variant: "info",        label: "Transféré" },
   "Échec SAP":     { variant: "destructive", label: "Échec SAP" },
 };
