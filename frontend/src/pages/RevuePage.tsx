@@ -287,7 +287,7 @@ export function RevuePage() {
   return (
     <>
       <Header
-        title="Revue de commande"
+        title="Détail de la commande"
         breadcrumbs={[
           { label: "Cockpit", href: "/" },
           { label: "Gérer les commandes", href: "/revue" },

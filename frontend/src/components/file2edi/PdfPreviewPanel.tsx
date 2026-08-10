@@ -113,7 +113,7 @@ export function PdfPreviewPanel({ fileName, orderId, pdfUrl }: PdfPreviewPanelPr
           )}
         </div>
         <p className="mt-3 text-center text-xs text-muted-foreground">
-          {src ? "Aperçu du document source" : "Importez un PDF via Convertir pour l’afficher ici"}
+          {src ? "Aperçu du document source" : "Importez un PDF via Déposer une commande pour l’afficher ici"}
         </p>
       </CardContent>
     </Card>
