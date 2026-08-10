@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { Download, CheckCircle, Send, PauseCircle, UserCheck, XCircle } from "lucide-react";
+import { Download, Send, PauseCircle, UserCheck, XCircle, Save } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOrderReview } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -65,22 +65,32 @@ export function RevuePage() {
 
   const generateEdifact = useMutation({
     mutationFn: () => api.generateEdifact(orderId),
+  });
+
+  const saveOrder = useMutation({
+    mutationFn: () => api.saveOrder(orderId),
     onSuccess: (result) => {
-      if (result.success) {
+      const blockers = result.blockers ?? [];
+      if (blockers.length) {
+        setInfoDialog({
+          title: "Enregistré avec alertes",
+          message:
+            "Modifications enregistrées, mais des points bloquent encore l'envoi SAP :\n\n"
+            + blockers.join("\n"),
+        });
+      } else {
         setInfoDialog({
           title: "Succès",
-          message: `EDIFACT généré : ${result.fileName}`,
-        });
-        invalidate();
-      } else {
-        const detail = result.errors?.length
-          ? result.errors.join("\n")
-          : result.message ?? "Génération échouée";
-        setInfoDialog({
-          title: "Erreur",
-          message: `Impossible de générer l'EDIFACT :\n\n${detail}`,
+          message: result.message || "Modifications enregistrées",
         });
       }
+      invalidate();
+    },
+    onError: (err) => {
+      setInfoDialog({
+        title: "Erreur",
+        message: `Impossible d'enregistrer :\n\n${err instanceof Error ? err.message : "Erreur inconnue"}`,
+      });
     },
   });
 
@@ -185,16 +195,8 @@ export function RevuePage() {
   const invalidDate = !order.orderDate;
   const pendingAnomalyCount = countPendingAnomalies(anomalies);
 
-  const handleValidate = () => {
-    const errors = collectReviewBlockers(order, partners, lines, anomalies);
-    if (errors.length) {
-      setInfoDialog({
-        title: "Erreur",
-        message: "Impossible de générer l'EDIFACT :\n\n" + errors.join("\n"),
-      });
-      return;
-    }
-    generateEdifact.mutate();
+  const handleSave = () => {
+    saveOrder.mutate();
   };
 
   const handleDownloadEdifact = () => {
@@ -209,13 +211,42 @@ export function RevuePage() {
     downloadEdifact.mutate();
   };
 
+  const ensureEdifactReady = async (): Promise<boolean> => {
+    if (data.edifactReady || order.status === "Généré") {
+      return true;
+    }
+    const generated = await generateEdifact.mutateAsync();
+    if (!generated.success) {
+      const detail = generated.errors?.length
+        ? generated.errors.join("\n")
+        : generated.message ?? "Génération échouée";
+      setInfoDialog({
+        title: "Erreur",
+        message: `Impossible de générer l'EDIFACT avant envoi SAP :\n\n${detail}`,
+      });
+      return false;
+    }
+    await invalidate();
+    return true;
+  };
+
   const handleSendToSap = async () => {
+    const errors = collectReviewBlockers(order, partners, lines, anomalies);
+    if (errors.length) {
+      setInfoDialog({
+        title: "Erreur",
+        message: "Impossible d'envoyer vers SAP :\n\n" + errors.join("\n"),
+      });
+      return;
+    }
     try {
+      const ready = await ensureEdifactReady();
+      if (!ready) return;
       const result = await sendToSap.mutateAsync({});
       if (result.success) {
         setInfoDialog({
           title: "Succès",
-          message: result.message || "Commande envoyée vers SAP",
+          message: result.message || "Fichier EDIFACT créé et envoyé vers SAP",
         });
         invalidate();
         return;
@@ -242,6 +273,18 @@ export function RevuePage() {
 
   const handleForceResendToSap = async () => {
     try {
+      // Force a fresh generation before admin resend
+      const generated = await generateEdifact.mutateAsync();
+      if (!generated.success) {
+        const detail = generated.errors?.length
+          ? generated.errors.join("\n")
+          : generated.message ?? "Génération échouée";
+        setInfoDialog({
+          title: "Erreur",
+          message: `Impossible de régénérer l'EDIFACT avant renvoi :\n\n${detail}`,
+        });
+        return;
+      }
       const forced = await sendToSap.mutateAsync({ force: true });
       if (forced.success) {
         setInfoDialog({
@@ -264,6 +307,14 @@ export function RevuePage() {
   };
 
   const handleSendClick = () => {
+    const errors = collectReviewBlockers(order, partners, lines, anomalies);
+    if (errors.length) {
+      setInfoDialog({
+        title: "Erreur",
+        message: "Impossible d'envoyer vers SAP :\n\n" + errors.join("\n"),
+      });
+      return;
+    }
     if (isSentToSap && isAdmin) {
       setConfirmResendOpen(true);
       return;
@@ -271,7 +322,11 @@ export function RevuePage() {
     setConfirmSendOpen(true);
   };
 
-  const edifactBusy = generateEdifact.isPending || downloadEdifact.isPending || sendToSap.isPending;
+  const edifactBusy =
+    generateEdifact.isPending
+    || downloadEdifact.isPending
+    || sendToSap.isPending
+    || saveOrder.isPending;
   const canValidate = pendingAnomalyCount === 0;
   const isValidated = data.edifactReady || order.status === "Généré";
   const isAdv = meQuery.data?.role === "adv";
@@ -281,7 +336,7 @@ export function RevuePage() {
   const isSentToSap = order.status === "Envoyé SAP" || Boolean(order.sapSentAt);
   const workflowLocked = isRejected || isSentToSap;
   const canSendToSap = !isRejected && !edifactBusy && (
-    (!isSentToSap && isValidated) || (isSentToSap && isAdmin)
+    (!isSentToSap && canValidate) || (isSentToSap && isAdmin)
   );
 
   return (
@@ -344,8 +399,22 @@ export function RevuePage() {
             >
               <UserCheck className="h-4 w-4" /> Transférer
             </Button>
-            <Button size="sm" className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate || workflowLocked}>
-              <CheckCircle className="h-4 w-4" /> Valider
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-2"
+              onClick={handleSave}
+              disabled={edifactBusy || workflowLocked}
+            >
+              <Save className="h-4 w-4" /> Enregistrer
+            </Button>
+            <Button
+              size="sm"
+              className="gap-2"
+              onClick={handleSendClick}
+              disabled={!canSendToSap}
+            >
+              <Send className="h-4 w-4" /> {isSentToSap && isAdmin ? "Renvoyer vers SAP" : "Envoyer vers SAP"}
             </Button>
           </div>
         }
@@ -458,7 +527,7 @@ export function RevuePage() {
             {pendingAnomalyCount > 0 && (
               <p className="text-sm text-amber-700">
                 {pendingAnomalyCount} anomalie{pendingAnomalyCount > 1 ? "s" : ""} à traiter — choisissez
-                une action pour chacune avant de valider la commande.
+                une action pour chacune avant d&apos;envoyer vers SAP.
               </p>
             )}
           </CardHeader>
@@ -554,14 +623,18 @@ export function RevuePage() {
               onClick={handleDownloadEdifact}
               disabled={edifactBusy || workflowLocked}
             >
-              <Download className="h-4 w-4" /> Télécharger EDIFACT
+              <Download className="h-4 w-4" /> Aperçu / Télécharger EDIFACT
             </Button>
           )}
-          <Button className="gap-2" onClick={handleValidate} disabled={edifactBusy || !canValidate || workflowLocked}>
-            <CheckCircle className="h-4 w-4" /> Valider
-          </Button>
           <Button
             variant="outline"
+            className="gap-2"
+            onClick={handleSave}
+            disabled={edifactBusy || workflowLocked}
+          >
+            <Save className="h-4 w-4" /> Enregistrer
+          </Button>
+          <Button
             className="gap-2"
             onClick={handleSendClick}
             disabled={!canSendToSap}
@@ -575,10 +648,14 @@ export function RevuePage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
           <Card className="w-full max-w-md">
             <CardHeader>
-              <CardTitle className="text-base">Confirmation</CardTitle>
+              <CardTitle className="text-base">Confirmation d&apos;envoi SAP</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm">Confirmer l&apos;envoi de ce fichier vers SAP ?</p>
+              <p className="text-sm">
+                {isValidated
+                  ? "Le fichier EDIFACT (.tst) sera envoyé vers SAP. Confirmer ?"
+                  : "Le fichier EDIFACT (.tst) sera généré puis envoyé vers SAP. Confirmer ?"}
+              </p>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setConfirmSendOpen(false)}>
                   Annuler
@@ -605,7 +682,8 @@ export function RevuePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm">
-                Cette commande a déjà été envoyée vers SAP. En tant qu&apos;administrateur, vous pouvez la renvoyer.
+                Cette commande a déjà été envoyée vers SAP. En tant qu&apos;administrateur, vous pouvez
+                régénérer le fichier EDIFACT puis le renvoyer.
               </p>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setConfirmResendOpen(false)}>
@@ -617,7 +695,7 @@ export function RevuePage() {
                     await handleForceResendToSap();
                   }}
                 >
-                  Renvoyer
+                  Régénérer et renvoyer
                 </Button>
               </div>
             </CardContent>

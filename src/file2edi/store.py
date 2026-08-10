@@ -1383,6 +1383,26 @@ class File2EdiStore:
         self._sync_order_graph(review)
         return review
 
+    def save_order_snapshot(self, order_id: str, actor: str = "operator") -> dict | None:
+        """Persist a review snapshot (refresh corrections + touch updated_at)."""
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT order_id FROM file2edi_orders WHERE order_id=?", [order_id]
+        ).fetchone()
+        if not row:
+            conn.close()
+            return None
+        self._refresh_corrections_json(conn, order_id)
+        conn.execute(
+            "UPDATE file2edi_orders SET updated_at=?, processed_by=COALESCE(?, processed_by) WHERE order_id=?",
+            [_now(), actor or None, order_id],
+        )
+        conn.commit()
+        conn.close()
+        review = self.load_order_review(order_id)
+        self._sync_order_graph(review)
+        return review
+
     def mark_edifact_generated(self, order_id: str, filename: str, content: str, actor: str = "operator") -> None:
         conn = self._conn()
         conn.execute(

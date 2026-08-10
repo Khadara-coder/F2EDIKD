@@ -248,6 +248,12 @@ export const api = {
       method: "POST",
     }),
 
+  saveOrder: (orderId: string) =>
+    request<{ success: boolean; message?: string; blockers?: string[]; review?: unknown }>(
+      `/orders/${orderId}/save`,
+      { method: "POST" },
+    ),
+
   sendToSap: (orderId: string, payload?: { force?: boolean }) =>
     request<{ success: boolean; message?: string; alreadySent?: boolean; requiresConfirmation?: boolean }>(`/orders/${orderId}/send-sap`, {
       method: "POST",

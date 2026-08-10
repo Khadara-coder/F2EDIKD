@@ -664,6 +664,24 @@ def create_router() -> APIRouter:
             raise HTTPException(404)
         return review
 
+    @router.post("/orders/{order_id}/save")
+    async def save_order(order_id: str, req: Request):
+        store = get_store()
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
+        review = store.save_order_snapshot(order_id, actor=actor)
+        if not review:
+            raise HTTPException(404)
+        blockers = _mandatory_review_errors(review)
+        return {
+            "success": True,
+            "message": "Modifications enregistrées",
+            "blockers": blockers,
+            "review": review,
+        }
+
     @router.post("/orders/{order_id}/generate-edifact")
     async def generate_edifact(order_id: str, req: Request):
         store = get_store()
