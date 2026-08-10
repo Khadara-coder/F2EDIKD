@@ -222,7 +222,7 @@ export function RevuePage() {
         : generated.message ?? "Génération échouée";
       setInfoDialog({
         title: "Erreur",
-        message: `Impossible de générer l'EDIFACT avant envoi SAP :\n\n${detail}`,
+        message: `Impossible d'envoyer vers SAP :\n\n${detail}`,
       });
       return false;
     }
@@ -246,7 +246,7 @@ export function RevuePage() {
       if (result.success) {
         setInfoDialog({
           title: "Succès",
-          message: result.message || "Fichier EDIFACT créé et envoyé vers SAP",
+          message: result.message || "Commande envoyée vers SAP",
         });
         invalidate();
         return;
@@ -281,7 +281,7 @@ export function RevuePage() {
           : generated.message ?? "Génération échouée";
         setInfoDialog({
           title: "Erreur",
-          message: `Impossible de régénérer l'EDIFACT avant renvoi :\n\n${detail}`,
+          message: `Impossible d'envoyer vers SAP :\n\n${detail}`,
         });
         return;
       }
@@ -328,7 +328,6 @@ export function RevuePage() {
     || sendToSap.isPending
     || saveOrder.isPending;
   const canValidate = pendingAnomalyCount === 0;
-  const isValidated = data.edifactReady || order.status === "Généré";
   const isAdv = meQuery.data?.role === "adv";
   const isAdmin = meQuery.data?.role === "admin";
   const isRejected = order.status === "Rejeté";
@@ -651,11 +650,7 @@ export function RevuePage() {
               <CardTitle className="text-base">Confirmation d&apos;envoi SAP</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <p className="text-sm">
-                {isValidated
-                  ? "Le fichier EDIFACT (.tst) sera envoyé vers SAP. Confirmer ?"
-                  : "Le fichier EDIFACT (.tst) sera généré puis envoyé vers SAP. Confirmer ?"}
-              </p>
+              <p className="text-sm">Confirmer l&apos;envoi de cette commande vers SAP ?</p>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setConfirmSendOpen(false)}>
                   Annuler
@@ -682,8 +677,7 @@ export function RevuePage() {
             </CardHeader>
             <CardContent className="space-y-4">
               <p className="text-sm">
-                Cette commande a déjà été envoyée vers SAP. En tant qu&apos;administrateur, vous pouvez
-                régénérer le fichier EDIFACT puis le renvoyer.
+                Cette commande a déjà été envoyée vers SAP. En tant qu&apos;administrateur, vous pouvez la renvoyer.
               </p>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setConfirmResendOpen(false)}>
@@ -695,7 +689,7 @@ export function RevuePage() {
                     await handleForceResendToSap();
                   }}
                 >
-                  Régénérer et renvoyer
+                  Renvoyer
                 </Button>
               </div>
             </CardContent>
