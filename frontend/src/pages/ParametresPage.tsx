@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, CheckCircle2, Database, FileSpreadsheet, Key, Lock, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, Database, Key, Lock, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/hooks/useFile2Edi";
 import { appSettingsSchema, type AppSettingsForm } from "@/schemas";
@@ -45,24 +46,34 @@ const TIMEZONE_OPTIONS = (() => {
 })();
 
 const SECTIONS = [
-  { id: "profil", label: "Profil EDI" },
-  { id: "connecteurs", label: "Connecteurs" },
+  { id: "general", label: "Général" },
+  { id: "traitement", label: "Traitement" },
   { id: "ia", label: "Intelligence artificielle" },
-  { id: "validation", label: "Validation" },
-  { id: "notifications", label: "Notifications" },
-  { id: "utilisateurs", label: "Utilisateurs" },
-  { id: "api-keys", label: "Clés API" },
-  { id: "sftp", label: "SFTP" },
-  { id: "securite", label: "Sécurité" },
+  { id: "connecteurs", label: "Connecteurs" },
+  { id: "donnees", label: "Données" },
+  { id: "acces", label: "Utilisateurs & Accès" },
 ] as const;
 
 type SettingsSection = (typeof SECTIONS)[number]["id"];
 
+const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
+
+function parseSettingsSection(value: string | null): SettingsSection {
+  if (value && SECTION_IDS.has(value)) {
+    return value as SettingsSection;
+  }
+  return "general";
+}
+
 export function ParametresPage() {
   const queryClient = useQueryClient();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { data: settingsRaw, isLoading } = useSettings();
   const settings = mergeSettings(settingsRaw);
-  const [activeSection, setActiveSection] = useState<SettingsSection>("profil");
+  const [activeSection, setActiveSection] = useState<SettingsSection>(() =>
+    parseSettingsSection(searchParams.get("section")),
+  );
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [sftpPassword, setSftpPassword] = useState("");
   const [sftpPasswordMsg, setSftpPasswordMsg] = useState("");
   const [testingConnector, setTestingConnector] = useState<string | null>(null);
@@ -92,11 +103,15 @@ export function ParametresPage() {
   const [editError, setEditError] = useState("");
   const [editSuccess, setEditSuccess] = useState("");
 
-  const rolesQuery = useQuery({
-    queryKey: ["admin", "roles"],
-    queryFn: api.getAccessRoles,
-    retry: 1,
-  });
+  const selectSection = (section: SettingsSection) => {
+    setActiveSection(section);
+    setSearchParams({ section }, { replace: true });
+  };
+
+  useEffect(() => {
+    const fromUrl = parseSettingsSection(searchParams.get("section"));
+    setActiveSection((current) => (current === fromUrl ? current : fromUrl));
+  }, [searchParams]);
 
   // ── User management queries/mutations ──────────────────────────────────────
   const usersQuery = useQuery<GestionnaireUser[]>({
@@ -218,6 +233,11 @@ export function ParametresPage() {
     mutationFn: (payload: AppSettingsForm) => api.updateSettings(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ["settings"] });
+      setSaveMessage("Paramètres enregistrés.");
+      window.setTimeout(() => setSaveMessage(null), 4000);
+    },
+    onError: (err) => {
+      setSaveMessage(err instanceof Error ? err.message : "Échec de l'enregistrement.");
     },
   });
 
@@ -324,8 +344,6 @@ export function ParametresPage() {
     },
   });
 
-  // roleItems still needed for securite section display
-  const _roleItems = useMemo(() => rolesQuery.data?.items ?? [], [rolesQuery.data]); void _roleItems;
   const apiKeyItems = useMemo(() => apiKeysQuery.data?.items ?? [], [apiKeysQuery.data]);
   const aiProvider = form.watch("aiProvider");
   const showDatabricksSql = aiProvider === "databricks" && form.watch("databricksConfig.sqlWarehouseEnabled");
@@ -333,7 +351,6 @@ export function ParametresPage() {
   const connectors = [
     { key: "apiExtraction", label: "API extraction", icon: Wifi, status: settings.connectors.apiExtraction },
     { key: "database", label: "Base de données", icon: Database, status: settings.connectors.database },
-    { key: "csvExport", label: "Export CSV", icon: FileSpreadsheet, status: settings.connectors.csvExport },
     { key: "sftp", label: "SFTP", icon: Server, status: settings.connectors.sftp },
   ];
 
@@ -355,7 +372,7 @@ export function ParametresPage() {
               <button
                 key={s.id}
                 type="button"
-                onClick={() => setActiveSection(s.id)}
+                onClick={() => selectSection(s.id)}
                 className={cn(
                   "w-full rounded-lg px-3 py-2 text-left text-sm transition-colors",
                   activeSection === s.id
@@ -370,10 +387,13 @@ export function ParametresPage() {
         </Card>
 
         <div className="lg:col-span-10 space-y-6">
-          {activeSection === "profil" && (
+          {activeSection === "general" && (
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Profil EDI</CardTitle>
+                <CardTitle className="text-base">Général</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Profil EDI et préférences d&apos;affichage des commandes.
+                </p>
               </CardHeader>
               <CardContent className="grid gap-4 sm:grid-cols-2">
                 <EditableField
@@ -508,102 +528,234 @@ export function ParametresPage() {
                       </SelectContent>
                     </Select>
                   </div>
-
-                  <div className="space-y-2">
-                    <Label>Profil SFTP</Label>
-                    <Input
-                      value={form.watch("connectorConfig.sftpProfile")}
-                      onChange={(e) => form.setValue("connectorConfig.sftpProfile", e.target.value)}
-                    />
-                  </div>
                 </CardContent>
               </Card>
 
               <Card className="lg:col-span-2">
                 <CardHeader>
-                  <CardTitle className="text-base">Sync Masterdata via n8n</CardTitle>
+                  <CardTitle className="text-base">SFTP — livraison EDIFACT</CardTitle>
                   <p className="text-xs text-muted-foreground">
-                    Le bouton Synchroniser déclenche ce webhook n8n. Le workflow tire GitHub puis
-                    recharge le cache File2EDI. Si l&apos;URL change, mettez-la à jour ici.
+                    En local, les valeurs viennent de <code>.env.local</code> (
+                    <code>SFTP_HOST</code>, <code>SFTP_USERNAME</code>, <code>SFTP_REMOTE_DIR</code>,{" "}
+                    <code>SFTP_PASSWORD</code>). Si les champs restent vides après un changement
+                    d&apos;env, recréez le conteneur API :{" "}
+                    <code>docker compose -f docker-compose.dev.yml up -d --force-recreate api</code>.
                   </p>
                 </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex items-center justify-between gap-4">
+                <CardContent className="space-y-6">
+                  <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
                     <div>
-                      <Label className="text-sm font-medium">Activer le déclenchement n8n</Label>
-                      <p className="text-xs text-muted-foreground">
-                        Prioritaire pour Synchroniser (sinon fallback Git/local)
-                      </p>
+                      <p className="font-medium">Export automatique SFTP</p>
+                      <p className="text-xs text-muted-foreground">Envoi automatique après génération EDIFACT</p>
                     </div>
                     <Switch
-                      checked={form.watch("masterdataN8nConfig.enabled")}
-                      onCheckedChange={(v) => form.setValue("masterdataN8nConfig.enabled", v)}
+                      checked={form.watch("options.autoSftp")}
+                      onCheckedChange={(v) => form.setValue("options.autoSftp", v)}
                     />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4">
+                    <Label className="text-sm font-medium">Connecteur SFTP activé</Label>
+                    <Switch
+                      checked={form.watch("sftpConfig.enabled")}
+                      onCheckedChange={(v) => form.setValue("sftpConfig.enabled", v)}
+                    />
+                  </div>
+
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <EditableField
+                      label="Hôte"
+                      value={form.watch("sftpConfig.host")}
+                      onChange={(v) => form.setValue("sftpConfig.host", v)}
+                    />
+                    <NumberField
+                      label="Port"
+                      value={form.watch("sftpConfig.port")}
+                      min={1}
+                      max={65535}
+                      onChange={(v) => form.setValue("sftpConfig.port", v)}
+                    />
+                    <EditableField
+                      label="Utilisateur"
+                      value={form.watch("sftpConfig.username")}
+                      onChange={(v) => form.setValue("sftpConfig.username", v)}
+                    />
+                    <EditableField
+                      label="Répertoire distant"
+                      value={form.watch("sftpConfig.remotePath")}
+                      onChange={(v) => form.setValue("sftpConfig.remotePath", v)}
+                    />
+                    <p className="text-xs text-muted-foreground sm:col-span-2">
+                      Bosch local : utilisez <code>/</code> (pas <code>/inbox</code> — ce dossier
+                      n&apos;existe pas sur le serveur).
+                    </p>
                   </div>
 
                   <EditableField
-                    label="URL webhook n8n"
-                    value={form.watch("masterdataN8nConfig.webhookUrl")}
-                    onChange={(v) => form.setValue("masterdataN8nConfig.webhookUrl", v)}
+                    label="Pattern nom de fichier"
+                    value={form.watch("sftpConfig.fileNamePattern")}
+                    onChange={(v) => form.setValue("sftpConfig.fileNamePattern", v)}
                   />
 
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <EditableField
-                      label="Header d'auth"
-                      value={form.watch("masterdataN8nConfig.authHeader")}
-                      onChange={(v) => form.setValue("masterdataN8nConfig.authHeader", v)}
+                  <div className="space-y-2 rounded-lg border p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label>Mot de passe SFTP</Label>
+                      <Badge variant={form.watch("sftpConfig.hasPassword") ? "default" : "secondary"}>
+                        {form.watch("sftpConfig.hasPassword") ? "Défini" : "Non défini"}
+                      </Badge>
+                    </div>
+                    <Input
+                      type="password"
+                      placeholder="Entrer le mot de passe SFTP"
+                      value={sftpPassword}
+                      onChange={(e) => {
+                        setSftpPassword(e.target.value);
+                        if (sftpPasswordMsg) setSftpPasswordMsg("");
+                      }}
                     />
-                    <div className="space-y-2">
-                      <Label>Timeout (secondes)</Label>
-                      <Input
-                        type="number"
-                        min={5}
-                        max={600}
-                        value={form.watch("masterdataN8nConfig.timeoutSeconds")}
-                        onChange={(e) =>
-                          form.setValue(
-                            "masterdataN8nConfig.timeoutSeconds",
-                            Number(e.target.value) || 120,
-                          )
-                        }
-                      />
+                    <div className="flex items-center gap-3">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => {
+                          if (!sftpPassword.trim()) {
+                            setSftpPasswordMsg("Mot de passe SFTP requis");
+                            return;
+                          }
+                          sftpPasswordMutation.mutate(sftpPassword);
+                        }}
+                        disabled={sftpPasswordMutation.isPending}
+                      >
+                        Enregistrer le mot de passe
+                      </Button>
+                      {sftpPasswordMsg && (
+                        <p className="text-xs text-muted-foreground">{sftpPasswordMsg}</p>
+                      )}
                     </div>
                   </div>
 
-                  <p className="text-xs text-muted-foreground">
-                    <strong>Local :</strong>{" "}
-                    <code>http://localhost:5678/webhook/masterdata-sync</code>
-                    {" "}(en Docker, un relay fait répondre localhost:5678 vers n8n sur
-                    l&apos;hôte — pas de rewrite d&apos;URL). <strong>Prod :</strong>{" "}
-                    <code>https://i1-d.n8n.bosch.com/webhook/masterdata-sync-prod</code>.
-                    Override : <code>MASTERDATA_N8N_WEBHOOK_URL</code>. Clé :{" "}
-                    <code>MASTERDATA_N8N_WEBHOOK_KEY</code>.
-                  </p>
-
-                  <div className="flex items-center gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() =>
-                        testConnectorMutation.mutate({
-                          connector: "csvExport",
-                          payload: {
-                            masterdataN8nConfig: form.getValues("masterdataN8nConfig"),
-                          },
-                        })
-                      }
-                      disabled={testConnectorMutation.isPending}
-                    >
-                      {testingConnector === "csvExport" ? "Test..." : "Tester le webhook n8n"}
-                    </Button>
-                    {connectorMessages.csvExport && (
-                      <p className="text-xs text-muted-foreground">{connectorMessages.csvExport}</p>
+                  <div className="space-y-2 rounded-lg border p-4">
+                    <div className="flex items-center justify-between gap-3">
+                      <Label>Test connexion SFTP</Label>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() =>
+                          testConnectorMutation.mutate({
+                            connector: "sftp",
+                            payload: {
+                              sftpConfig: {
+                                host: form.getValues("sftpConfig.host"),
+                                port: form.getValues("sftpConfig.port"),
+                                username: form.getValues("sftpConfig.username"),
+                                remotePath: form.getValues("sftpConfig.remotePath"),
+                              },
+                            },
+                          })
+                        }
+                        disabled={testConnectorMutation.isPending}
+                      >
+                        {testingConnector === "sftp" ? "Test..." : "Tester la connexion"}
+                      </Button>
+                    </div>
+                    {connectorMessages.sftp && (
+                      <p className="text-xs text-muted-foreground">{connectorMessages.sftp}</p>
                     )}
                   </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Le mot de passe n&apos;est jamais renvoyé en clair. Il est appliqué au runtime pour les tests et exports SFTP.
+                  </p>
                 </CardContent>
               </Card>
             </div>
+          )}
+
+          {activeSection === "donnees" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Sync Masterdata via n8n</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Le bouton Synchroniser (Données maîtres) déclenche ce webhook n8n. Le workflow tire GitHub puis
+                  recharge le cache File2EDI. Si l&apos;URL change, mettez-la à jour ici.
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label className="text-sm font-medium">Activer le déclenchement n8n</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Prioritaire pour Synchroniser (sinon fallback Git/local)
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.watch("masterdataN8nConfig.enabled")}
+                    onCheckedChange={(v) => form.setValue("masterdataN8nConfig.enabled", v)}
+                  />
+                </div>
+
+                <EditableField
+                  label="URL webhook n8n"
+                  value={form.watch("masterdataN8nConfig.webhookUrl")}
+                  onChange={(v) => form.setValue("masterdataN8nConfig.webhookUrl", v)}
+                />
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <EditableField
+                    label="Header d'auth"
+                    value={form.watch("masterdataN8nConfig.authHeader")}
+                    onChange={(v) => form.setValue("masterdataN8nConfig.authHeader", v)}
+                  />
+                  <div className="space-y-2">
+                    <Label>Timeout (secondes)</Label>
+                    <Input
+                      type="number"
+                      min={5}
+                      max={600}
+                      value={form.watch("masterdataN8nConfig.timeoutSeconds")}
+                      onChange={(e) =>
+                        form.setValue(
+                          "masterdataN8nConfig.timeoutSeconds",
+                          Number(e.target.value) || 120,
+                        )
+                      }
+                    />
+                  </div>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  <strong>Local :</strong>{" "}
+                  <code>http://localhost:5678/webhook/masterdata-sync</code>
+                  {" "}(en Docker, un relay fait répondre localhost:5678 vers n8n sur
+                  l&apos;hôte — pas de rewrite d&apos;URL). <strong>Prod :</strong>{" "}
+                  <code>https://i1-d.n8n.bosch.com/webhook/masterdata-sync-prod</code>.
+                  Override : <code>MASTERDATA_N8N_WEBHOOK_URL</code>. Clé :{" "}
+                  <code>MASTERDATA_N8N_WEBHOOK_KEY</code>.
+                </p>
+
+                <div className="flex items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      testConnectorMutation.mutate({
+                        connector: "csvExport",
+                        payload: {
+                          masterdataN8nConfig: form.getValues("masterdataN8nConfig"),
+                        },
+                      })
+                    }
+                    disabled={testConnectorMutation.isPending}
+                  >
+                    {testingConnector === "csvExport" ? "Test..." : "Tester le webhook n8n"}
+                  </Button>
+                  {connectorMessages.csvExport && (
+                    <p className="text-xs text-muted-foreground">{connectorMessages.csvExport}</p>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {activeSection === "ia" && (
@@ -873,11 +1025,15 @@ export function ParametresPage() {
             </div>
           )}
 
-          {activeSection === "validation" && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Règles de validation</CardTitle>
-              </CardHeader>
+          {activeSection === "traitement" && (
+            <div className="space-y-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Règles de validation</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Seuils et comportements appliqués lors de la revue commande.
+                  </p>
+                </CardHeader>
               <CardContent className="space-y-6">
                 <div className="grid gap-4 sm:grid-cols-2">
                   <NumberField
@@ -944,205 +1100,71 @@ export function ParametresPage() {
                   </div>
                 </div>
               </CardContent>
-            </Card>
-          )}
+              </Card>
 
-          {activeSection === "notifications" && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Notifications</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  {[
-                    { key: "emailEnabled" as const, label: "Activer les e-mails" },
-                    { key: "notifyOnSuccess" as const, label: "Notifier les succès" },
-                    { key: "notifyOnFailure" as const, label: "Notifier les échecs" },
-                    { key: "webhookEnabled" as const, label: "Activer les webhooks" },
-                    { key: "notifyOnDuplicate" as const, label: "Notifier en cas de doublon détecté", fromOptions: true },
-                  ].map((opt) => (
-                    <div key={opt.key} className="flex items-center justify-between gap-4">
-                      <Label className="text-sm font-medium">{opt.label}</Label>
-                      <Switch
-                        checked={opt.fromOptions ? form.watch("options.notifyOnDuplicate") : form.watch(`notifications.${opt.key as "emailEnabled" | "notifyOnSuccess" | "notifyOnFailure" | "webhookEnabled"}`)}
-                        onCheckedChange={(v) => {
-                          if (opt.fromOptions) {
-                            form.setValue("options.notifyOnDuplicate", v);
-                          } else {
-                            form.setValue(`notifications.${opt.key as "emailEnabled" | "notifyOnSuccess" | "notifyOnFailure" | "webhookEnabled"}`, v);
-                          }
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-
-                <EditableField
-                  label="Destinataires e-mail (séparés par ; )"
-                  value={form.watch("notifications.emailRecipients")}
-                  onChange={(v) => form.setValue("notifications.emailRecipients", v)}
-                />
-
-                <EditableField
-                  label="URL Webhook"
-                  value={form.watch("notifications.webhookUrl")}
-                  onChange={(v) => form.setValue("notifications.webhookUrl", v)}
-                />
-              </CardContent>
-            </Card>
-          )}
-
-          {activeSection === "sftp" && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">SFTP</CardTitle>
-                <p className="text-xs text-muted-foreground">
-                  En local, les valeurs viennent de <code>.env.local</code> (
-                  <code>SFTP_HOST</code>, <code>SFTP_USERNAME</code>, <code>SFTP_REMOTE_DIR</code>,{" "}
-                  <code>SFTP_PASSWORD</code>). Si les champs restent vides après un changement
-                  d&apos;env, recréez le conteneur API :{" "}
-                  <code>docker compose -f docker-compose.dev.yml up -d --force-recreate api</code>.
-                </p>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
-                  <div>
-                    <p className="font-medium">Export automatique SFTP</p>
-                    <p className="text-xs text-muted-foreground">Envoi automatique après génération EDIFACT</p>
-                  </div>
-                  <Switch
-                    checked={form.watch("options.autoSftp")}
-                    onCheckedChange={(v) => form.setValue("options.autoSftp", v)}
-                  />
-                </div>
-
-                <div className="flex items-center justify-between gap-4">
-                  <Label className="text-sm font-medium">Connecteur SFTP activé</Label>
-                  <Switch
-                    checked={form.watch("sftpConfig.enabled")}
-                    onCheckedChange={(v) => form.setValue("sftpConfig.enabled", v)}
-                  />
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <EditableField
-                    label="Hôte"
-                    value={form.watch("sftpConfig.host")}
-                    onChange={(v) => form.setValue("sftpConfig.host", v)}
-                  />
-                  <NumberField
-                    label="Port"
-                    value={form.watch("sftpConfig.port")}
-                    min={1}
-                    max={65535}
-                    onChange={(v) => form.setValue("sftpConfig.port", v)}
-                  />
-                  <EditableField
-                    label="Utilisateur"
-                    value={form.watch("sftpConfig.username")}
-                    onChange={(v) => form.setValue("sftpConfig.username", v)}
-                  />
-                    <EditableField
-                    label="Répertoire distant"
-                    value={form.watch("sftpConfig.remotePath")}
-                    onChange={(v) => form.setValue("sftpConfig.remotePath", v)}
-                  />
-                  <p className="text-xs text-muted-foreground -mt-2">
-                    Bosch local : utilisez <code>/</code> (pas <code>/inbox</code> — ce dossier
-                    n&apos;existe pas sur le serveur).
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base">Notifications</CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Alertes e-mail et webhooks lors du traitement des commandes.
                   </p>
-                </div>
-
-                <EditableField
-                  label="Pattern nom de fichier"
-                  value={form.watch("sftpConfig.fileNamePattern")}
-                  onChange={(v) => form.setValue("sftpConfig.fileNamePattern", v)}
-                />
-
-                <div className="space-y-2 rounded-lg border p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label>Mot de passe SFTP</Label>
-                    <Badge variant={form.watch("sftpConfig.hasPassword") ? "default" : "secondary"}>
-                      {form.watch("sftpConfig.hasPassword") ? "Défini" : "Non défini"}
-                    </Badge>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="space-y-4">
+                    {[
+                      { key: "emailEnabled" as const, label: "Activer les e-mails" },
+                      { key: "notifyOnSuccess" as const, label: "Notifier les succès" },
+                      { key: "notifyOnFailure" as const, label: "Notifier les échecs" },
+                      { key: "webhookEnabled" as const, label: "Activer les webhooks" },
+                      { key: "notifyOnDuplicate" as const, label: "Notifier en cas de doublon détecté", fromOptions: true },
+                    ].map((opt) => (
+                      <div key={opt.key} className="flex items-center justify-between gap-4">
+                        <Label className="text-sm font-medium">{opt.label}</Label>
+                        <Switch
+                          checked={opt.fromOptions ? form.watch("options.notifyOnDuplicate") : form.watch(`notifications.${opt.key as "emailEnabled" | "notifyOnSuccess" | "notifyOnFailure" | "webhookEnabled"}`)}
+                          onCheckedChange={(v) => {
+                            if (opt.fromOptions) {
+                              form.setValue("options.notifyOnDuplicate", v);
+                            } else {
+                              form.setValue(`notifications.${opt.key as "emailEnabled" | "notifyOnSuccess" | "notifyOnFailure" | "webhookEnabled"}`, v);
+                            }
+                          }}
+                        />
+                      </div>
+                    ))}
                   </div>
-                  <Input
-                    type="password"
-                    placeholder="Entrer le mot de passe SFTP"
-                    value={sftpPassword}
-                    onChange={(e) => {
-                      setSftpPassword(e.target.value);
-                      if (sftpPasswordMsg) setSftpPasswordMsg("");
-                    }}
+
+                  <EditableField
+                    label="Destinataires e-mail (séparés par ; )"
+                    value={form.watch("notifications.emailRecipients")}
+                    onChange={(v) => form.setValue("notifications.emailRecipients", v)}
                   />
-                  <div className="flex items-center gap-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => {
-                        if (!sftpPassword.trim()) {
-                          setSftpPasswordMsg("Mot de passe SFTP requis");
-                          return;
-                        }
-                        sftpPasswordMutation.mutate(sftpPassword);
-                      }}
-                      disabled={sftpPasswordMutation.isPending}
-                    >
-                      Enregistrer le mot de passe
-                    </Button>
-                    {sftpPasswordMsg && (
-                      <p className="text-xs text-muted-foreground">{sftpPasswordMsg}</p>
-                    )}
-                  </div>
-                </div>
 
-                <div className="space-y-2 rounded-lg border p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <Label>Test connexion SFTP</Label>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() =>
-                        testConnectorMutation.mutate({
-                          connector: "sftp",
-                          payload: {
-                            sftpConfig: {
-                              host: form.getValues("sftpConfig.host"),
-                              port: form.getValues("sftpConfig.port"),
-                              username: form.getValues("sftpConfig.username"),
-                              remotePath: form.getValues("sftpConfig.remotePath"),
-                            },
-                          },
-                        })
-                      }
-                      disabled={testConnectorMutation.isPending}
-                    >
-                      {testingConnector === "sftp" ? "Test..." : "Tester la connexion"}
-                    </Button>
-                  </div>
-                  {connectorMessages.sftp && (
-                    <p className="text-xs text-muted-foreground">{connectorMessages.sftp}</p>
-                  )}
-                </div>
-
-                <p className="text-xs text-muted-foreground">
-                  Le mot de passe n&apos;est jamais renvoyé en clair. Il est appliqué au runtime pour les tests et exports SFTP.
-                </p>
-              </CardContent>
-            </Card>
+                  <EditableField
+                    label="URL Webhook"
+                    value={form.watch("notifications.webhookUrl")}
+                    onChange={(v) => form.setValue("notifications.webhookUrl", v)}
+                  />
+                </CardContent>
+              </Card>
+            </div>
           )}
 
-          {activeSection === "utilisateurs" && (
+          {activeSection === "acces" && (
             <>
               {/* ── Créer un utilisateur ─────────────────────────────────── */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <UserPlus className="h-5 w-5" />
-                    Créer un utilisateur
+                    Utilisateurs
                   </CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Comptes gestionnaires ADV et administrateurs.
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  <p className="text-sm font-medium">Créer un utilisateur</p>
                   <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2">
                     {/* Ligne 1 : identifiant + nom complet */}
                     <div className="space-y-1.5">
@@ -1473,17 +1495,16 @@ export function ParametresPage() {
                   </div>
                 </div>
               )}
-            </>
-          )}
 
-          {activeSection === "api-keys" && (
-            <>
               <Card>
                 <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h2 className="text-2xl font-bold">Clés API</h2>
-                      <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
+                      <CardTitle className="flex items-center gap-2 text-base">
+                        <Key className="h-5 w-5" />
+                        Clés API
+                      </CardTitle>
+                      <p className="text-sm text-muted-foreground mt-1">
                         Générez et gérez les clés API pour accéder à l&apos;API File2EDI de manière programmatique.
                       </p>
                     </div>
@@ -1604,14 +1625,16 @@ export function ParametresPage() {
                   </div>
                 </CardContent>
               </Card>
-            </>
-          )}
 
-          {activeSection === "securite" && (
-            <>
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-base">Sécurité applicative</CardTitle>
+                  <CardTitle className="flex items-center gap-2 text-base">
+                    <Lock className="h-5 w-5" />
+                    Sécurité applicative
+                  </CardTitle>
+                  <p className="text-xs text-muted-foreground">
+                    Politique d&apos;accès et journalisation (paramètres avancés).
+                  </p>
                 </CardHeader>
                 <CardContent className="space-y-6">
                   <div className="space-y-4">
@@ -1658,7 +1681,19 @@ export function ParametresPage() {
             </>
           )}
 
-          <div className="flex justify-end gap-3">
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {saveMessage && (
+              <p
+                className={cn(
+                  "mr-auto text-sm",
+                  saveMessage.includes("Échec") || saveMessage.includes("impossible")
+                    ? "text-destructive"
+                    : "text-emerald-600",
+                )}
+              >
+                {saveMessage}
+              </p>
+            )}
             <Button variant="outline" onClick={() => form.reset()}>
               Réinitialiser
             </Button>
@@ -1668,7 +1703,7 @@ export function ParametresPage() {
               disabled={saveMutation.isPending}
             >
               <Save className="h-4 w-4" />
-              Enregistrer
+              {saveMutation.isPending ? "Enregistrement…" : "Enregistrer"}
             </Button>
           </div>
         </div>
