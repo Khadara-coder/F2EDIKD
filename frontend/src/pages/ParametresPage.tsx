@@ -51,19 +51,38 @@ const SECTIONS = [
   { id: "ia", label: "Intelligence artificielle" },
   { id: "connecteurs", label: "Connecteurs" },
   { id: "donnees", label: "Données" },
-  { id: "acces", label: "Utilisateurs & Accès" },
+  { id: "utilisateurs", label: "Utilisateurs" },
+  { id: "api", label: "API" },
 ] as const;
 
 type SettingsSection = (typeof SECTIONS)[number]["id"];
 
 const SECTION_IDS = new Set<string>(SECTIONS.map((s) => s.id));
 
+const LEGACY_SECTION_ALIASES: Record<string, SettingsSection> = {
+  acces: "utilisateurs",
+  "api-keys": "api",
+  securite: "api",
+};
+
 function parseSettingsSection(value: string | null): SettingsSection {
+  if (value && LEGACY_SECTION_ALIASES[value]) {
+    return LEGACY_SECTION_ALIASES[value];
+  }
   if (value && SECTION_IDS.has(value)) {
     return value as SettingsSection;
   }
   return "general";
 }
+
+const FORM_SAVE_SECTIONS = new Set<SettingsSection>([
+  "general",
+  "traitement",
+  "ia",
+  "connecteurs",
+  "donnees",
+  "api",
+]);
 
 export function ParametresPage() {
   const queryClient = useQueryClient();
@@ -109,9 +128,13 @@ export function ParametresPage() {
   };
 
   useEffect(() => {
-    const fromUrl = parseSettingsSection(searchParams.get("section"));
+    const raw = searchParams.get("section");
+    const fromUrl = parseSettingsSection(raw);
     setActiveSection((current) => (current === fromUrl ? current : fromUrl));
-  }, [searchParams]);
+    if (raw && raw !== fromUrl) {
+      setSearchParams({ section: fromUrl }, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   // ── User management queries/mutations ──────────────────────────────────────
   const usersQuery = useQuery<GestionnaireUser[]>({
@@ -1150,7 +1173,7 @@ export function ParametresPage() {
             </div>
           )}
 
-          {activeSection === "acces" && (
+          {activeSection === "utilisateurs" && (
             <>
               {/* ── Créer un utilisateur ─────────────────────────────────── */}
               <Card>
@@ -1496,6 +1519,11 @@ export function ParametresPage() {
                 </div>
               )}
 
+            </>
+          )}
+
+          {activeSection === "api" && (
+            <>
               <Card>
                 <CardHeader className="pb-4">
                   <div className="flex items-center justify-between">
@@ -1505,7 +1533,7 @@ export function ParametresPage() {
                         Clés API
                       </CardTitle>
                       <p className="text-sm text-muted-foreground mt-1">
-                        Générez et gérez les clés API pour accéder à l&apos;API File2EDI de manière programmatique.
+                        Accès programmatique à l&apos;API File2EDI (n8n, intégrations externes).
                       </p>
                     </div>
                   </div>
@@ -1681,6 +1709,7 @@ export function ParametresPage() {
             </>
           )}
 
+          {FORM_SAVE_SECTIONS.has(activeSection) && (
           <div className="flex flex-wrap items-center justify-end gap-3">
             {saveMessage && (
               <p
@@ -1706,6 +1735,7 @@ export function ParametresPage() {
               {saveMutation.isPending ? "Enregistrement…" : "Enregistrer"}
             </Button>
           </div>
+          )}
         </div>
       </div>
     </>
