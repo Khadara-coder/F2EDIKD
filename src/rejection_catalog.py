@@ -89,8 +89,8 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "business_status": "PENDING_USER_INPUT",
         "retry_allowed": True,
         "manual_review_required": True,
-        "message_fr": "Les données maîtres sont absentes ou vides — synchronisation requise.",
-        "message_en": "Master data is missing or empty — synchronization required.",
+        "message_fr": "Les données maîtres sont absentes ou vides - synchronisation requise.",
+        "message_en": "Master data is missing or empty - synchronization required.",
     },
     "MASTERDATA_SCHEMA_INVALID": {
         "severity": "TECHNICAL",
@@ -119,8 +119,8 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "business_status": "PENDING_USER_INPUT",
         "retry_allowed": True,
         "manual_review_required": True,
-        "message_fr": "Ce PDF a déjà été soumis — la commande est recalculée.",
-        "message_en": "This PDF was already submitted — the order is recalculated.",
+        "message_fr": "Ce PDF a déjà été soumis - la commande est recalculée.",
+        "message_en": "This PDF was already submitted - the order is recalculated.",
     },
     "NO_VALID_ARTICLE": {
         "severity": "BUSINESS_REJECT",
@@ -135,8 +135,8 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "business_status": "REJECTED",
         "retry_allowed": False,
         "manual_review_required": True,
-        "message_fr": "Le document contient un mot-clé contrat/devis — ce n'est pas un bon de commande.",
-        "message_en": "The document contains a contract/quotation keyword — this is not a purchase order.",
+        "message_fr": "Le document contient un mot-clé contrat/devis - ce n'est pas un bon de commande.",
+        "message_en": "The document contains a contract/quotation keyword - this is not a purchase order.",
     },
     "CONTRACT_BREAK_ADDRESSES_MISSING": {
         "severity": "BLOCKER",

@@ -75,10 +75,10 @@ def main() -> int:
         fields = extract_candidate_fields(text, args.instruction, source_name, layout, {})
         structured = fields.get("structured", {})
         (case_dir / "expected.json").write_text(json.dumps(structured, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"Wrote full expected.json — trim it to the key fields you want to lock.")
+        print(f"Wrote full expected.json - trim it to the key fields you want to lock.")
     elif not (case_dir / "expected.json").exists():
         (case_dir / "expected.json").write_text("{}\n", encoding="utf-8")
-        print("Created empty expected.json — add assertions manually.")
+        print("Created empty expected.json - add assertions manually.")
 
     print(f"Golden case ready: {case_dir}")
     return 0

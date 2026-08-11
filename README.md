@@ -258,7 +258,7 @@ Le test `test_forbidden_strings.py` l'enforçe automatiquement.
 
 ---
 
-## Extraction — Champs extraits par ligne de commande
+## Extraction - Champs extraits par ligne de commande
 
 | Champ | Source | Phase |
 |-------|--------|-------|
@@ -314,4 +314,4 @@ docker compose exec api python scripts/backfill_new_fields.py
 
 ---
 
-*Bosch Thermotechnologie France — EDIPUSHBOT / GenieCommande*
+*Bosch Thermotechnologie France - EDIPUSHBOT / GenieCommande*

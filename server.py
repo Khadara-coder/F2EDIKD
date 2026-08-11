@@ -1,4 +1,4 @@
-"""EDIFACT Generator — FastAPI REST API + File2EDI React SPA.
+"""EDIFACT Generator - FastAPI REST API + File2EDI React SPA.
 
 Bosch Thermotechnologie France / ELM_STANDARD D.96A ORDERS
 Entry:  uvicorn server:app --host=0.0.0.0 --port=8000
@@ -204,7 +204,7 @@ def _auth_headers() -> dict:
         h["Content-Type"] = "application/json"
         return h
     except Exception as exc:
-        hint = (" — set DATABRICKS_CONFIG_PROFILE (ex: Khadara) or DATABRICKS_TOKEN"
+        hint = (" - set DATABRICKS_CONFIG_PROFILE (ex: Khadara) or DATABRICKS_TOKEN"
                 if IS_LOCAL else "")
         return {"Content-Type": "application/json", "_auth_error": f"{exc}{hint}"}
 
@@ -600,7 +600,7 @@ def _extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
 
 # ── History ────────────────────────────────────────────────────────────────────
 def _load_history() -> list[list]:
-    """Legacy jobs history endpoint — PostgreSQL orders live under /api/orders."""
+    """Legacy jobs history endpoint - PostgreSQL orders live under /api/orders."""
     return []
 
 
@@ -629,7 +629,7 @@ def _download_workspace_file(ws_path: str, dst_path: Path) -> None:
     available, so we fall back to the HTTP export endpoint which works
     on every platform as long as the app SP has CAN_READ on the file.
 
-    Uses ``direct_download=true`` to stream raw bytes — no base64, no
+    Uses ``direct_download=true`` to stream raw bytes - no base64, no
     10 MB limit.
     """
     import requests as _req
@@ -696,7 +696,7 @@ def _sync_masterdata() -> list[list]:
             else:
                 err_cat = str(exc)[:150]
             log.warning("masterdata sync failed for %s: %s", fname, exc)
-            rows.append([fname, "—", "—", f"ERROR: {err_cat}"])
+            rows.append([fname, "-", "-", f"ERROR: {err_cat}"])
 
     metadata_src = Path(MASTER_DATA_SRC) / MASTERDATA_SYNC_METADATA_FILENAME
     metadata_dst = Path(MASTERDATA_SYNC_METADATA_PATH)
@@ -755,6 +755,12 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"],
 async def _startup_event() -> None:
     """Initialize database and load master data on app startup."""
     log.info("🚀 Application startup...")
+    try:
+        from src.app_logs import ensure_ring_handler
+
+        ensure_ring_handler()
+    except Exception:
+        pass
     await _init_postgres_db()
     log.info("✅ Startup complete")
 
@@ -1213,13 +1219,13 @@ def _persist_uploaded_pdf(
 
 
 def _store_conversion_history(result: dict) -> None:
-    """Legacy no-op — conversions persist via File2EDI PostgreSQL store."""
+    """Legacy no-op - conversions persist via File2EDI PostgreSQL store."""
     return
 
 
 @app.get("/api/proxy/health")
 def api_proxy_health():
-    """Health check — fully local.  Always returns top-level ok/status (Issue 1 fix)."""
+    """Health check - fully local.  Always returns top-level ok/status (Issue 1 fix)."""
     from src.health_probe import build_proxy_health
 
     return build_proxy_health(
@@ -1276,7 +1282,7 @@ async def api_proxy_convert_batch(req: Request, files: list[UploadFile] = File(.
 
 
 def _ai_configuration_status() -> dict:
-    """Compatibility wrapper — prefer src.ai_status.get_ai_configuration_status."""
+    """Compatibility wrapper - prefer src.ai_status.get_ai_configuration_status."""
     from src.ai_status import get_ai_configuration_status
 
     return get_ai_configuration_status()
@@ -1286,7 +1292,7 @@ def _ai_configuration_status() -> dict:
 @app.get("/api/health")
 @app.get("/api/health/system")
 def api_health_alias():
-    """Health check — retourne le format normalisé attendu par le frontend React.
+    """Health check - retourne le format normalisé attendu par le frontend React.
     Format: {api, database, csv, sftp, ai} avec valeurs 'connected'|'disconnected'.
     """
     from src.ai_status import build_system_health_payload
@@ -1420,8 +1426,8 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
                     "severity": "info",
                     "fieldName": "resubmission",
                     "message": (
-                        f"Ce PDF a déjà été soumis (première soumission: {prev_created or '—'}). "
-                        f"État précédent: {prev_status} — {prev_lines} ligne(s) — {prev_total:,.2f} €. "
+                        f"Ce PDF a déjà été soumis (première soumission: {prev_created or '-'}). "
+                        f"État précédent: {prev_status} - {prev_lines} ligne(s) - {prev_total:,.2f} €. "
                         f"La commande est entièrement recalculée avec les patterns d'extraction actuels."
                     ),
                     "status": "Info",
@@ -1474,7 +1480,7 @@ async def _startup_sync_masterdata() -> None:
             )
         else:
             log.info(
-                "startup sftp: SFTP_HOST empty — fill .env.local then recreate api "
+                "startup sftp: SFTP_HOST empty - fill .env.local then recreate api "
                 "(docker compose -f docker-compose.dev.yml up -d --force-recreate api)"
             )
     except Exception as exc:
@@ -1487,10 +1493,10 @@ async def _startup_sync_masterdata() -> None:
             total = sum((dst / f).stat().st_size for f in _MASTER_FILES)
             _apply_masterdata_sync_metadata_to_cache_state()
             _load_masterdata_cache()
-            log.info("startup masterdata: all %d files already present (%.1f MB bundled) — skipping API sync",
+            log.info("startup masterdata: all %d files already present (%.1f MB bundled) - skipping API sync",
                      len(_MASTER_FILES), total / 1_048_576)
         else:
-            # Files missing — try API download
+            # Files missing - try API download
             rows = _sync_masterdata()
             _apply_masterdata_sync_metadata_to_cache_state()
             _load_masterdata_cache()   # warm up cache after download
@@ -1537,7 +1543,7 @@ async def _startup_sync_masterdata() -> None:
     except Exception as exc:
         log.warning("startup masterdata autosync wiring failed: %s", exc)
 
-    # ── Persistence backend (always runs — no early return above) ─────────
+    # ── Persistence backend (always runs - no early return above) ─────────
     try:
         _detect_and_init_backend()
         log.info("persistence: backend=%s persistent=%s location=%s",
@@ -1908,25 +1914,31 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
                 "fallback": True,
                 "sync": _masterdata_sync_freshness(),
                 "message": (
-                    f"Échec n8n — sync git OK (commit {str((repo_payload or {}).get('commit') or '')[:12]})"
+                    f"Échec n8n - sync git OK (commit {str((repo_payload or {}).get('commit') or '')[:12]})"
                     if repo_payload is not None
-                    else f"Échec déclenchement n8n — cache local rechargé ({err}"
+                    else f"Échec déclenchement n8n - cache local rechargé ({err}"
                     + (f" ; git: {repo_error}" if repo_error else "")
                     + ")"
                 ),
             }
 
         now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        is_async = bool(isinstance(n8n_payload, dict) and n8n_payload.get("async"))
         for key in _MD_FILES:
             _MD_LAST_SYNC[key] = now_iso
-        _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_trigger")
+        _mdr.bump_sync_metadata(
+            synced_at_utc=now_iso,
+            source="api_sync_n8n_trigger_async" if is_async else "api_sync_n8n_trigger",
+        )
         _apply_masterdata_sync_metadata_to_cache_state()
-        _load_masterdata_cache()
+        # When async, n8n will POST import + reload-cache; avoid reloading stale files now.
+        if not is_async:
+            _load_masterdata_cache()
         save_audit_event(
             "__masterdata__",
             "masterdata_sync_succeeded",
             actor,
-            {"source": "n8n_webhook", "result": n8n_payload},
+            {"source": "n8n_webhook", "result": n8n_payload, "async": is_async},
         )
         message = ""
         if isinstance(n8n_payload, dict):
@@ -1935,11 +1947,17 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
             "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
             "failed": 0,
             "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
-            "cache_reloaded": True,
+            "cache_reloaded": not is_async,
             "source": "n8n",
+            "async": is_async,
             "n8n": n8n_payload,
             "sync": _masterdata_sync_freshness(),
-            "message": message or "Workflow n8n masterdata déclenché et terminé",
+            "message": message
+            or (
+                "Workflow n8n déclenché - mise à jour en cours"
+                if is_async
+                else "Workflow n8n masterdata déclenché et terminé"
+            ),
         }
 
     if from_repo:
@@ -2050,7 +2068,7 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
     else:
         save_audit_event("__masterdata__", "masterdata_sync_failed", "system",
                          {"errors": [r[3] for r in rows if len(r) >= 4]})
-        log.warning("masterdata sync: all files failed — cache unchanged")
+        log.warning("masterdata sync: all files failed - cache unchanged")
     return {
         "synced":         len(ok_files),
         "failed":         len(err_files),
@@ -2063,7 +2081,7 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
         "source": "local",
         "message": (
             f"{len(ok_files)}/{len(rows)} fichiers synchronisés"
-            + (f" — {len(err_files)} erreur(s)" if err_files else "")
+            + (f" - {len(err_files)} erreur(s)" if err_files else "")
         ),
     }
 
@@ -2075,7 +2093,7 @@ def api_md_delta():
         statuses = create_all_tables()
         return {"results": [[s.name, "OK" if s.success else "FAIL", s.message] for s in statuses]}
     except Exception as exc:
-        return {"results": [["—", "ERROR", str(exc)]]}
+        return {"results": [["-", "ERROR", str(exc)]]}
 
 
 class MasterdataRowPayload(BaseModel):
@@ -2112,7 +2130,7 @@ async def api_md_import(
     )
     return {
         "ok": True,
-        "message": f"Import OK — {result.get('rows')} lignes ({result.get('file')})",
+        "message": f"Import OK - {result.get('rows')} lignes ({result.get('file')})",
         **result,
     }
 
@@ -2138,7 +2156,7 @@ def api_md_add_row(payload: MasterdataRowPayload):
     )
     return {
         "ok": True,
-        "message": f"Ligne ajoutée — {result.get('rows')} lignes au total",
+        "message": f"Ligne ajoutée - {result.get('rows')} lignes au total",
         **result,
     }
 
@@ -2221,14 +2239,14 @@ def api_settings():
         "sftp": {
             "configured":  sftp_ok,
             "status":      "CONFIGURED" if sftp_ok else "NOT_CONFIGURED",
-            "host":        masked_host if sftp_ok else "—",
+            "host":        masked_host if sftp_ok else "-",
             "remote_path": (
                 str((persisted.get("sftpConfig") or {}).get("remotePath") or "").strip()
                 if isinstance(persisted, dict)
                 else ""
             )
             or os.environ.get("SFTP_REMOTE_DIR")
-            or "—",
+            or "-",
             "last_error":  None,
         },
         "email": {
@@ -2349,7 +2367,7 @@ def api_admin_upsert_role(req: Request, payload: RoleUpsertPayload):
             overrides = settings.get("rbac_role_overrides") or {}
             overrides[actor] = role
             store.save_app_settings({**settings, "rbac_role_overrides": overrides})
-        # (other backends: no-op — manage roles via env vars APP_ADMIN_USERS)
+        # (other backends: no-op - manage roles via env vars APP_ADMIN_USERS)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Mise à jour du rôle impossible: {exc}")
 
@@ -2516,7 +2534,7 @@ INDEX_HTML = _FRONTEND_DIST / "index.html"
 if INDEX_HTML.exists():
     log.info("UI: React SPA (frontend/dist)")
 else:
-    log.warning("frontend/dist missing — run: cd frontend && npm install && npm run build")
+    log.warning("frontend/dist missing - run: cd frontend && npm install && npm run build")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # FULL PLATFORM BACKEND  (n8n → File2EDI migration)
@@ -2602,7 +2620,7 @@ def _init_db() -> None:
 def _add_audit(conversion_id: str, event_type: str,
                actor: str = "system", payload: dict | None = None,
                result: str | None = None) -> None:
-    """Append one audit event row (PostgreSQL backend — audit handled via File2EDI store)."""
+    """Append one audit event row (PostgreSQL backend - audit handled via File2EDI store)."""
     try:
         # PostgreSQL backend: audit events stored via File2EDI store
         # This function is now a no-op; audit logging handled by router.py
@@ -2685,12 +2703,12 @@ def _emit_conversion_callback(conversion_id: str, event_type: str, actor: str = 
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# PERSISTENCE ADAPTER  — Delta ▶ Workspace-JSONL ▶ PostgreSQL
+# PERSISTENCE ADAPTER  - Delta ▶ Workspace-JSONL ▶ PostgreSQL
 # ─────────────────────────────────────────────────────────────────────────────
 #
-# TIER 1 — Delta tables (preferred on Databricks, scalable, persistent)
-# TIER 2 — Workspace JSONL (no admin needed, user-grantable)
-# TIER 3 — PostgreSQL via File2EDI store (PG_DATABASE_URL) — default runtime
+# TIER 1 - Delta tables (preferred on Databricks, scalable, persistent)
+# TIER 2 - Workspace JSONL (no admin needed, user-grantable)
+# TIER 3 - PostgreSQL via File2EDI store (PG_DATABASE_URL) - default runtime
 # ══════════════════════════════════════════════════════════════════════════════
 
 import threading as _threading
@@ -2755,7 +2773,7 @@ def _ws_probe(base_path: str) -> None:
     """Test write+read access to the persist folder.  No workspace/delete ever called.
 
     Uses conversions.jsonl.tmp as the probe target so the write is harmless if left
-    behind — the first real JSONL write will overwrite it (Req 3+4+5).
+    behind - the first real JSONL write will overwrite it (Req 3+4+5).
     """
     probe_path = f"{base_path}/conversions.jsonl.tmp"
     probe_content = _b64.b64encode(b"[]\n").decode()   # valid empty JSONL, safe if left
@@ -2768,7 +2786,7 @@ def _ws_probe(base_path: str) -> None:
     r2 = _ws_api("GET", "/api/2.0/workspace/get-status", params={"path": probe_path})
     if r2.status_code != 200:
         raise RuntimeError(f"workspace read probe HTTP {r2.status_code}")
-    # No delete — .tmp file left in place; overwritten on first real JSONL write
+    # No delete - .tmp file left in place; overwritten on first real JSONL write
 
 def _ws_read_jsonl(ws_path: str) -> list[dict]:
     """Read JSONL from workspace, with short-lived cache. Returns [] if absent."""
@@ -2795,7 +2813,7 @@ def _ws_write_jsonl(ws_path: str, rows: list[dict]) -> None:
     """Atomic JSONL write: stage → verify → promote.  No workspace/delete ever called.
 
     The staging file (ws_path + ".tmp") is intentionally left in place after each
-    write cycle — it is overwritten by the next write (Req 3+4+5).  If stage-verify
+    write cycle - it is overwritten by the next write (Req 3+4+5).  If stage-verify
     or promote fails, ws_path is untouched and the caller's except block fires (Req 6).
     """
     text    = "\n".join(_json.dumps(r, default=str) for r in rows) + "\n"
@@ -2963,7 +2981,7 @@ def save_order_graph(review: dict) -> bool:
 
     Best-effort: active only when the Delta backend and order-graph tables are
     available. Returns True on success, False when skipped or on failure
-    (failures are logged, never raised — must not break the primary store path).
+    (failures are logged, never raised - must not break the primary store path).
     """
     if _PERSIST_BACKEND.get("backend") != "delta":
         return False
@@ -3059,7 +3077,7 @@ def load_order_graphs_from_delta() -> list[dict]:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PUBLIC ADAPTER — the six canonical functions
+# PUBLIC ADAPTER - the six canonical functions
 # ─────────────────────────────────────────────────────────────────────────────
 
 def get_storage_mode() -> dict:
@@ -3714,7 +3732,7 @@ async def api_generate(cid: str, req: Request):
         except Exception as _e:
             log.debug("api_generate: store lookup failed: %s", _e)
         if not row:
-            return JSONResponse(status_code=404, content={"error": "Conversion introuvable — utilisez /api/orders/{id}/generate"})
+            return JSONResponse(status_code=404, content={"error": "Conversion introuvable - utilisez /api/orders/{id}/generate"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
@@ -3750,18 +3768,18 @@ async def api_generate(cid: str, req: Request):
     if _cust.get("rows", 0) == 0:
         md_blockers.append({
             "code": "MASTERDATA_MISSING",
-            "message": "Cache clients vide — synchronisez les données maîtres avant de générer.",
+            "message": "Cache clients vide - synchronisez les données maîtres avant de générer.",
         })
     elif _cust.get("schema_valid") is False:
         mc = _cust.get("missing_columns", [])
         md_blockers.append({
             "code": "MASTERDATA_SCHEMA_INVALID",
-            "message": f"Schéma clients invalide — colonnes manquantes: {', '.join(mc)}",
+            "message": f"Schéma clients invalide - colonnes manquantes: {', '.join(mc)}",
         })
     if _mats.get("rows", 0) == 0:
         md_blockers.append({
             "code": "MASTERDATA_MISSING",
-            "message": "Cache articles vide — les codes MATNR ne peuvent pas être validés.",
+            "message": "Cache articles vide - les codes MATNR ne peuvent pas être validés.",
         })
     if md_blockers:
         save_audit_event(cid, "edifact_generation_failed", actor,
@@ -3771,7 +3789,7 @@ async def api_generate(cid: str, req: Request):
             "status":        "REVIEW_REQUIRED",
             "rejection_code": md_blockers[0]["code"],
             "blockers":      md_blockers,
-            "message":       "Génération bloquée — données maîtres insuffisantes.",
+            "message":       "Génération bloquée - données maîtres insuffisantes.",
         }
 
     # ── Validation: mandatory blockers ──────────────────────────────────
@@ -3802,8 +3820,8 @@ async def api_generate(cid: str, req: Request):
             "blockers": blockers,
             "errors": blocker_messages,
             "generated": False,
-            "message": " — ".join(blocker_messages) if blocker_messages else (
-                "Blocages restants — corrigez les champs avant de générer."
+            "message": " - ".join(blocker_messages) if blocker_messages else (
+                "Blocages restants - corrigez les champs avant de générer."
             ),
         }
 
@@ -3896,7 +3914,7 @@ async def api_retry_sftp(cid: str):
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 @app.get("/api/dashboard")
 def api_dashboard():
-    """Legacy KPIs endpoint — redirected to PostgreSQL-backed React API."""
+    """Legacy KPIs endpoint - redirected to PostgreSQL-backed React API."""
     return {"today": {}, "totals": {}, "work_queue": [],
             "_note": "Use /api/dashboard/metrics and /api/dashboard/review-queue"}
 
@@ -3904,42 +3922,42 @@ def api_dashboard():
 # ── Conversions list ──────────────────────────────────────────────────────────
 @app.get("/api/conversions")
 def api_conversions(status: str = "", q: str = "", limit: int = 100):
-    """Legacy endpoint — use /api/orders instead."""
+    """Legacy endpoint - use /api/orders instead."""
     return {"conversions": [], "_note": "Use /api/orders for PostgreSQL-backed order list"}
 
 
 # ── Single conversion detail ──────────────────────────────────────────────────
 @app.get("/api/conversions/{cid}")
 def api_conversion_detail(cid: str):
-    """Legacy endpoint — use /api/orders/{id}/review instead."""
+    """Legacy endpoint - use /api/orders/{id}/review instead."""
     return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/review"})
 
 
 # ── Approve ───────────────────────────────────────────────────────────────────
 @app.post("/api/conversions/{cid}/approve")
 async def api_approve(cid: str, req: Request):
-    """Legacy approve — use /api/orders/{id}/approve instead."""
+    """Legacy approve - use /api/orders/{id}/approve instead."""
     return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/approve"})
 
 
 # ── Reject ────────────────────────────────────────────────────────────────────
 @app.post("/api/conversions/{cid}/reject")
 async def api_reject(cid: str, req: Request):
-    """Legacy reject — use /api/orders/{id}/reject instead."""
+    """Legacy reject - use /api/orders/{id}/reject instead."""
     return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/reject"})
 
 
 # ── Save corrections ──────────────────────────────────────────────────────────
 @app.post("/api/conversions/{cid}/review")
 async def api_save_review(cid: str, req: Request):
-    """Legacy corrections endpoint — use /api/orders/{id}/update instead."""
+    """Legacy corrections endpoint - use /api/orders/{id}/update instead."""
     return JSONResponse(status_code=404, content={"error": "Use /api/orders/{id}/update"})
 
 
 # ── Audit trail ───────────────────────────────────────────────────────────────
 @app.get("/api/conversions/{cid}/audit")
 def api_audit(cid: str):
-    """Legacy audit endpoint — use /api/orders/{id}/review (includes traceability)."""
+    """Legacy audit endpoint - use /api/orders/{id}/review (includes traceability)."""
     return {"events": []}
 
 
@@ -4046,12 +4064,12 @@ def _send_generated_edifact_sftp(cid: str, req: Request):
 
 @app.post("/api/conversions/{cid}/send-sftp")
 def api_send_sftp(cid: str, req: Request):
-    """Legacy SFTP endpoint — use /api/orders/{id}/send-sftp instead."""
+    """Legacy SFTP endpoint - use /api/orders/{id}/send-sftp instead."""
     return _send_generated_edifact_sftp(cid, req)
 
 
 def _upsert_sftp_status(cid: str, sftp_status: str, detail: str = "") -> None:
-    """Update SFTP status — no-op for PostgreSQL (status tracked via File2EDI store)."""
+    """Update SFTP status - no-op for PostgreSQL (status tracked via File2EDI store)."""
     log.debug("_upsert_sftp_status(%s, %s): postgres backend, skipped", cid, sftp_status)
 
 
@@ -4064,7 +4082,7 @@ async def api_preview_rejection_endpoint(req: Request):
     except Exception:
         request = {}
     cid        = request.get("conversion_id","?")
-    filename   = request.get("source_filename","—")
+    filename   = request.get("source_filename","-")
     po_number  = request.get("po_number","INCONNU")
     code       = request.get("rejection_code","?")
     message    = request.get("rejection_message") or REJECT_LABELS.get(code, code)
@@ -4089,7 +4107,7 @@ Action requise :
 Merci de vérifier la commande et de corriger les données si nécessaire.
 
 Cordialement,
-File2EDI — EDIFACT Generator
+File2EDI - EDIFACT Generator
 """
     subject_en = f"Your Order {po_number} was rejected"
     body_en = f"""Dear Sir or Madam,
@@ -4197,10 +4215,10 @@ def api_md_reload_cache():
         },
         "sapFeedback": sap_feedback,
         "message": (
-            f"Cache rechargé — sync={md_sync.get('status')}"
+            f"Cache rechargé - sync={md_sync.get('status')}"
             + (f" commit={(md_sync.get('commit') or '')[:12]}" if md_sync.get("commit") else "")
             + (
-                f" — SAP confirmées={sap_feedback.get('confirmed', 0)}"
+                f" - SAP confirmées={sap_feedback.get('confirmed', 0)}"
                 if sap_feedback.get("ok")
                 else ""
             )
@@ -4278,7 +4296,7 @@ if STATIC_DIR.exists():
 
 @app.get("/{full_path:path}", response_class=HTMLResponse, include_in_schema=False)
 def spa_fallback(full_path: str):
-    """React Router paths (/revue, /convertir, …) — serve index.html on direct URL access."""
+    """React Router paths (/revue, /convertir, …) - serve index.html on direct URL access."""
     if full_path.startswith(("api/", "assets/")):
         raise HTTPException(404)
     # Serve static files at the dist root (e.g. genie-commande.png, file.png)

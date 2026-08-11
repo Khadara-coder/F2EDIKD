@@ -1,4 +1,4 @@
-"""Tests for src/api.py — FastAPI endpoints."""
+"""Tests for src/api.py - FastAPI endpoints."""
 from __future__ import annotations
 
 import importlib

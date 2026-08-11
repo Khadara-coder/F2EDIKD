@@ -1,4 +1,4 @@
-# Stack n8n autonome — séparée de File2EDI / GenieCommande.
+# Stack n8n autonome - séparée de File2EDI / GenieCommande.
 # Usage : docker compose -f docker-compose.n8n.yml up -d
 #
 # Communication UNIQUEMENT par HTTP :

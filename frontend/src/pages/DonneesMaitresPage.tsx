@@ -166,6 +166,11 @@ export function DonneesMaitresPage() {
     onSuccess: (res) => {
       setSyncMessage(res.message || "Synchronisation terminée");
       invalidateMasterData();
+      // n8n continues in background (import + reload-cache); refresh UI shortly after.
+      if (res.async) {
+        window.setTimeout(() => invalidateMasterData(), 8000);
+        window.setTimeout(() => invalidateMasterData(), 20000);
+      }
     },
     onError: (err) => {
       setSyncMessage(err instanceof Error ? err.message : "Échec de la synchronisation");
@@ -283,32 +288,32 @@ export function DonneesMaitresPage() {
           <div className="lg:col-span-2 space-y-3">
             <StatCard
               label="Clients actifs"
-              value={summary?.activeClients?.toLocaleString("fr-FR") ?? "—"}
+              value={summary?.activeClients?.toLocaleString("fr-FR") ?? "-"}
               sublabel={growthLabel(summary?.monthlyGrowth.clients)}
               icon={Building2}
             />
             <StatCard
               label="Ship-to"
-              value={summary?.shiptoCount?.toLocaleString("fr-FR") ?? "—"}
+              value={summary?.shiptoCount?.toLocaleString("fr-FR") ?? "-"}
               sublabel={growthLabel(summary?.monthlyGrowth.shipto)}
               icon={Database}
             />
             <StatCard
               label="Articles"
-              value={summary?.articlesCount?.toLocaleString("fr-FR") ?? "—"}
+              value={summary?.articlesCount?.toLocaleString("fr-FR") ?? "-"}
               sublabel={growthLabel(summary?.monthlyGrowth.articles)}
               icon={Package}
             />
             <StatCard
               label="Règles"
-              value={summary?.rulesCount?.toLocaleString("fr-FR") ?? "—"}
+              value={summary?.rulesCount?.toLocaleString("fr-FR") ?? "-"}
               sublabel={growthLabel(summary?.monthlyGrowth.rules)}
               icon={Shield}
             />
             <p className="text-xs text-muted-foreground px-1">
               Dernière synchronisation
               <br />
-              {summary?.lastSync ? formatDateTime(summary.lastSync, displayTimeZone) : "—"}
+              {summary?.lastSync ? formatDateTime(summary.lastSync, displayTimeZone) : "-"}
               {summary?.syncStatus ? (
                 <>
                   <br />
@@ -390,16 +395,16 @@ export function DonneesMaitresPage() {
                         <TableCell className="font-mono text-xs">{c.clientId}</TableCell>
                         <TableCell className="font-medium">{c.name}</TableCell>
                         <TableCell>{c.soldto}</TableCell>
-                        <TableCell className="text-xs">{c.vat || "—"}</TableCell>
-                        <TableCell>{c.country || "—"}</TableCell>
-                        <TableCell>{c.city || "—"}</TableCell>
+                        <TableCell className="text-xs">{c.vat || "-"}</TableCell>
+                        <TableCell>{c.country || "-"}</TableCell>
+                        <TableCell>{c.city || "-"}</TableCell>
                         <TableCell>
                           <Badge variant={c.status === "Actif" ? "success" : "secondary"}>
                             {c.status}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-sm">
-                          {c.updatedAt ? formatDateTime(c.updatedAt, displayTimeZone) : "—"}
+                          {c.updatedAt ? formatDateTime(c.updatedAt, displayTimeZone) : "-"}
                         </TableCell>
                       </TableRow>
                     ))}
@@ -439,10 +444,10 @@ export function DonneesMaitresPage() {
                         <TableCell className="font-mono text-xs">{row.shipto}</TableCell>
                         <TableCell className="font-mono text-xs">{row.soldto}</TableCell>
                         <TableCell className="font-medium">{row.name}</TableCell>
-                        <TableCell>{row.country || "—"}</TableCell>
-                        <TableCell>{row.city || "—"}</TableCell>
-                        <TableCell>{row.partnerFunction || "—"}</TableCell>
-                        <TableCell className="text-xs">{row.advManager || "—"}</TableCell>
+                        <TableCell>{row.country || "-"}</TableCell>
+                        <TableCell>{row.city || "-"}</TableCell>
+                        <TableCell>{row.partnerFunction || "-"}</TableCell>
+                        <TableCell className="text-xs">{row.advManager || "-"}</TableCell>
                       </TableRow>
                     ))}
                   </DataTable>
@@ -490,7 +495,7 @@ export function DonneesMaitresPage() {
                               }
                               title={value || undefined}
                             >
-                              {value || "—"}
+                              {value || "-"}
                             </TableCell>
                           );
                         })}
@@ -555,10 +560,10 @@ export function DonneesMaitresPage() {
                         <TableCell className="max-w-[140px] truncate text-xs">{row.buttonAccept || "Valider"}</TableCell>
                         <TableCell className="max-w-[140px] truncate text-xs">{row.buttonReject || "Ignorer"}</TableCell>
                         <TableCell className="max-w-[140px] truncate text-xs text-muted-foreground">
-                          {row.autoActionAccept || "—"}
+                          {row.autoActionAccept || "-"}
                         </TableCell>
                         <TableCell className="max-w-[140px] truncate text-xs text-muted-foreground">
-                          {row.autoActionReject || "—"}
+                          {row.autoActionReject || "-"}
                         </TableCell>
                         <TableCell className="text-sm max-w-xs truncate">{row.message}</TableCell>
                       </TableRow>
@@ -587,11 +592,11 @@ export function DonneesMaitresPage() {
                 rows={[
                   ["ID client", selectedClient.clientId],
                   ["Sold-to", selectedClient.soldto],
-                  ["TVA", selectedClient.vat || "—"],
-                  ["Adresse", selectedClient.address || "—"],
-                  ["Ville", selectedClient.city || "—"],
-                  ["Code postal", selectedClient.postalCode || "—"],
-                  ["Pays", selectedClient.country || "—"],
+                  ["TVA", selectedClient.vat || "-"],
+                  ["Adresse", selectedClient.address || "-"],
+                  ["Ville", selectedClient.city || "-"],
+                  ["Code postal", selectedClient.postalCode || "-"],
+                  ["Pays", selectedClient.country || "-"],
                   ["Devise", selectedClient.currency ?? "EUR"],
                 ]}
                 onShowAll={() => setDetailFields(selectedClient.fields || {})}
@@ -605,11 +610,11 @@ export function DonneesMaitresPage() {
                 rows={[
                   ["Ship-to", selectedShipTo.shipto],
                   ["Sold-to", selectedShipTo.soldto],
-                  ["Adresse", selectedShipTo.address || "—"],
-                  ["Ville", selectedShipTo.city || "—"],
-                  ["Code postal", selectedShipTo.postalCode || "—"],
-                  ["Pays", selectedShipTo.country || "—"],
-                  ["ADV", selectedShipTo.advManager || "—"],
+                  ["Adresse", selectedShipTo.address || "-"],
+                  ["Ville", selectedShipTo.city || "-"],
+                  ["Code postal", selectedShipTo.postalCode || "-"],
+                  ["Pays", selectedShipTo.country || "-"],
+                  ["ADV", selectedShipTo.advManager || "-"],
                 ]}
                 onShowAll={() => setDetailFields(selectedShipTo.fields || {})}
               />
@@ -623,11 +628,11 @@ export function DonneesMaitresPage() {
                   Object.keys(selectedArticle.fields || {}).length > 0
                     ? Object.entries(selectedArticle.fields || {}).map(([k, v]) => [
                         k,
-                        v || "—",
+                        v || "-",
                       ])
                     : [
-                        ["MATNR", selectedArticle.materialId || "—"],
-                        ["MAKTX", selectedArticle.description || "—"],
+                        ["MATNR", selectedArticle.materialId || "-"],
+                        ["MAKTX", selectedArticle.description || "-"],
                       ]
                 }
                 onShowAll={() => setDetailFields(selectedArticle.fields || {
@@ -648,8 +653,8 @@ export function DonneesMaitresPage() {
                   ["Mode", selectedRule.mode || "Manuel"],
                   ["Bouton accepter", selectedRule.buttonAccept || "Valider"],
                   ["Bouton rejeter", selectedRule.buttonReject || "Ignorer"],
-                  ["Action auto (accepter)", selectedRule.autoActionAccept || "—"],
-                  ["Action auto (rejeter)", selectedRule.autoActionReject || "—"],
+                  ["Action auto (accepter)", selectedRule.autoActionAccept || "-"],
+                  ["Action auto (rejeter)", selectedRule.autoActionReject || "-"],
                   ["Message", selectedRule.message],
                   ["Retry", selectedRule.retryAllowed ? "Oui" : "Non"],
                   ["Revue manuelle", selectedRule.manualReview ? "Oui" : "Non"],
@@ -702,7 +707,7 @@ export function DonneesMaitresPage() {
         <DialogContent className="max-w-md max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
-              Ajouter —{" "}
+              Ajouter -{" "}
               {tab === "clients" ? "client" : tab === "shipto" ? "ship-to" : "article"}
             </DialogTitle>
           </DialogHeader>
@@ -747,7 +752,7 @@ export function DonneesMaitresPage() {
               Object.entries(detailFields).map(([k, v]) => (
                 <div key={k} className="flex justify-between gap-3 border-b pb-2">
                   <span className="text-muted-foreground font-mono text-xs">{k}</span>
-                  <span className="text-right break-all">{v || "—"}</span>
+                  <span className="text-right break-all">{v || "-"}</span>
                 </div>
               ))}
           </div>
@@ -852,7 +857,7 @@ function DetailCard({
       <CardHeader className="flex flex-row items-start justify-between space-y-0">
         <div>
           <p className="text-xs font-semibold uppercase text-muted-foreground">Détail</p>
-          <CardTitle className="text-lg mt-1">{title || "—"}</CardTitle>
+          <CardTitle className="text-lg mt-1">{title || "-"}</CardTitle>
           {badge ? (
             <Badge variant="success" className="mt-2">
               {badge}

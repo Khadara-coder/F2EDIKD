@@ -1,4 +1,4 @@
-# Databricks — Rôle dans l'architecture GenieCommande
+# Databricks - Rôle dans l'architecture GenieCommande
 
 ## Architecture actuelle
 
@@ -16,8 +16,8 @@ Databricks / GitHub               ← repo masterdata RSR1DY/masterdata.git
 ```
 
 **Databricks n'héberge plus l'application.** Il fournit deux services :
-1. **Model Serving** — endpoint LLM pour l'extraction intelligente des PDFs
-2. **Source masterdata** — repo git utilisé pour mettre à jour les CSV de référence
+1. **Model Serving** - endpoint LLM pour l'extraction intelligente des PDFs
+2. **Source masterdata** - repo git utilisé pour mettre à jour les CSV de référence
 
 ---
 
@@ -85,12 +85,12 @@ Champs attendus :
 
 Le script requiert un accès git vers `github.boschdevcloud.com`.
 
-Option 1 — SSH key dans l'agent :
+Option 1 - SSH key dans l'agent :
 ```bash
 export GIT_SSH_COMMAND="ssh -i /root/.ssh/id_ed25519_masterdata -o StrictHostKeyChecking=no"
 ```
 
-Option 2 — Token HTTPS dans l'URL :
+Option 2 - Token HTTPS dans l'URL :
 ```bash
 --repo-url https://<token>@github.boschdevcloud.com/RSR1DY/masterdata.git
 ```

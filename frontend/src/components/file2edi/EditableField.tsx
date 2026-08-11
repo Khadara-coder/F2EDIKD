@@ -57,7 +57,7 @@ export function EditableField({
   };
 
   const flag = editFlag ?? (manuallyEdited ? "manual" : undefined);
-  const displayValue = type === "date" ? formatDate(value) : (value || "—");
+  const displayValue = type === "date" ? formatDate(value) : (value || "-");
 
   return (
     <div className={cn("group space-y-1", className)}>

@@ -7,7 +7,7 @@ conn = sqlite3.connect("data/file2edi.db")
 conn.row_factory = sqlite3.Row
 
 print("=" * 90)
-print(f"COMMANDES ET LIGNES EXTRAITES — 20 dernieres (sur 221 total)")
+print(f"COMMANDES ET LIGNES EXTRAITES - 20 dernieres (sur 221 total)")
 print("=" * 90)
 
 orders = conn.execute("""

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test de 50 documents aléatoires — RAG Purchase Orders
+Test de 50 documents aléatoires - RAG Purchase Orders
 Évalue la qualité d'extraction sur un échantillon réel des améliorations Phase 1+2.
 
 Usage (dans le container):
@@ -125,7 +125,7 @@ def main(source_dir: Path):
     all_pdfs = [p for p in source_dir.iterdir() if p.suffix.lower() == ".pdf"]
     
     if len(all_pdfs) < N_SAMPLE:
-        print(f"⚠  Seulement {len(all_pdfs)} PDFs trouvés — test sur tous")
+        print(f"⚠  Seulement {len(all_pdfs)} PDFs trouvés - test sur tous")
         sample = all_pdfs
     else:
         sample = random.sample(all_pdfs, N_SAMPLE)
@@ -133,7 +133,7 @@ def main(source_dir: Path):
     sample.sort(key=lambda p: p.name)
     
     print(f"\n{'='*65}")
-    print(f"TEST EXTRACTION — {N_SAMPLE} PDFs ALÉATOIRES")
+    print(f"TEST EXTRACTION - {N_SAMPLE} PDFs ALÉATOIRES")
     print(f"Source: {source_dir}")
     print(f"Seed:   {SEED}  |  Date: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"{'='*65}\n")
@@ -202,7 +202,7 @@ def main(source_dir: Path):
     n_err = len(errors)
     
     print(f"\n{'='*65}")
-    print(f"RÉSUMÉ — {n_ok}/{N_SAMPLE} documents traités ({n_err} erreurs)")
+    print(f"RÉSUMÉ - {n_ok}/{N_SAMPLE} documents traités ({n_err} erreurs)")
     print(f"{'='*65}")
     
     if n_ok == 0:

@@ -1,4 +1,4 @@
-"""Rejection engine — runs Esker-compatible checks on extracted order data.
+"""Rejection engine - runs Esker-compatible checks on extracted order data.
 
 Implements the 9 Esker rejection rules from FILE2EDI app/engines/rejection_engine.py,
 adapted to work against both:
@@ -6,10 +6,10 @@ adapted to work against both:
   • The src.engine_adapter ``order`` dict format
 
 Every returned rejection dict has keys:
-    code (str)       — matches a REJECTION_CATALOG key
-    message (str)    — French short message for UI/logging
-    severity (str)   — "blocking" | "warning"
-    details (dict)   — optional context
+    code (str)       - matches a REJECTION_CATALOG key
+    message (str)    - French short message for UI/logging
+    severity (str)   - "blocking" | "warning"
+    details (dict)   - optional context
 
 Public API:
     check_rejections(structured, master_data, materials) → list[dict]

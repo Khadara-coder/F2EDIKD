@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Test runner complet — Phase 1 + Phase 2 validation
+Test runner complet - Phase 1 + Phase 2 validation
 Tests toutes les améliorations récentes:
 - Extraction quantité (variants QTÉ/QTE/QTY/QNT)
 - Customer reference extraction
@@ -246,7 +246,7 @@ try:
     check("database field present", "database" in data, list(data.keys()))
 
 except requests.exceptions.ConnectionError:
-    check("API health (running?)", False, "Connection refused — API not running")
+    check("API health (running?)", False, "Connection refused - API not running")
 except Exception as e:
     check("API health", False, str(e))
 
@@ -270,6 +270,6 @@ print(f"\n  {passed}/{total} tests passed", end="")
 if failed > 0:
     print(f"  ({failed} FAILED)")
 else:
-    print("  — ALL PASS ✓")
+    print("  - ALL PASS ✓")
 
 sys.exit(0 if failed == 0 else 1)

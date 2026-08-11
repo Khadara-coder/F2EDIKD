@@ -141,7 +141,7 @@
 
 ## Extraction Quality UAT (Phase 1+2+3)
 
-### EQ-01: Quantité — Variantes keywords
+### EQ-01: Quantité - Variantes keywords
 - **Input**: PDF avec "QTÉ 5" ou "QTY 3" ou "QNT 2" dans les lignes
 - **Expected**: `quantity` extrait correctement (pas NULL, pas 0)
 - **Vérifier**: `scripts/test_random_pdfs.py` → colonne Qty ≥ 80%

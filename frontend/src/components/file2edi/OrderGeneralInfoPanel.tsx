@@ -106,9 +106,9 @@ export function OrderGeneralInfoPanel({
   });
 
   const soldtoSapId = cleanDisplay(soldtoMd?.SOLDTO ?? soldtoCode);
-  const soldtoName = cleanDisplay(soldtoMd?.NAME ?? soldto?.partnerName ?? "—");
+  const soldtoName = cleanDisplay(soldtoMd?.NAME ?? soldto?.partnerName ?? "-");
   const clientName = cleanDisplay(
-    shipto?.partnerName || shiptoMd?.NAME || order.clientName || "—",
+    shipto?.partnerName || shiptoMd?.NAME || order.clientName || "-",
   );
 
   const handleSoldtoSelect = async (md: MasterDataCustomerRow) => {

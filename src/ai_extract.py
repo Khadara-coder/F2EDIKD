@@ -118,7 +118,7 @@ def _try_tesseract(pdf_path: Path) -> str:
         doc.close()
         return "\n".join(bits).strip()
     except ImportError:
-        log.debug("pytesseract/fitz/Pillow not available — skipping OCR")
+        log.debug("pytesseract/fitz/Pillow not available - skipping OCR")
         return ""
     except Exception as exc:
         log.warning("pytesseract OCR failed: %s", exc)
@@ -143,8 +143,8 @@ def extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
             log.debug("PDF text extracted via %s (%d chars)", name, len(text))
             return text, name
 
-    # OCR last resort (slow — only for image-only PDFs)
-    log.info("All text extractors returned short text — trying OCR")
+    # OCR last resort (slow - only for image-only PDFs)
+    log.info("All text extractors returned short text - trying OCR")
     text = _try_tesseract(pdf_path)
     if text:
         return text, "tesseract"
@@ -220,7 +220,7 @@ Return ONE JSON object only with these exact keys (no markdown, no explanation):
     }
   ]
 }
-Use null for any field not found. Strict JSON only — no extra text."""
+Use null for any field not found. Strict JSON only - no extra text."""
 
 
 def _sanitize_ai_json(raw: str) -> dict:
@@ -237,7 +237,7 @@ def _sanitize_ai_json(raw: str) -> dict:
     try:
         return json.loads(s)
     except json.JSONDecodeError as exc:
-        log.warning("AI JSON parse error: %s — raw: %.200s", exc, raw)
+        log.warning("AI JSON parse error: %s - raw: %.200s", exc, raw)
         return {"status": "parse_error", "error": f"JSON_PARSE_FAILED: {exc}", "raw": raw[:500]}
 
 
@@ -291,7 +291,7 @@ def extract_order_with_ai(
     2. Send to databricks-gpt-oss-120b for structured extraction.
     3. Normalize and map to AiExtractResult.
 
-    Never raises — errors are captured in ``result.error``.
+    Never raises - errors are captured in ``result.error``.
     """
     # 1. Text extraction
     text, method = extract_pdf_text(pdf_path)

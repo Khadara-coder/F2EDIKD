@@ -103,14 +103,14 @@ export function workflowMotif(row: Pick<
 
   if (group === "inProgress") {
     if (status === "En attente" && row.holdReason) {
-      return `En attente — ${row.holdReason}`;
+      return `En attente - ${row.holdReason}`;
     }
     if (status === "Transféré") {
-      const from = getDisplayName?.(row.transferredFrom) || row.transferredFrom || "—";
-      return row.transferNote ? `Transféré par ${from} — ${row.transferNote}` : `Transféré par ${from}`;
+      const from = getDisplayName?.(row.transferredFrom) || row.transferredFrom || "-";
+      return row.transferNote ? `Transféré par ${from} - ${row.transferNote}` : `Transféré par ${from}`;
     }
     if (status === "Généré" || status === "Validé") {
-      return "Traité — EDIFACT prêt, en attente envoi SAP";
+      return "Traité - EDIFACT prêt, en attente envoi SAP";
     }
     return null;
   }

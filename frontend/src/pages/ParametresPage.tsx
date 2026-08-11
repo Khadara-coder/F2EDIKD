@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, CheckCircle2, Database, Key, Lock, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, Database, Key, Lock, RefreshCw, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/hooks/useFile2Edi";
 import { appSettingsSchema, type AppSettingsForm } from "@/schemas";
@@ -53,6 +53,7 @@ const SECTIONS = [
   { id: "donnees", label: "Données" },
   { id: "utilisateurs", label: "Utilisateurs" },
   { id: "api", label: "API" },
+  { id: "logs", label: "Logs" },
 ] as const;
 
 type SettingsSection = (typeof SECTIONS)[number]["id"];
@@ -286,7 +287,7 @@ export function ParametresPage() {
     onSuccess: (res, vars) => {
       const connector = vars.connector;
       const label = res.status === "connected" ? "Connecté" : "Déconnecté";
-      const msg = res.message ? `${label} — ${res.message}` : label;
+      const msg = res.message ? `${label} - ${res.message}` : label;
       setConnectorMessages((prev) => ({ ...prev, [connector]: msg }));
       queryClient.setQueryData(["settings"], (current: unknown) => {
         const settings = current && typeof current === "object" ? (current as Record<string, unknown>) : {};
@@ -368,6 +369,41 @@ export function ParametresPage() {
   });
 
   const apiKeyItems = useMemo(() => apiKeysQuery.data?.items ?? [], [apiKeysQuery.data]);
+  const [logLevel, setLogLevel] = useState("INFO");
+  const [logSearch, setLogSearch] = useState("");
+  const [logFile, setLogFile] = useState<string>("");
+  const [logKind, setLogKind] = useState<"technical" | "business" | "all">("business");
+  const [logAutoRefresh, setLogAutoRefresh] = useState(() => {
+    try {
+      return window.localStorage.getItem("file2edi.logs.autoRefresh") === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem("file2edi.logs.autoRefresh", logAutoRefresh ? "1" : "0");
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }, [logAutoRefresh]);
+
+  const logsQuery = useQuery({
+    queryKey: ["admin", "logs", logKind, logLevel, logSearch, logFile],
+    queryFn: () =>
+      api.getAppLogs({
+        limit: 300,
+        kind: logKind,
+        level: logLevel,
+        search: logSearch.trim() || undefined,
+        file: logKind === "business" ? undefined : logFile || undefined,
+      }),
+    enabled: activeSection === "logs",
+    refetchInterval: activeSection === "logs" && logAutoRefresh ? 5000 : false,
+    retry: 1,
+  });
+
   const aiProvider = form.watch("aiProvider");
   const showDatabricksSql = aiProvider === "databricks" && form.watch("databricksConfig.sqlWarehouseEnabled");
 
@@ -556,7 +592,7 @@ export function ParametresPage() {
 
               <Card className="lg:col-span-2">
                 <CardHeader>
-                  <CardTitle className="text-base">SFTP — livraison EDIFACT</CardTitle>
+                  <CardTitle className="text-base">SFTP - livraison EDIFACT</CardTitle>
                   <p className="text-xs text-muted-foreground">
                     En local, les valeurs viennent de <code>.env.local</code> (
                     <code>SFTP_HOST</code>, <code>SFTP_USERNAME</code>, <code>SFTP_REMOTE_DIR</code>,{" "}
@@ -609,7 +645,7 @@ export function ParametresPage() {
                       onChange={(v) => form.setValue("sftpConfig.remotePath", v)}
                     />
                     <p className="text-xs text-muted-foreground sm:col-span-2">
-                      Bosch local : utilisez <code>/</code> (pas <code>/inbox</code> — ce dossier
+                      Bosch local : utilisez <code>/</code> (pas <code>/inbox</code> - ce dossier
                       n&apos;existe pas sur le serveur).
                     </p>
                   </div>
@@ -750,7 +786,10 @@ export function ParametresPage() {
                   <strong>Local :</strong>{" "}
                   <code>http://localhost:5678/webhook/masterdata-sync</code>
                   {" "}(en Docker, un relay fait répondre localhost:5678 vers n8n sur
-                  l&apos;hôte — pas de rewrite d&apos;URL). <strong>Prod :</strong>{" "}
+                  l&apos;hôte - pas de rewrite d&apos;URL). Le webhook n8n doit être en{" "}
+                  <code>onReceived</code> (Respond Immediately) - réimportez{" "}
+                  <code>n8n_masterdata_github_sync_raw.json</code> puis activez le workflow.
+                  {" "}<strong>Prod :</strong>{" "}
                   <code>https://i1-d.n8n.bosch.com/webhook/masterdata-sync-prod</code>.
                   Override : <code>MASTERDATA_N8N_WEBHOOK_URL</code>. Clé :{" "}
                   <code>MASTERDATA_N8N_WEBHOOK_KEY</code>.
@@ -1222,7 +1261,7 @@ export function ParametresPage() {
                         {newUserRole === "adv" && <span className="text-destructive ml-0.5">*</span>}
                       </Label>
                       <Input
-                        placeholder="8 chiffres — ex: 15016007"
+                        placeholder="8 chiffres - ex: 15016007"
                         value={newSapId}
                         maxLength={8}
                         onChange={(e) => setNewSapId(e.target.value.replace(/\D/g, "").slice(0, 8))}
@@ -1332,8 +1371,8 @@ export function ParametresPage() {
                           <tr key={user.userId} className="border-t hover:bg-muted/30">
                             <td className="px-4 py-3 font-mono text-xs font-semibold">{user.username}</td>
                             <td className="px-4 py-3">{user.displayName}</td>
-                            <td className="px-4 py-3 text-xs text-muted-foreground">{(user as GestionnaireUser).email || "—"}</td>
-                            <td className="px-4 py-3 text-xs font-mono">{(user as GestionnaireUser).sapId || "—"}</td>
+                            <td className="px-4 py-3 text-xs text-muted-foreground">{(user as GestionnaireUser).email || "-"}</td>
+                            <td className="px-4 py-3 text-xs font-mono">{(user as GestionnaireUser).sapId || "-"}</td>
                             <td className="px-4 py-3">
                               <Badge
                                 variant={(user as GestionnaireUser).role === "admin" ? "default" : "secondary"}
@@ -1344,7 +1383,7 @@ export function ParametresPage() {
                               </Badge>
                             </td>
                             <td className="px-4 py-3 text-xs text-muted-foreground">
-                              {user.createdAt ? user.createdAt.slice(0, 10) : "—"}
+                              {user.createdAt ? user.createdAt.slice(0, 10) : "-"}
                             </td>
                             <td className="px-4 py-3">
                               {resetUserId === user.userId ? (
@@ -1434,7 +1473,7 @@ export function ParametresPage() {
                   <div className="bg-background rounded-lg border shadow-xl w-full max-w-lg p-6 space-y-4">
                     <h2 className="text-lg font-semibold flex items-center gap-2">
                       <Shield className="h-5 w-5 text-primary" />
-                      Modifier — {editUser.username}
+                      Modifier - {editUser.username}
                     </h2>
                     <div className="grid gap-3 sm:grid-cols-2">
                       <div className="space-y-1.5">
@@ -1458,7 +1497,7 @@ export function ParametresPage() {
                           {editRole === "adv" && <span className="text-destructive ml-0.5">*</span>}
                         </Label>
                         <Input
-                          placeholder="8 chiffres — ex: 15016007"
+                          placeholder="8 chiffres - ex: 15016007"
                           value={editSapId}
                           maxLength={8}
                           onChange={(e) => { setEditSapId(e.target.value.replace(/\D/g, "").slice(0, 8)); setEditError(""); }}
@@ -1614,7 +1653,7 @@ export function ParametresPage() {
                             {apiKeyItems.map((key) => (
                               <tr key={key.id} className="border-b dark:border-gray-700">
                                 <td className="py-2 px-2">{key.name}</td>
-                                <td className="py-2 px-2">{key.created_by || "—"}</td>
+                                <td className="py-2 px-2">{key.created_by || "-"}</td>
                                 <td className="py-2 px-2">
                                   {new Date(key.created_at).toLocaleDateString("fr-FR")}
                                 </td>
@@ -1707,6 +1746,237 @@ export function ParametresPage() {
                 </CardContent>
               </Card>
             </>
+          )}
+
+          {activeSection === "logs" && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <RefreshCw className="h-5 w-5" />
+                  Logs
+                </CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  {logKind === "business"
+                    ? "Journal métier : actions utilisateurs, parcours commande et durées (performance)."
+                    : logKind === "all"
+                      ? "Vue mixte technique + métier."
+                      : (
+                        <>
+                          Journal technique (mémoire process) + fichiers sous{" "}
+                          <code>{logsQuery.data?.logDir || "data/logs"}</code>.
+                        </>
+                      )}
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex flex-wrap gap-2">
+                  {(
+                    [
+                      { id: "business", label: "Métier" },
+                      { id: "technical", label: "Technique" },
+                      { id: "all", label: "Tous" },
+                    ] as const
+                  ).map((tab) => (
+                    <Button
+                      key={tab.id}
+                      type="button"
+                      size="sm"
+                      variant={logKind === tab.id ? "default" : "outline"}
+                      onClick={() => setLogKind(tab.id)}
+                    >
+                      {tab.label}
+                    </Button>
+                  ))}
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {logKind !== "business" && (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label>Niveau minimum</Label>
+                        <Select value={logLevel} onValueChange={setLogLevel}>
+                          <SelectTrigger>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="DEBUG">DEBUG</SelectItem>
+                            <SelectItem value="INFO">INFO</SelectItem>
+                            <SelectItem value="WARNING">WARNING</SelectItem>
+                            <SelectItem value="ERROR">ERROR</SelectItem>
+                            <SelectItem value="CRITICAL">CRITICAL</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label>Fichier</Label>
+                        <Select
+                          value={logFile || "__all__"}
+                          onValueChange={(v) => setLogFile(v === "__all__" ? "" : v)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Tous" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__all__">Tous / mémoire</SelectItem>
+                            {(logsQuery.data?.files ?? []).map((f) => (
+                              <SelectItem key={f.name} value={f.name}>
+                                {f.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </>
+                  )}
+                  <div className={cn("space-y-1.5", logKind === "business" ? "sm:col-span-2 lg:col-span-4" : "sm:col-span-2")}>
+                    <Label>Recherche</Label>
+                    <Input
+                      placeholder={
+                        logKind === "business"
+                          ? "Filtrer (acteur, action, orderId, résultat…)"
+                          : "Filtrer (ex: SFTP, masterdata, erreur…)"
+                      }
+                      value={logSearch}
+                      onChange={(e) => setLogSearch(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") logsQuery.refetch();
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-3">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => logsQuery.refetch()}
+                    disabled={logsQuery.isFetching}
+                  >
+                    <RefreshCw className={cn("h-4 w-4", logsQuery.isFetching && "animate-spin")} />
+                    Actualiser
+                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Switch checked={logAutoRefresh} onCheckedChange={setLogAutoRefresh} />
+                    <Label className="text-sm">Auto-refresh (5 s)</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {logsQuery.data
+                      ? `${logsQuery.data.count} entrée(s) · ${logsQuery.data.generatedAt}`
+                      : "-"}
+                  </p>
+                </div>
+
+                {logKind !== "business" && (logsQuery.data?.files?.length ?? 0) > 0 && (
+                  <div className="rounded-lg border p-3 text-xs text-muted-foreground">
+                    Fichiers :{" "}
+                    {(logsQuery.data?.files ?? [])
+                      .map((f) => `${f.name} (${Math.round(f.sizeBytes / 1024)} Ko)`)
+                      .join(" · ")}
+                  </div>
+                )}
+
+                {logsQuery.isError && (
+                  <p className="text-sm text-destructive">
+                    {(logsQuery.error as Error)?.message || "Impossible de charger les logs"}
+                  </p>
+                )}
+
+                <div className="max-h-[min(560px,60vh)] overflow-auto rounded-md border bg-slate-950 p-3 font-mono text-xs text-slate-100">
+                  {logsQuery.isLoading ? (
+                    <p className="text-slate-400">Chargement des logs…</p>
+                  ) : (logsQuery.data?.items.length ?? 0) === 0 ? (
+                    <p className="text-slate-400">Aucune entrée pour ces filtres.</p>
+                  ) : logKind === "business" ? (
+                    <div className="space-y-1">
+                      {(logsQuery.data?.items ?? []).map((row) => {
+                        const result = row.result || "ok";
+                        const resultColor =
+                          result === "ok"
+                            ? "text-emerald-300"
+                            : result === "failed" || result === "error"
+                              ? "text-red-400"
+                              : "text-amber-300";
+                        const ts = row.createdAt || row.timestamp || "-";
+                        const changes = (row.details as { changes?: Record<string, { from?: unknown; to?: unknown }> } | undefined)?.changes;
+                        const changeText =
+                          changes && typeof changes === "object"
+                            ? Object.entries(changes)
+                                .map(([field, delta]) => {
+                                  const from = delta?.from == null || delta.from === "" ? "∅" : String(delta.from);
+                                  const to = delta?.to == null || delta.to === "" ? "∅" : String(delta.to);
+                                  return `${field}: ${from} → ${to}`;
+                                })
+                                .join(" · ")
+                            : "";
+                        const restDetails = row.details
+                          ? Object.fromEntries(
+                              Object.entries(row.details).filter(([k]) => k !== "changes" && k !== "fields"),
+                            )
+                          : {};
+                        const extra =
+                          Object.keys(restDetails).length > 0 ? JSON.stringify(restDetails) : "";
+                        return (
+                          <div
+                            key={row.eventId || row.id}
+                            className="grid gap-1 border-b border-slate-800/80 py-1.5 last:border-0 lg:grid-cols-[150px_110px_140px_90px_70px_1fr]"
+                          >
+                            <span className="text-slate-500">{ts}</span>
+                            <span className="text-sky-300">{row.actor || "-"}</span>
+                            <span className="text-slate-200">{row.action || "-"}</span>
+                            <span className={cn("font-semibold", resultColor)}>{result}</span>
+                            <span className="text-slate-400">
+                              {row.durationMs != null ? `${row.durationMs} ms` : "-"}
+                            </span>
+                            <span className="break-all text-slate-300">
+                              {row.orderId ? (
+                                <span className="text-slate-500">order={row.orderId.slice(0, 12)}… </span>
+                              ) : null}
+                              {changeText ? <span className="text-amber-200">{changeText}</span> : null}
+                              {changeText && extra ? " · " : null}
+                              {extra}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      {(logsQuery.data?.items ?? []).map((row) => {
+                        const color =
+                          row.level === "ERROR" || row.level === "CRITICAL"
+                            ? "text-red-400"
+                            : row.level === "WARNING"
+                              ? "text-amber-300"
+                              : row.level === "DEBUG"
+                                ? "text-slate-400"
+                                : "text-emerald-300";
+                        const prefix =
+                          row.kind === "business"
+                            ? "[métier] "
+                            : row.logger
+                              ? `[${row.logger}] `
+                              : "";
+                        return (
+                          <div
+                            key={row.id || row.eventId}
+                            className="grid gap-1 border-b border-slate-800/80 py-1 last:border-0 lg:grid-cols-[160px_80px_1fr]"
+                          >
+                            <span className="text-slate-500">{row.timestamp || row.createdAt || "-"}</span>
+                            <span className={cn("font-semibold", color)}>{row.level || "INFO"}</span>
+                            <span className="break-all text-slate-200">
+                              <span className="text-slate-500">{prefix}</span>
+                              {row.message}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           )}
 
           {FORM_SAVE_SECTIONS.has(activeSection) && (

@@ -2,7 +2,7 @@
 
 When the API runs in Docker and n8n is published on the host (:5678), a
 loopback listener forwards to ``host.docker.internal:5678``. Application code
-keeps calling ``http://localhost:5678/...`` — no URL rewrite to internal hosts.
+keeps calling ``http://localhost:5678/...`` - no URL rewrite to internal hosts.
 """
 
 from __future__ import annotations

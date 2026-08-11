@@ -12,7 +12,7 @@
 
 ---
 
-## Qualité d'extraction — Cibles
+## Qualité d'extraction - Cibles
 
 | Colonne DB | Cible prod | Commande de vérification |
 |---|---|---|
@@ -150,7 +150,7 @@ Sortie : `docs/N8N_ANALYSIS_REPORT.md`
 
 ---
 
-## Profil UNB — verrouillage permanent
+## Profil UNB - verrouillage permanent
 
 Le profil UNB est **définitivement verrouillé** sur `ELM_STANDARD`.
 

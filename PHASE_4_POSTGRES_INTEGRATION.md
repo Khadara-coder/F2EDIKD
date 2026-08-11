@@ -1,6 +1,6 @@
-# Phase 4: PostgreSQL Integration — Complete
+# Phase 4: PostgreSQL Integration - Complete
 
-**Status**: ✅ **DEPLOYED** — File2EDI runtime is PostgreSQL-only (`PG_DATABASE_URL` required).
+**Status**: ✅ **DEPLOYED** - File2EDI runtime is PostgreSQL-only (`PG_DATABASE_URL` required).
 
 > Note: the experimental dual-mode `store_adapter.py` was removed; use
 > `src.file2edi.store.get_store()` (`PostgresFile2EdiStore`).
@@ -18,7 +18,7 @@
 - ✅ `@app.on_event("shutdown")` gracefully closes PostgreSQL connections
 
 ### 3. Store
-- ✅ `src/file2edi/store.py` — `PostgresFile2EdiStore` for runtime; SQLite base class for tests
+- ✅ `src/file2edi/store.py` - `PostgresFile2EdiStore` for runtime; SQLite base class for tests
 - ✅ Same sync interface consumed by `router.py`
 
 ### 4. Router RBAC Context Passing
@@ -51,7 +51,7 @@ Without `PG_DATABASE_URL`, `get_store()` fails fast (no SQLite runtime fallback)
 
 ## What's NOT Yet Implemented (Phase 6)
 
-❌ RBAC filtering logic — context is passed but not yet used
+❌ RBAC filtering logic - context is passed but not yet used
 ❌ Order-listing access control enforcement
 ❌ ADV users seeing only their assigned orders
 
@@ -90,7 +90,7 @@ These require a user decision (Phase 6) on filtering strategy:
 → Check connection string: `postgresql+psycopg://user:password@host:5432/database`
 
 ### "RLS policies auto-initialized"
-→ Good — data is protected at the database layer.
+→ Good - data is protected at the database layer.
 
 ## Security Notes
 

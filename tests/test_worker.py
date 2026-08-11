@@ -1,4 +1,4 @@
-"""Tests for src/worker.py — job processing loop and dedupe gating."""
+"""Tests for src/worker.py - job processing loop and dedupe gating."""
 from __future__ import annotations
 
 import importlib

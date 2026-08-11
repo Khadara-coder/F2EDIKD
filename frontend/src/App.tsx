@@ -94,7 +94,7 @@ function AppContent() {
   return (
     <BrowserRouter>
       <Routes>
-        {/* /login always shows login page — never redirects even if "authenticated" via dev fallback */}
+        {/* /login always shows login page - never redirects even if "authenticated" via dev fallback */}
         <Route path="/login" element={<LoginPage />} />
         <Route element={<AppShell />}>
           <Route

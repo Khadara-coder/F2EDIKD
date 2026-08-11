@@ -326,10 +326,10 @@ def material_line_status(matnr: str) -> dict[str, Any]:
     Replacement chains in ``Statut`` are resolved (A→B→C) with cycle detection.
 
     Returns ``kind``:
-    - ``missing`` — MATNR not in masterdata
-    - ``available`` — ``Article disponible`` (no anomaly)
-    - ``no_sale`` — article arrêté (`no sale` / VMSTA 92), including replacement target
-    - ``replacement`` — resolved final reference MATNR in ``replacement``
+    - ``missing`` - MATNR not in masterdata
+    - ``available`` - ``Article disponible`` (no anomaly)
+    - ``no_sale`` - article arrêté (`no sale` / VMSTA 92), including replacement target
+    - ``replacement`` - resolved final reference MATNR in ``replacement``
     """
     code = normalize_article_code(matnr)
     if not code:
@@ -764,7 +764,7 @@ def stats() -> dict:
                         "source": "bundled", "loaded_at": None,
                         "file_size_kb": round(fp.stat().st_size / 1024, 1),
                         "schema_valid": None,
-                        "warnings": ["Cache non chargé — rechargement recommandé."],
+                        "warnings": ["Cache non chargé - rechargement recommandé."],
                     }
                 except Exception as exc:
                     result[key] = {
@@ -799,7 +799,7 @@ def load_cache() -> dict:
     try:
         import pandas as _pd
     except ImportError:
-        log.warning("pandas not available — masterdata cache disabled")
+        log.warning("pandas not available - masterdata cache disabled")
         return {"error": "pandas not available"}
 
     with _MC_LOCK:
@@ -842,7 +842,7 @@ def load_cache() -> dict:
                 }
                 MD_SOURCE[key] = src_type
                 log.info(
-                    "MD cache: %s — %d rows  schema_valid=%s  source=%s",
+                    "MD cache: %s - %d rows  schema_valid=%s  source=%s",
                     fpath.name, len(df), schema_info["schema_valid"], src_type,
                 )
             except FileNotFoundError:
@@ -850,11 +850,11 @@ def load_cache() -> dict:
                     fallback = dict(prev_entry)
                     fallback["source"] = "fallback"
                     fallback["warnings"] = list(prev_entry.get("warnings", [])) + [
-                        f"Fichier introuvable: {fpath} — données précédentes conservées."
+                        f"Fichier introuvable: {fpath} - données précédentes conservées."
                     ]
                     CACHE[key] = fallback
                     MD_SOURCE[key] = "fallback"
-                    log.warning("MD cache: %s MISSING — Tier C fallback active", fname)
+                    log.warning("MD cache: %s MISSING - Tier C fallback active", fname)
                 else:
                     CACHE[key] = {
                         "df": None, "rows": 0, "loaded_at": None,
@@ -871,11 +871,11 @@ def load_cache() -> dict:
                     fallback = dict(prev_entry)
                     fallback["source"] = "fallback"
                     fallback["warnings"] = list(prev_entry.get("warnings", [])) + [
-                        f"Erreur rechargement: {exc} — données précédentes conservées."
+                        f"Erreur rechargement: {exc} - données précédentes conservées."
                     ]
                     CACHE[key] = fallback
                     MD_SOURCE[key] = "fallback"
-                    log.warning("MD cache: %s ERROR — Tier C fallback: %s", fname, exc)
+                    log.warning("MD cache: %s ERROR - Tier C fallback: %s", fname, exc)
                 else:
                     CACHE[key] = {
                         "df": None, "rows": 0, "loaded_at": None, "error": str(exc),
@@ -1032,8 +1032,8 @@ def format_clients(rows: list[dict], sync_at: str = "") -> list[dict]:
             "name": row_value(row, "NAME", "name"),
             "soldto": soldto,
             "vat": row_value(row, "VAT_NR", "vat"),
-            "channel": row_value(row, "VTWEG", "channel") or "—",
-            "division": row_value(row, "SPART", "division") or "—",
+            "channel": row_value(row, "VTWEG", "channel") or "-",
+            "division": row_value(row, "SPART", "division") or "-",
             "status": "Actif",
             "updatedAt": sync_at,
             "country": row_value(row, "LAND1", "country"),

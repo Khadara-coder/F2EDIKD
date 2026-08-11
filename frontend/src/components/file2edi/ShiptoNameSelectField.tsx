@@ -205,7 +205,7 @@ export function ShiptoNameSelectField({
       </div>
 
       <div ref={anchorRef} className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-sm font-medium">{value || "—"}</span>
+        <span className="truncate text-sm font-medium">{value || "-"}</span>
         <button
           type="button"
           onClick={(e) => {

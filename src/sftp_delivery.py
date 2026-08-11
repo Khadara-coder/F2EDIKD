@@ -280,6 +280,6 @@ def test_connection_from_env() -> tuple[bool, str]:
             transport.close()
         except Exception:
             pass
-        return True, f"Connecté à {host} en tant que {user} — {len(listing)} fichiers dans {rdir}"
+        return True, f"Connecté à {host} en tant que {user} - {len(listing)} fichiers dans {rdir}"
     except Exception as exc:
         return False, f"Échec ({type(exc).__name__}): {exc}"

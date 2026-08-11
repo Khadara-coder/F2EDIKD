@@ -1,4 +1,4 @@
-"""Engine adapter — bridges worker.py to the src.* processing modules.
+"""Engine adapter - bridges worker.py to the src.* processing modules.
 
 Replaces the legacy sys.path-based engine_adapter from FILE2EDI.
 All imports are from the src package; no dynamic path injection.
@@ -58,7 +58,7 @@ def process_pdf_to_edifact(source_pdf: Path) -> ProcessingResult:
 
     Any rejection exception maps to ProcessingResult(REJECTED, rejection_reason=...).
     Unexpected exceptions also produce REJECTED with PDF_PARSE_FAILURE.
-    Never raises — all errors are surfaced via the return value.
+    Never raises - all errors are surfaced via the return value.
     """
     try:
         from .config_loader import load_config

@@ -23,7 +23,7 @@ export function collectReviewBlockers(
   const pendingAnomalies = anomalies.filter(isAnomalyPending);
   if (pendingAnomalies.length > 0) {
     errors.push(
-      `${pendingAnomalies.length} anomalie${pendingAnomalies.length > 1 ? "s" : ""} en attente — validez ou ignorez chacune avant de valider la commande`,
+      `${pendingAnomalies.length} anomalie${pendingAnomalies.length > 1 ? "s" : ""} en attente - validez ou ignorez chacune avant de valider la commande`,
     );
     for (const anomaly of pendingAnomalies) {
       errors.push(`Anomalie : ${anomaly.message}`);
@@ -43,7 +43,7 @@ export function collectReviewBlockers(
     errors.push("Code ship-to SAP manquant");
   }
   if (lines.length === 0) {
-    errors.push("Aucune ligne de commande — ajoutez au moins une ligne");
+    errors.push("Aucune ligne de commande - ajoutez au moins une ligne");
   } else {
     for (const line of lines) {
       if (!line.boschArticle?.trim()) {

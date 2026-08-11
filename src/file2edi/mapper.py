@@ -341,7 +341,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "orderId": order_id,
             "uploadId": upload_id,
             "fileName": result.get("filename") or "",
-            "clientName": str(cust.get("name") or "—"),
+            "clientName": str(cust.get("name") or "-"),
             "customerOrderNumber": str(order.get("po_number") or ""),
             "documentReference": str(order.get("document_reference") or order.get("po_number") or ""),
             "orderDate": None if invalid_date else order_date,

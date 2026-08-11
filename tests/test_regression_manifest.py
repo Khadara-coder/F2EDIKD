@@ -51,4 +51,4 @@ def test_regression_pdfs_built():
         path = REGRESSION / case["file"]
         if not path.exists():
             missing.append(case["file"])
-    assert not missing, f"Exécutez scripts/build_regression_set.ps1 — manquants : {missing[:5]}"
+    assert not missing, f"Exécutez scripts/build_regression_set.ps1 - manquants : {missing[:5]}"

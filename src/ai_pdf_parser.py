@@ -140,7 +140,7 @@ def extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
     text = extract_text_with_pypdf(pdf_path)
     if len(text.strip()) > 80:
         return text, "pypdf"
-    # Very sparse text — likely scanned; return what we have
+    # Very sparse text - likely scanned; return what we have
     combined = text or extract_text_with_pdfplumber(pdf_path)
     return combined, "sparse" if combined else "empty"
 
@@ -150,7 +150,7 @@ def extract_pdf_text(pdf_path: Path) -> tuple[str, str]:
 _AI_SYSTEM_PROMPT = """\
 You are a strict purchase-order field extractor for Bosch Thermotechnologie France.
 Input is raw text extracted from a customer PDF purchase order (may include noise).
-Return ONLY a single valid JSON object — no markdown fences, no explanation:
+Return ONLY a single valid JSON object - no markdown fences, no explanation:
 {
   "status": "ok",
   "order_key": "<customer PO number>",
@@ -187,11 +187,11 @@ Rules:
 - For French decimals: 1.234,56 means 1234.56.
 - For dates in DD/MM/YYYY format, preserve as-is.
 - confidence: 0.0–1.0, reflect how complete the extraction is.
-- If a field is unknown, use empty string or null — never invent data."""
+- If a field is unknown, use empty string or null - never invent data."""
 
 
 def _sanitize_json_response(raw: str) -> dict:
-    """Parse LLM response to dict — handles markdown fences and leading garbage."""
+    """Parse LLM response to dict - handles markdown fences and leading garbage."""
     s = raw.strip()
     # Strip markdown code fences
     s = re.sub(r"^```(?:json)?\s*", "", s, flags=re.IGNORECASE)
@@ -204,7 +204,7 @@ def _sanitize_json_response(raw: str) -> dict:
     try:
         return json.loads(s)
     except json.JSONDecodeError as exc:
-        log.warning("JSON parse failed: %s — raw: %.200s", exc, raw)
+        log.warning("JSON parse failed: %s - raw: %.200s", exc, raw)
         return {"status": "parse_error", "error": str(exc)}
 
 
@@ -257,7 +257,7 @@ def _ai_to_build_params(ai: dict, pdf_name: str = "") -> dict:
     if not doc_date:
         from datetime import datetime
         doc_date = datetime.now().strftime("%Y%m%d")
-        warnings.append("document_date missing — defaulted to today")
+        warnings.append("document_date missing - defaulted to today")
 
     order = {
         "order_number": order_key,
@@ -332,7 +332,7 @@ def parse_pdf_with_ai(
 
     Returns the dict from _ai_to_build_params() plus:
       raw_text_chars, extraction_method.
-    Never raises — errors appear in warnings/raw_ai fields.
+    Never raises - errors appear in warnings/raw_ai fields.
     """
     pdf_path = Path(pdf_path)
     text, method = extract_pdf_text(pdf_path)
@@ -342,7 +342,7 @@ def parse_pdf_with_ai(
         return {
             "order": {"order_number": "", "order_date": "", "delivery_date": ""},
             "soldto_row": {}, "shipto_row": {}, "lines": [],
-            "confidence": 0.0, "warnings": ["PDF text is empty — may be scanned"],
+            "confidence": 0.0, "warnings": ["PDF text is empty - may be scanned"],
             "raw_ai": {}, "raw_text_chars": 0, "extraction_method": method,
         }
 

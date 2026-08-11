@@ -294,7 +294,7 @@ export const api = {
     return request<MasterDataResponse>(`/master-data?${params}`);
   },
 
-  /** Manual masterdata sync — triggers configured n8n webhook by default. */
+  /** Manual masterdata sync - triggers configured n8n webhook by default. */
   syncMasterData: (opts?: { fromRepo?: boolean }) => {
     const params = new URLSearchParams({
       from_repo: opts?.fromRepo ? "true" : "false",
@@ -306,6 +306,7 @@ export const api = {
       from_repo?: boolean;
       source?: string;
       commit?: string;
+      async?: boolean;
       message: string;
     }>(`/masterdata/sync?${params}`, { method: "POST" });
   },
@@ -442,4 +443,61 @@ export const api = {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
+
+  getAppLogs: (params?: {
+    limit?: number;
+    level?: string;
+    search?: string;
+    file?: string;
+    kind?: "technical" | "business" | "all";
+    actor?: string;
+    action?: string;
+  }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit) qs.set("limit", String(params.limit));
+    if (params?.level) qs.set("level", params.level);
+    if (params?.search) qs.set("search", params.search);
+    if (params?.file) qs.set("file", params.file);
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.actor) qs.set("actor", params.actor);
+    if (params?.action) qs.set("action", params.action);
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{
+      kind?: "technical" | "business" | "all";
+      items: Array<{
+        id?: string;
+        eventId?: string;
+        timestamp?: string;
+        createdAt?: string;
+        level?: string;
+        logger?: string;
+        message?: string;
+        source?: string;
+        raw?: string;
+        kind?: "technical" | "business";
+        actor?: string;
+        action?: string;
+        orderId?: string;
+        entityType?: string;
+        entityId?: string;
+        result?: string;
+        durationMs?: number | null;
+        details?: Record<string, unknown>;
+      }>;
+      count: number;
+      limit: number;
+      level?: string;
+      search?: string;
+      actor?: string;
+      action?: string;
+      logDir?: string;
+      files?: Array<{
+        name: string;
+        path: string;
+        sizeBytes: number;
+        modifiedAt: string;
+      }>;
+      generatedAt: string;
+    }>(`/logs${suffix}`);
+  },
 };

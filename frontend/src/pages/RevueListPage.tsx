@@ -153,7 +153,7 @@ export function RevueListPage() {
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToBusinessGroup(row.status as OrderStatus) === statusFilter;
-      // "Mes dossiers" filter — match if user is assignee OR processor
+      // "Mes dossiers" filter - match if user is assignee OR processor
       const rowAssignee = row.assignedTo?.toLowerCase() || "";
       const rowProcessor = (row.processedBy || "").toLowerCase();
       const userLc = (currentUsername || "").toLowerCase();
@@ -194,7 +194,7 @@ export function RevueListPage() {
     <>
       <Header
         title="Gérer les commandes"
-        subtitle="Toutes les commandes converties — ouvrez un dossier pour valider ou corriger"
+        subtitle="Toutes les commandes converties - ouvrez un dossier pour valider ou corriger"
       />
 
       <Card>
@@ -271,7 +271,7 @@ export function RevueListPage() {
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
                 className="h-10 w-[138px] text-xs"
-                title="Date d'import — début"
+                title="Date d'import - début"
               />
               <span className="shrink-0 text-muted-foreground text-xs">→</span>
               <Input
@@ -279,7 +279,7 @@ export function RevueListPage() {
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
                 className="h-10 w-[138px] text-xs"
-                title="Date d'import — fin"
+                title="Date d'import - fin"
               />
             </div>
 
@@ -436,7 +436,7 @@ export function RevueListPage() {
                         return motif ? (
                           <span className="whitespace-normal break-words text-sky-700">{motif}</span>
                         ) : (
-                          <span className="text-muted-foreground">—</span>
+                          <span className="text-muted-foreground">-</span>
                         );
                       })()}
                     </TableCell>
@@ -444,29 +444,29 @@ export function RevueListPage() {
                       {row.sapVbeln ? (
                         <span className="font-mono text-sm font-medium">{row.sapVbeln}</span>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-sm">
                       {row.processedAt || row.sapSentAt
                         ? formatDateTime(row.processedAt || row.sapSentAt, displayTimeZone)
-                        : <span className="text-muted-foreground">—</span>}
+                        : <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
-                      {getDisplayName(row.sapSentBy) || <span className="text-muted-foreground">—</span>}
+                      {getDisplayName(row.sapSentBy) || <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
                       {getDisplayName(
                         row.status === "Transféré" ? (row.transferredTo || row.assignedTo) : row.assignedTo
                         || row.processedBy
-                      ) || <span className="text-muted-foreground">—</span>}
+                      ) || <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-sm">{formatDateTime(row.createdAt || row.date, displayTimeZone)}</TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {row.action || <span className="text-muted-foreground">—</span>}
+                      {row.action || <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     {isAdmin && (
                       <TableCell className={confidenceColor(row.confidence)}>
@@ -475,7 +475,7 @@ export function RevueListPage() {
                     )}
                     {isAdmin && (
                       <TableCell className="max-w-[160px] truncate text-sm text-muted-foreground">
-                        {row.issue || "—"}
+                        {row.issue || "-"}
                       </TableCell>
                     )}
                   </TableRow>

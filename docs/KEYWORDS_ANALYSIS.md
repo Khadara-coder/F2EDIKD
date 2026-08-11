@@ -3,9 +3,9 @@
 
 ⚡ STATUT D'IMPLÉMENTATION (mis à jour 2026-07-30)
 ──────────────────────────────────────────────────
-Phase 1 ✅ DÉPLOYÉE  — Qty variants + customer_reference + payment_terms
-Phase 2 ✅ DÉPLOYÉE  — delivery_date + special_instructions + warnings engines
-Phase 3 ✅ DÉPLOYÉE  — Migration DB + backfill + persistence store.py
+Phase 1 ✅ DÉPLOYÉE  - Qty variants + customer_reference + payment_terms
+Phase 2 ✅ DÉPLOYÉE  - delivery_date + special_instructions + warnings engines
+Phase 3 ✅ DÉPLOYÉE  - Migration DB + backfill + persistence store.py
 
 Résultats tests batch (50 PDFs RAG, seed=42):
   • Documents traités   : 39/50 (78%)

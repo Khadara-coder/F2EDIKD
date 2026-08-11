@@ -55,12 +55,12 @@ export function OrderLinesSummaryTable({
                     line.status === "À vérifier" && "text-amber-600",
                   )}
                 >
-                  {line.boschArticle || "—"}
+                  {line.boschArticle || "-"}
                 </span>
               </TableCell>
               <TableCell>
                 <span className="block max-w-[280px] truncate text-sm text-muted-foreground">
-                  {line.designation || "—"}
+                  {line.designation || "-"}
                 </span>
               </TableCell>
               <TableCell>{line.quantity}</TableCell>

@@ -18,7 +18,7 @@
         },
         "options": {
           "respondWith": "text",
-          "responseText": "✅ Fichier reçu — conversion en cours. Consultez le statut dans l'interface File2EDI."
+          "responseText": "✅ Fichier reçu - conversion en cours. Consultez le statut dans l'interface File2EDI."
         }
       },
       "id": "form-trigger-001",

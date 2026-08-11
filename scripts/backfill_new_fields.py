@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Backfill Phase 3 — Reprocesser les lignes existantes avec les nouveaux extracteurs.
+Backfill Phase 3 - Reprocesser les lignes existantes avec les nouveaux extracteurs.
 
 Pour chaque ligne dans file2edi_order_lines:
 - Extrait payment_terms et special_instructions depuis la designation
@@ -43,31 +43,31 @@ def backfill(db_path: str):
 
         updates = {}
 
-        # payment_terms — uniquement si NULL et designation a du contenu
+        # payment_terms - uniquement si NULL et designation a du contenu
         if row["payment_terms"] is None and text:
             terms = _extract_payment_terms(text)
             if terms:
                 updates["payment_terms"] = terms
 
-        # delivery_date — uniquement si NULL
+        # delivery_date - uniquement si NULL
         if row["delivery_date"] is None and text:
             ddate = extract_delivery_date(text)
             if ddate:
                 updates["delivery_date"] = ddate
 
-        # special_instructions — uniquement si NULL
+        # special_instructions - uniquement si NULL
         if row["special_instructions"] is None and text:
             instr = extract_special_instructions(text)
             if instr:
                 updates["special_instructions"] = instr
 
-        # warnings — uniquement si NULL
+        # warnings - uniquement si NULL
         if row["warnings"] is None and text:
             warn = extract_warnings(text)
             if warn:
                 updates["warnings"] = warn
 
-        # customer_reference — backfill si NULL et designation contient une ref
+        # customer_reference - backfill si NULL et designation contient une ref
         if not row["customer_reference"] and text:
             ref = _extract_customer_reference(text)
             if ref:
@@ -83,7 +83,7 @@ def backfill(db_path: str):
     conn.commit()
     conn.close()
 
-    print(f"\n  ✓ Backfill terminé — {updated}/{len(rows)} lignes mises à jour")
+    print(f"\n  ✓ Backfill terminé - {updated}/{len(rows)} lignes mises à jour")
 
     # Stats après backfill
     conn2 = sqlite3.connect(db_path)

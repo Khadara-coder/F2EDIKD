@@ -9,7 +9,7 @@ from typing import Any
 def get_ai_configuration_status(persisted_settings: dict[str, Any] | None = None) -> dict[str, Any]:
     """Return whether the selected AI provider has runtime credentials/config.
 
-    Does not call the provider — only checks local env/settings presence.
+    Does not call the provider - only checks local env/settings presence.
     """
     persisted: dict[str, Any]
     if persisted_settings is not None:

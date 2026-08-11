@@ -70,3 +70,87 @@ def test_trigger_posts_configured_url(monkeypatch):
     assert out["ok"] is True
     assert captured["url"] == "http://localhost:5678/webhook/masterdata-sync"
     assert captured["headers"]["x-api-key"] == "secret"
+    assert out.get("async") is False  # full sync payload returned
+    assert captured["json"]["file2ediApiBase"]
+
+
+def test_trigger_treats_remote_disconnect_as_async_start(monkeypatch):
+    import requests
+
+    def boom(*_a, **_k):
+        raise requests.ConnectionError(
+            "('Connection aborted.', RemoteDisconnected('Remote end closed connection without response'))"
+        )
+
+    monkeypatch.delenv("MASTERDATA_N8N_WEBHOOK_URL", raising=False)
+    monkeypatch.setattr("requests.post", boom)
+    out = trigger_masterdata_sync_workflow(
+        {"enabled": True, "webhookUrl": "http://localhost:5678/webhook/masterdata-sync"},
+    )
+    assert out["ok"] is True
+    assert out["async"] is True
+    assert out.get("assumed_started") is True
+    assert "onReceived" in out["message"]
+
+
+def test_trigger_onreceived_empty_body_is_async(monkeypatch):
+    class FakeResp:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {}
+
+    monkeypatch.delenv("MASTERDATA_N8N_WEBHOOK_URL", raising=False)
+    monkeypatch.setattr("requests.post", lambda *a, **k: FakeResp())
+    out = trigger_masterdata_sync_workflow(
+        {"enabled": True, "webhookUrl": "http://localhost:5678/webhook/masterdata-sync"},
+    )
+    assert out["ok"] is True
+    assert out["async"] is True
+    assert "déclenché" in out["message"].lower()
+
+
+def test_probe_n8n_uses_healthz_not_webhook(monkeypatch):
+    from src.masterdata_n8n import probe_n8n_connectivity
+
+    calls = []
+
+    class FakeResp:
+        status_code = 200
+        text = "ok"
+
+    def fake_get(url, timeout=None):
+        calls.append(("GET", url, timeout))
+        return FakeResp()
+
+    def fail_post(*_a, **_k):
+        raise AssertionError("probe must not POST the long-running webhook")
+
+    monkeypatch.setattr("requests.get", fake_get)
+    monkeypatch.setattr("requests.post", fail_post)
+    monkeypatch.delenv("MASTERDATA_N8N_WEBHOOK_KEY", raising=False)
+
+    out = probe_n8n_connectivity({
+        "enabled": True,
+        "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
+        "timeoutSeconds": 120,
+    })
+    assert out["status"] == "connected"
+    assert calls == [("GET", "http://localhost:5678/healthz", 5)]
+    assert "healthz" in out["message"]
+    assert "Synchroniser" in out["message"]
+
+
+def test_probe_n8n_reports_unreachable(monkeypatch):
+    from src.masterdata_n8n import probe_n8n_connectivity
+
+    def boom(*_a, **_k):
+        raise TimeoutError("Read timed out")
+
+    monkeypatch.setattr("requests.get", boom)
+    out = probe_n8n_connectivity({
+        "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
+    })
+    assert out["status"] == "disconnected"
+    assert "timeout" in out["message"].lower()

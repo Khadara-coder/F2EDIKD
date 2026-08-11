@@ -53,7 +53,7 @@ export function Sidebar() {
     try {
       await api.logout();
     } catch {
-      // ignore errors — clear state anyway
+      // ignore errors - clear state anyway
     }
     queryClient.clear();
     navigate("/login");

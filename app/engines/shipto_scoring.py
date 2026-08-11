@@ -1,4 +1,4 @@
-"""SHIPTO Scoring Engine — Evidence-based candidate ranking.
+"""SHIPTO Scoring Engine - Evidence-based candidate ranking.
 
 Architecture:
   1. Generate all SHIPTO candidates for a SOLDTO
@@ -233,7 +233,7 @@ def score_candidate(
             cs.score += 15
             cs.reason_codes.append("POSTAL_IN_TEXT_NOT_DELIVERY")
     elif cand_postal and cand_postal == soldto_postal_norm:
-        # Postal matches SOLDTO headquarters — no extra evidence
+        # Postal matches SOLDTO headquarters - no extra evidence
         pass
 
     # ── SCORE: Rue normalisee dans le PDF (+30) ──
@@ -366,7 +366,7 @@ def score_shipto_candidates(
     # Get order history for this SOLDTO
     order_history = masterdata.get("salesorders_by_kunnr", {}).get(soldto_id, [])
 
-    # 4. Score each candidate (SOLDTO excluded — it's the HQ, not a delivery point)
+    # 4. Score each candidate (SOLDTO excluded - it's the HQ, not a delivery point)
     scored: list[CandidateScore] = []
     for cand in candidates:
         if cand.get("id") == soldto_id:
@@ -401,7 +401,7 @@ def score_shipto_candidates(
         result.decision = "REVIEW"
         result.shipto_confidence = best.score
     elif best.score >= 70:
-        # Plausible but ambiguous — needs LLM
+        # Plausible but ambiguous - needs LLM
         result.decision = "REVIEW"
         result.shipto_confidence = best.score
         result.reason_codes.append("LLM_RECOMMENDED")
@@ -582,7 +582,7 @@ def resolve_shipto_with_scoring(
                 result.reason_codes.append("LLM_LOW_CONFIDENCE")
 
         elif llm_result is None and best.score < 70:
-            # LLM failed and score is low — reject
+            # LLM failed and score is low - reject
             result.decision = "REJECTED"
             result.reason_codes.append("LLM_FAILED")
 

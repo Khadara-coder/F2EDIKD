@@ -51,7 +51,7 @@ function SystemBadges() {
       label: data?.ai === "connected" ? "IA OK" : "IA X",
       ok: data?.ai === "connected",
       title: data?.aiDetail
-        ? `${data.aiProvider || "IA"} — ${data.aiDetail}`
+        ? `${data.aiProvider || "IA"} - ${data.aiDetail}`
         : "Statut de configuration IA",
     },
   ];

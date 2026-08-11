@@ -93,7 +93,7 @@ def _predict(endpoint: str, messages: list, max_tokens: int) -> Optional[str]:
     """Single endpoint prediction via direct REST. Returns text or None."""
     url = _invocation_url(endpoint)
     if not url:
-        log.warning("LLM: DATABRICKS_HOST not set — cannot call endpoint %s", endpoint)
+        log.warning("LLM: DATABRICKS_HOST not set - cannot call endpoint %s", endpoint)
         return None
 
     import requests

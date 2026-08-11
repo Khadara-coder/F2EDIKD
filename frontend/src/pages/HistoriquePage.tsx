@@ -82,27 +82,27 @@ export function HistoriquePage() {
       <div className="mb-6 grid gap-4 md:grid-cols-4">
         <StatCard
           label="Total traités"
-          value={data?.kpis.totalProcessed.toLocaleString("fr-FR") ?? "—"}
+          value={data?.kpis.totalProcessed.toLocaleString("fr-FR") ?? "-"}
           sublabel="Sur les 30 derniers jours"
           icon={FileText}
         />
         <StatCard
           label="Taux auto-validation"
-          value={data ? `${data.kpis.autoValidationRate}%` : "—"}
+          value={data ? `${data.kpis.autoValidationRate}%` : "-"}
           sublabel={data ? `${data.kpis.autoValidatedCount} / ${data.kpis.totalProcessed}` : undefined}
           icon={CheckCircle}
           iconClassName="bg-emerald-500/10 [&_svg]:text-emerald-600"
         />
         <StatCard
           label="Temps moyen"
-          value={data ? `${Math.floor(data.kpis.averageTimeSeconds / 60)}m ${data.kpis.averageTimeSeconds % 60}s` : "—"}
+          value={data ? `${Math.floor(data.kpis.averageTimeSeconds / 60)}m ${data.kpis.averageTimeSeconds % 60}s` : "-"}
           sublabel="Par document"
           icon={Clock}
           iconClassName="bg-blue-500/10 [&_svg]:text-blue-600"
         />
         <StatCard
           label="Erreurs"
-          value={data?.kpis.errors ?? "—"}
+          value={data?.kpis.errors ?? "-"}
           sublabel={data ? `Soit ${data.kpis.errorRate}%` : undefined}
           icon={AlertTriangle}
           iconClassName="bg-red-500/10 [&_svg]:text-red-600"

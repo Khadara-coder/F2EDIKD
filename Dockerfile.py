@@ -11,7 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt
 # Copy project source
 COPY . .
 
-# Runtime defaults — override via .env or environment
+# Runtime defaults - override via .env or environment
 ENV APP_HOST=0.0.0.0 \
     APP_PORT=8088 \
     LOG_LEVEL=INFO \

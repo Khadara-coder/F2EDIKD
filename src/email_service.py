@@ -3,7 +3,7 @@
 Subject format:
   [BI BOT][{REJECTION_CODE}][DEPT {DEPT}] {FILENAME} (corr={CORRELATION_ID})
 
-All SMTP credentials come from environment variables — nothing is hardcoded.
+All SMTP credentials come from environment variables - nothing is hardcoded.
 Required env vars: SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD.
 Optional: SMTP_FROM (default: TEAM.BI@fr.bosch.com)
           REJECTION_EMAIL_TO (default: botrejet.Commandes@fr.bosch.com)
@@ -110,7 +110,7 @@ def send_rejection_email(
     """Send the BI BOT rejection email for *ctx*.
 
     Returns True if sent (or dry-run), False on delivery failure.
-    Never raises — all errors are logged.
+    Never raises - all errors are logged.
     """
     smtp_host = os.environ.get("SMTP_HOST", "")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
@@ -129,7 +129,7 @@ def send_rejection_email(
         return True
 
     if not smtp_host:
-        log.warning("SMTP_HOST not configured — rejection email NOT sent (code=%s, file=%s)",
+        log.warning("SMTP_HOST not configured - rejection email NOT sent (code=%s, file=%s)",
                     ctx.rejection_code, ctx.filename)
         return False
 

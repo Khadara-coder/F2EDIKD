@@ -114,3 +114,20 @@ CREATE TABLE IF NOT EXISTS file2edi_settings (
   setting_value   TEXT NOT NULL,
   updated_at      TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS file2edi_business_events (
+  event_id        TEXT PRIMARY KEY,
+  created_at      TEXT NOT NULL,
+  actor           TEXT NOT NULL,
+  action          TEXT NOT NULL,
+  entity_type     TEXT,
+  entity_id       TEXT,
+  order_id        TEXT,
+  result          TEXT,
+  duration_ms     INTEGER,
+  details_json    TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_created ON file2edi_business_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_actor ON file2edi_business_events(actor);
+CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_action ON file2edi_business_events(action);

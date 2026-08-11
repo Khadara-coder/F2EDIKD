@@ -52,7 +52,7 @@ def get_connection() -> Generator[sqlite3.Connection, None, None]:
 def initialize_database() -> None:
     """Create schema tables if they do not exist.
 
-    Idempotent — safe to call on every startup.
+    Idempotent - safe to call on every startup.
     """
     _ensure_directories()
     schema_path = _project_root() / "data" / "schema.sql"

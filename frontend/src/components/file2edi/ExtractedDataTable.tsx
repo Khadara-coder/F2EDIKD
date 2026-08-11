@@ -22,7 +22,7 @@ export function ExtractedDataTable({ preview }: ExtractedDataTableProps) {
           <tr className="border-b bg-white">
             <td className={cellLabel}>Adresse de livraison</td>
             <td className={`${cellValue} col-span-3`} colSpan={3}>
-              {preview.deliveryAddress || "—"}
+              {preview.deliveryAddress || "-"}
             </td>
           </tr>
           <tr className="border-b bg-white">

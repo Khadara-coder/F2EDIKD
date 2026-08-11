@@ -4,7 +4,7 @@
 
 Je viens de créer l'implémentation PostgreSQL complète pour ton projet EDIFACT. Voici ce qui est livré :
 
-### 1. Schéma PostgreSQL Unifié (`src/database_pg.py` — 18.5 KB)
+### 1. Schéma PostgreSQL Unifié (`src/database_pg.py` - 18.5 KB)
 
 **10 tables unifiées**, remplaçant les anciens SQLite fragmentés + CSV :
 
@@ -26,16 +26,16 @@ Je viens de créer l'implémentation PostgreSQL complète pour ton projet EDIFAC
 - adv_contacts (sold-to → ADV mapping)
 ```
 
-**Row-Level Security (RLS) Policies** — RBAC enforcement au niveau DB :
+**Row-Level Security (RLS) Policies** - RBAC enforcement au niveau DB :
 - ADV users voient SEULEMENT : orders où `processed_by` les concerne OU `soldto` dans leur scope
 - Admin voit tout sans restrictions
 - Impossible à contourner (contrairement au code Python)
 
-**SQLAlchemy 2.0 ORM** — async-ready, typé, production-grade
+**SQLAlchemy 2.0 ORM** - async-ready, typé, production-grade
 
 ---
 
-### 2. Script de Migration (`migrate_to_postgres.py` — 12.8 KB)
+### 2. Script de Migration (`migrate_to_postgres.py` - 12.8 KB)
 
 ```bash
 python migrate_to_postgres.py \
@@ -154,7 +154,7 @@ export PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localh
 python server.py
 ```
 
-When `PG_DATABASE_URL` is set, `src.file2edi.store.get_store()` uses PostgreSQL with the same synchronous interface already consumed by `src/file2edi/router.py`. Without `PG_DATABASE_URL`, startup fails — SQLite runtime fallback is disabled.
+When `PG_DATABASE_URL` is set, `src.file2edi.store.get_store()` uses PostgreSQL with the same synchronous interface already consumed by `src/file2edi/router.py`. Without `PG_DATABASE_URL`, startup fails - SQLite runtime fallback is disabled.
 
 Current integration scope:
 - File2EDI uploads, orders, partners, lines, anomalies, conversion history, EDIFACT exports, and app settings are stored in PostgreSQL.
@@ -194,7 +194,7 @@ All files compiled & tested ✅
 ## 🆘 Troubleshooting
 
 **"Still using SQLite?"**
-- Check: `echo $PG_DATABASE_URL` — must be set; runtime has no SQLite fallback
+- Check: `echo $PG_DATABASE_URL` - must be set; runtime has no SQLite fallback
 - Unit tests may still open temporary SQLite DBs via `File2EdiStore`
 
 **"Migration failed?"**

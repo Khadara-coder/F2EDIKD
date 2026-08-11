@@ -1,4 +1,4 @@
-# Dev local de référence — API FastAPI + PostgreSQL + OCR Tesseract en container
+# Dev local de référence - API FastAPI + PostgreSQL + OCR Tesseract en container
 # Usage : docker compose -f docker-compose.dev.yml up --build
 # Cette stack est celle à utiliser localement pour reproduire les cas OCR/scans.
 
@@ -54,7 +54,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      # Code source monté — uvicorn --reload prend les changements à chaud
+      # Code source monté - uvicorn --reload prend les changements à chaud
       - .:/app
       - /app/frontend/node_modules
       - geniecommande_data_dev:/app/data

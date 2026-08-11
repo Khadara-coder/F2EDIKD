@@ -187,7 +187,7 @@ export function BulkOrderLinesDialog({ open, onOpenChange, onImport }: BulkOrder
                       </TableCell>
                       <TableCell className="text-xs">
                         {isBulkRowEmpty(row) ? (
-                          <span className="text-muted-foreground">—</span>
+                          <span className="text-muted-foreground">-</span>
                         ) : status?.valid ? (
                           <span className="text-emerald-700">OK</span>
                         ) : (

@@ -187,7 +187,7 @@ def write_markdown_summary(rows: list[dict], output_md: Path, *, title: str = "R
     for row in rows:
         if row["shipto_score"] < 100 and not row["erreur"]:
             lines.append(
-                f"- **{row['fichier']}** — {row['code_postal']} {row['ville']} — {row['rue'][:60] if row['rue'] else ''} — {row['raison_shipto'] or row['shipto_statut']}"
+                f"- **{row['fichier']}** - {row['code_postal']} {row['ville']} - {row['rue'][:60] if row['rue'] else ''} - {row['raison_shipto'] or row['shipto_statut']}"
             )
 
     output_md.write_text("\n".join(lines), encoding="utf-8")
@@ -204,7 +204,7 @@ def main() -> None:
     )
     parser.add_argument("--output", type=Path, default=ROOT / "reports" / "regression_report.json")
     parser.add_argument("--markdown", type=Path, default=ROOT / "reports" / "regression_report.md")
-    parser.add_argument("--title", type=str, default="Rapport batch — jeu de régression (30 PDF)")
+    parser.add_argument("--title", type=str, default="Rapport batch - jeu de régression (30 PDF)")
     parser.add_argument("--limit", type=int, default=0, help="Limiter le nombre de PDF (0 = tous)")
     args = parser.parse_args()
 

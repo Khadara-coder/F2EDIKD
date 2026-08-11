@@ -1,4 +1,4 @@
-"""FastAPI router — React File2EDI SPA contract (/api/*)."""
+"""FastAPI router - React File2EDI SPA contract (/api/*)."""
 from __future__ import annotations
 
 import json
@@ -23,9 +23,89 @@ from src.ai_status import build_system_health_payload
 from src.health_probe import build_proxy_health
 from src.masterdata_runtime import allowed_soldtos_for_actor, payload_for_scope, stats as masterdata_stats
 from src.sftp_delivery import is_configured_from_env, test_connection_from_env
+import time as _time
 
 
 DEMO_ORDER_ID = "ord-rexel-026545008"
+
+
+def _biz_log(
+    *,
+    actor: str,
+    action: str,
+    entity_type: str | None = None,
+    entity_id: str | None = None,
+    order_id: str | None = None,
+    result: str = "ok",
+    duration_ms: int | None = None,
+    details: dict | None = None,
+) -> None:
+    """Best-effort métier / performance event (never breaks the main flow)."""
+    try:
+        get_store().log_business_event(
+            actor=actor or "system",
+            action=action,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            order_id=order_id,
+            result=result,
+            duration_ms=duration_ms,
+            details=details,
+        )
+    except Exception:
+        pass
+
+
+_BIZ_META_FIELDS = frozenset({"editSource", "editSources"})
+
+
+def _biz_scalar(value):
+    if value is None:
+        return None
+    if isinstance(value, (str, int, float, bool)):
+        if isinstance(value, str) and len(value) > 240:
+            return value[:237] + "..."
+        return value
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(value)
+    if len(text) > 240:
+        return text[:237] + "..."
+    return text
+
+
+def _biz_field_changes(before: dict | None, payload: dict | None, *, ignore: set[str] | None = None) -> dict:
+    """Build {field: {from, to}} for patched fields (audit trail)."""
+    ignore_keys = set(ignore or set()) | set(_BIZ_META_FIELDS)
+    before = before or {}
+    changes: dict = {}
+    for key, new_val in (payload or {}).items():
+        if key in ignore_keys:
+            continue
+        old_val = before.get(key)
+        if old_val == new_val:
+            continue
+        changes[str(key)] = {"from": _biz_scalar(old_val), "to": _biz_scalar(new_val)}
+    return changes
+
+
+def _partner_snapshot_from_review(review: dict | None, partner_id: str) -> dict | None:
+    if not review:
+        return None
+    for partner in review.get("partners") or []:
+        if str(partner.get("partnerId") or "") == str(partner_id):
+            return partner
+    return None
+
+
+def _line_snapshot_from_review(review: dict | None, line_id: str) -> dict | None:
+    if not review:
+        return None
+    for line in review.get("lines") or []:
+        if str(line.get("lineId") or "") == str(line_id):
+            return line
+    return None
 
 
 def _inject_resubmission_anomaly(store, order_id: str, review: dict) -> None:
@@ -44,8 +124,8 @@ def _inject_resubmission_anomaly(store, order_id: str, review: dict) -> None:
             "severity": "info",
             "fieldName": "RESUBMISSION_DETECTED",
             "message": (
-                f"Ce PDF a déjà été soumis (première soumission: {prev_created or '—'}). "
-                f"État précédent: {prev_status} — {prev_lines} ligne(s) — {prev_total:,.2f} €. "
+                f"Ce PDF a déjà été soumis (première soumission: {prev_created or '-'}). "
+                f"État précédent: {prev_status} - {prev_lines} ligne(s) - {prev_total:,.2f} €. "
                 f"La commande est entièrement recalculée avec les patterns d'extraction actuels."
             ),
             "status": "Info",
@@ -185,7 +265,7 @@ def overlay_sftp_config_from_env(sftp: dict | None = None) -> dict:
     """Merge UI ``sftpConfig`` with process env (``.env.local`` / compose).
 
     Empty UI fields are filled from ``SFTP_*``. Env never exposes the password
-    value — only ``hasPassword``. Used by GET ``/api/settings`` so Paramètres
+    value - only ``hasPassword``. Used by GET ``/api/settings`` so Paramètres
     shows the local defaults without requiring a manual Save.
     """
     base = dict(sftp) if isinstance(sftp, dict) else {}
@@ -267,8 +347,16 @@ def create_router() -> APIRouter:
             raise HTTPException(400, "Identifiant et mot de passe requis")
         user = get_store().verify_credentials(username, password)
         if not user:
+            _biz_log(actor=username, action="auth.login", result="failed", details={"reason": "invalid_credentials"})
             raise HTTPException(401, "Identifiant ou mot de passe incorrect")
         session_id = get_store().create_session(user["userId"], ip=req.client.host if req.client else None)
+        _biz_log(
+            actor=user["username"],
+            action="auth.login",
+            entity_type="user",
+            entity_id=user["userId"],
+            details={"role": user.get("role", "adv")},
+        )
         resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"], "role": "admin"})
         resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=43200)
         return resp
@@ -276,19 +364,27 @@ def create_router() -> APIRouter:
     @router.post("/auth/logout")
     async def auth_logout(req: Request):
         from fastapi.responses import JSONResponse
+        actor = "unknown"
+        try:
+            user = _get_current_user(req)
+            if user:
+                actor = user.get("username") or "unknown"
+        except Exception:
+            pass
         session_id = req.cookies.get(SESSION_COOKIE)
         if session_id:
             try:
                 get_store().invalidate_session(session_id)
             except Exception:
                 pass
+        _biz_log(actor=actor, action="auth.logout", entity_type="user")
         resp = JSONResponse({"ok": True})
         resp.delete_cookie(SESSION_COOKIE)
         return resp
 
     @router.get("/me")
     def get_me(req: Request):
-        """Return current user info — prefers session cookie, falls back to server actor.
+        """Return current user info - prefers session cookie, falls back to server actor.
         
         If a f2edi_session cookie is present but invalid/expired, return authenticated=False
         so the frontend shows the login page (prevents bypassing logout via DEV_ACTOR fallback).
@@ -394,6 +490,14 @@ def create_router() -> APIRouter:
         result = get_store().hold_order(order_id, reason, actor)
         if not result:
             raise HTTPException(404)
+        _biz_log(
+            actor=actor,
+            action="order.hold",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            details={"reason": reason},
+        )
         return {"ok": True, "status": "En attente", "reason": reason}
 
     @router.post("/orders/{order_id}/reject")
@@ -408,6 +512,14 @@ def create_router() -> APIRouter:
         result = get_store().reject_order(order_id, reason, actor)
         if not result:
             raise HTTPException(404)
+        _biz_log(
+            actor=actor,
+            action="order.reject",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            details={"reason": reason},
+        )
         return {"ok": True, "status": "Rejeté", "reason": reason}
 
     @router.post("/orders/{order_id}/transfer")
@@ -423,6 +535,14 @@ def create_router() -> APIRouter:
         result = get_store().transfer_order(order_id, to_username, note, from_actor)
         if not result:
             raise HTTPException(404)
+        _biz_log(
+            actor=from_actor,
+            action="order.transfer",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            details={"to": to_username, "note": note},
+        )
         return {"ok": True, "status": "Transféré", "to": to_username}
 
     # ── Health (React Header badges) ─────────────────────────────────────────
@@ -479,7 +599,7 @@ def create_router() -> APIRouter:
                     items.append({
                         "orderId": c.get("id"),
                         "fileName": c.get("source_filename"),
-                        "clientName": c.get("customer_name") or "—",
+                        "clientName": c.get("customer_name") or "-",
                         "confidence": conf,
                         "issue": c.get("rejection_message") or c.get("rejection_code") or "Revue requise",
                         "date": c.get("created_at"),
@@ -499,7 +619,7 @@ def create_router() -> APIRouter:
                 "conversionId": f"conv-{o['order_id']}",
                 "orderId": o["order_id"],
                 "fileName": o["file_name"],
-                "clientName": o["client_name"] or "—",
+                "clientName": o["client_name"] or "-",
                 "status": o.get("status", "Généré"),
                 "date": o.get("updated_at") or o.get("created_at"),
                 "hasEdifact": o.get("status") == "Généré",
@@ -521,11 +641,19 @@ def create_router() -> APIRouter:
         dest.write_bytes(payload)
         uploaded_by = resolve_actor(req)
         meta = store.save_upload_with_id(upload_id, pdf.filename, len(payload), str(dest), uploaded_by=uploaded_by)
+        _biz_log(
+            actor=uploaded_by,
+            action="upload.create",
+            entity_type="upload",
+            entity_id=upload_id,
+            details={"fileName": pdf.filename, "bytes": len(payload)},
+        )
         return {"uploadId": meta["uploadId"]}
 
     @router.post("/upload/{upload_id}/extract")
     def extract_upload(upload_id: str):
         store = get_store()
+        started = _time.perf_counter()
         pdf_path = store.get_upload_path(upload_id)
         if not pdf_path:
             raise HTTPException(404, "Upload introuvable")
@@ -563,6 +691,21 @@ def create_router() -> APIRouter:
             engine_bridge.upsert_conversion(_conversion_from_engine(order_id, upload_id, result, operator=assigned_actor))
         except Exception:
             pass
+        _biz_log(
+            actor=assigned_actor or uploaded_by,
+            action="upload.extract",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            duration_ms=int((_time.perf_counter() - started) * 1000),
+            details={
+                "uploadId": upload_id,
+                "fileName": upload_meta.get("file_name"),
+                "pages": page_count,
+                "lines": len(review.get("lines") or []),
+                "anomalies": len(review.get("anomalies") or []),
+            },
+        )
         return engine_to_extraction_preview(
             upload_id, order_id, result, len(payload), page_count=page_count,
         )
@@ -578,6 +721,7 @@ def create_router() -> APIRouter:
             raise HTTPException(400, "Fichier trop volumineux (max 20 Mo)")
 
         store = get_store()
+        started = _time.perf_counter()
         upload_id = f"upl-{uuid.uuid4().hex[:12]}"
         dest = store.intake_dir / f"{upload_id}.pdf"
         dest.write_bytes(payload)
@@ -626,6 +770,21 @@ def create_router() -> APIRouter:
             result,
             len(payload),
             page_count=page_count,
+        )
+        _biz_log(
+            actor=assigned_actor or uploaded_by,
+            action="upload.extract_direct",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            duration_ms=int((_time.perf_counter() - started) * 1000),
+            details={
+                "uploadId": upload_id,
+                "fileName": pdf.filename,
+                "pages": page_count,
+                "lines": len(review.get("lines") or []),
+                "anomalies": len(review.get("anomalies") or []),
+            },
         )
         return {
             "uploadId": upload_id,
@@ -688,54 +847,155 @@ def create_router() -> APIRouter:
         return _serve_order_pdf(order_id)
 
     @router.patch("/orders/{order_id}")
-    async def patch_order(order_id: str, payload: dict = Body(...)):
+    async def patch_order(order_id: str, req: Request, payload: dict = Body(...)):
         try:
-            review = get_store().update_order_header(order_id, payload)
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
+        store = get_store()
+        before = (store.load_order_review(order_id) or {}).get("order") or {}
+        try:
+            review = store.update_order_header(order_id, payload)
         except Exception as exc:
             raise HTTPException(500, f"Mise à jour commande échouée: {exc}") from exc
         if not review:
             raise HTTPException(404)
+        changes = _biz_field_changes(before, payload)
+        _biz_log(
+            actor=actor,
+            action="order.patch_header",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            details={"fields": sorted(changes.keys()), "changes": changes},
+        )
         return review
 
     @router.patch("/orders/partners/{partner_id}")
-    async def patch_partner(partner_id: str, payload: dict = Body(...)):
+    async def patch_partner(partner_id: str, req: Request, payload: dict = Body(...)):
         try:
-            review = get_store().update_partner(partner_id, payload)
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
+        store = get_store()
+        order_id_before = store.find_partner_order_id(partner_id)
+        before_partner = None
+        if order_id_before:
+            before_partner = _partner_snapshot_from_review(
+                store.load_order_review(order_id_before), partner_id
+            )
+        try:
+            review = store.update_partner(partner_id, payload)
         except Exception as exc:
             raise HTTPException(500, f"Mise à jour partenaire échouée: {exc}") from exc
         if not review:
             raise HTTPException(404)
+        order_id = (review.get("order") or {}).get("orderId")
+        changes = _biz_field_changes(before_partner, payload)
+        _biz_log(
+            actor=actor,
+            action="order.patch_partner",
+            entity_type="partner",
+            entity_id=partner_id,
+            order_id=order_id,
+            details={
+                "fields": sorted(changes.keys()),
+                "changes": changes,
+                "partnerFunction": (before_partner or {}).get("partnerFunction"),
+                "editSource": (payload or {}).get("editSource"),
+            },
+        )
         return review
 
     @router.patch("/orders/lines/{line_id}")
-    async def patch_line(line_id: str, payload: dict):
-        review = get_store().update_line(line_id, payload)
+    async def patch_line(line_id: str, req: Request, payload: dict):
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
+        store = get_store()
+        order_id_before = store.find_line_order_id(line_id)
+        before_line = None
+        if order_id_before:
+            before_line = _line_snapshot_from_review(
+                store.load_order_review(order_id_before), line_id
+            )
+        review = store.update_line(line_id, payload)
         if not review:
             raise HTTPException(404)
+        order_id = (review.get("order") or {}).get("orderId")
+        changes = _biz_field_changes(before_line, payload)
+        _biz_log(
+            actor=actor,
+            action="order.patch_line",
+            entity_type="line",
+            entity_id=line_id,
+            order_id=order_id,
+            details={
+                "fields": sorted(changes.keys()),
+                "changes": changes,
+                "lineNumber": (before_line or {}).get("lineNumber"),
+            },
+        )
         return review
 
     @router.post("/orders/{order_id}/lines")
-    async def post_line(order_id: str, payload: dict):
+    async def post_line(order_id: str, req: Request, payload: dict):
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
         review = get_store().add_line(order_id, payload)
         if not review:
             raise HTTPException(404)
+        _biz_log(
+            actor=actor,
+            action="order.add_line",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+        )
         return review
 
     @router.post("/orders/{order_id}/lines/bulk")
-    async def post_lines_bulk(order_id: str, payload: dict = Body(...)):
+    async def post_lines_bulk(order_id: str, req: Request, payload: dict = Body(...)):
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
         lines = payload.get("lines")
         if not isinstance(lines, list) or not lines:
             raise HTTPException(400, "Au moins une ligne est requise.")
         review = get_store().add_lines_bulk(order_id, lines)
         if not review:
             raise HTTPException(404)
+        _biz_log(
+            actor=actor,
+            action="order.add_lines_bulk",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            details={"count": len(lines)},
+        )
         return review
 
     @router.delete("/orders/lines/{line_id}")
-    async def delete_line(line_id: str):
+    async def delete_line(line_id: str, req: Request):
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
         review = get_store().delete_line(line_id)
         if not review:
             raise HTTPException(404)
+        order_id = (review.get("order") or {}).get("orderId")
+        _biz_log(
+            actor=actor,
+            action="order.delete_line",
+            entity_type="line",
+            entity_id=line_id,
+            order_id=order_id,
+        )
         return review
 
     @router.delete("/uploads/{upload_id}")
@@ -746,11 +1006,24 @@ def create_router() -> APIRouter:
         return {"deleted": upload_id}
 
     @router.patch("/orders/anomalies/{anomaly_id}")
-    async def patch_anomaly(anomaly_id: str, payload: dict):
+    async def patch_anomaly(anomaly_id: str, payload: dict, req: Request):
         action = payload.get("action", "corrected")
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
         review = get_store().resolve_anomaly(anomaly_id, action)
         if not review:
             raise HTTPException(404)
+        order_id = (review.get("order") or {}).get("orderId")
+        _biz_log(
+            actor=actor,
+            action=f"anomaly.{action}",
+            entity_type="anomaly",
+            entity_id=anomaly_id,
+            order_id=order_id,
+            details={"action": action},
+        )
         return review
 
     @router.post("/orders/{order_id}/save")
@@ -764,6 +1037,14 @@ def create_router() -> APIRouter:
         if not review:
             raise HTTPException(404)
         blockers = _mandatory_review_errors(review)
+        _biz_log(
+            actor=actor,
+            action="order.save",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            details={"blockers": len(blockers)},
+        )
         return {
             "success": True,
             "message": "Modifications enregistrées",
@@ -774,12 +1055,27 @@ def create_router() -> APIRouter:
     @router.post("/orders/{order_id}/generate-edifact")
     async def generate_edifact(order_id: str, req: Request):
         store = get_store()
+        started = _time.perf_counter()
+        try:
+            _actor = resolve_actor(req)
+        except Exception:
+            _actor = "operator"
         review = store.load_order_review(order_id)
         if not review:
             raise HTTPException(404)
 
         mandatory_errors = _mandatory_review_errors(review)
         if mandatory_errors:
+            _biz_log(
+                actor=_actor,
+                action="order.generate_edifact",
+                entity_type="order",
+                entity_id=order_id,
+                order_id=order_id,
+                result="blocked",
+                duration_ms=int((_time.perf_counter() - started) * 1000),
+                details={"errors": mandatory_errors[:5]},
+            )
             return {"success": False, "errors": mandatory_errors}
 
         _ensure_conversion_for_generate(order_id, review)
@@ -792,24 +1088,61 @@ def create_router() -> APIRouter:
                 return {"corrections": _corrections_from_review(review)}
 
         result = await engine_bridge.generate_edifact(order_id, _FakeRequest())
+        duration_ms = int((_time.perf_counter() - started) * 1000)
         if hasattr(result, "status_code"):
             body = getattr(result, "body", b"") or b""
             try:
                 detail = json.loads(body).get("error", "Conversion introuvable")
             except Exception:
                 detail = "Conversion introuvable"
+            _biz_log(
+                actor=_actor,
+                action="order.generate_edifact",
+                entity_type="order",
+                entity_id=order_id,
+                order_id=order_id,
+                result="error",
+                duration_ms=duration_ms,
+                details={"error": detail},
+            )
             return {"success": False, "errors": [detail]}
         if isinstance(result, dict) and result.get("generated"):
             fname = result.get("tst_filename") or f"ORDERS_{order_id}.tst"
             content = result.get("edifact_content") or ""
-            try:
-                _actor = resolve_actor(req)
-            except Exception:
-                _actor = "operator"
             store.mark_edifact_generated(order_id, fname, content, actor=_actor)
+            _biz_log(
+                actor=_actor,
+                action="order.generate_edifact",
+                entity_type="order",
+                entity_id=order_id,
+                order_id=order_id,
+                result="ok",
+                duration_ms=duration_ms,
+                details={"fileName": fname, "bytes": len(content or "")},
+            )
             return {"success": True, "fileName": fname, "content": content}
         if isinstance(result, dict):
-            return {"success": False, "errors": _extract_generate_errors(result)}
+            errors = _extract_generate_errors(result)
+            _biz_log(
+                actor=_actor,
+                action="order.generate_edifact",
+                entity_type="order",
+                entity_id=order_id,
+                order_id=order_id,
+                result="error",
+                duration_ms=duration_ms,
+                details={"errors": errors[:5]},
+            )
+            return {"success": False, "errors": errors}
+        _biz_log(
+            actor=_actor,
+            action="order.generate_edifact",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            result="error",
+            duration_ms=duration_ms,
+        )
         return {"success": False, "errors": ["Génération échouée"]}
 
     @router.post("/orders/{order_id}/send-sftp")
@@ -823,6 +1156,7 @@ def create_router() -> APIRouter:
         from src.sftp_delivery import upload_tst
 
         store = get_store()
+        started = _time.perf_counter()
         export = store.get_edifact_export(order_id)
         if not export:
             raise HTTPException(400, "EDIFACT non généré pour cette commande")
@@ -940,6 +1274,16 @@ def create_router() -> APIRouter:
             if result.success:
                 store.mark_sftp_delivery(order_id, True, result.remote_path, sent_by=sent_by)
                 remote = str(result.remote_path or "")
+                _biz_log(
+                    actor=sent_by,
+                    action="order.send_sap",
+                    entity_type="order",
+                    entity_id=order_id,
+                    order_id=order_id,
+                    result="ok",
+                    duration_ms=int((_time.perf_counter() - started) * 1000),
+                    details={"remotePath": remote, "force": bool((payload or {}).get("force"))},
+                )
                 return {
                     "success": True,
                     "ok": True,
@@ -950,12 +1294,32 @@ def create_router() -> APIRouter:
                 }
 
             store.mark_sftp_delivery(order_id, False, result.error_reason)
+            _biz_log(
+                actor=sent_by,
+                action="order.send_sap",
+                entity_type="order",
+                entity_id=order_id,
+                order_id=order_id,
+                result="error",
+                duration_ms=int((_time.perf_counter() - started) * 1000),
+                details={"error": str(result.error_reason or "Échec envoi SFTP")},
+            )
             return {"success": False, "message": str(result.error_reason or "Échec envoi SFTP")}
         except Exception as exc:
             try:
                 store.mark_sftp_delivery(order_id, False, str(exc))
             except Exception:
                 pass
+            _biz_log(
+                actor=sent_by if "sent_by" in locals() else "system",
+                action="order.send_sap",
+                entity_type="order",
+                entity_id=order_id,
+                order_id=order_id,
+                result="error",
+                duration_ms=int((_time.perf_counter() - started) * 1000) if "started" in locals() else None,
+                details={"error": str(exc)},
+            )
             return {"success": False, "message": f"Échec envoi SFTP: {exc}"}
 
     @router.post("/orders/reconcile-sap")
@@ -1006,7 +1370,7 @@ def create_router() -> APIRouter:
                 "conversionId": f"conv-{o['order_id']}",
                 "orderId": o["order_id"],
                 "fileName": o["file_name"],
-                "clientName": o["client_name"] or "—",
+                "clientName": o["client_name"] or "-",
                 "customerOrderNumber": "",
                 "documentReference": "",
                 "processedAt": o.get("updated_at") or o.get("created_at"),
@@ -1120,8 +1484,19 @@ def create_router() -> APIRouter:
             raise
         except Exception:
             pass
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "admin"
 
         persisted = get_store().save_app_settings(payload or {})
+        _biz_log(
+            actor=actor,
+            action="settings.update",
+            entity_type="settings",
+            entity_id="app",
+            details={"keys": sorted(str(k) for k in (payload or {}).keys())[:40]},
+        )
         try:
             from src.masterdata_n8n import resolve_config
 
@@ -1228,8 +1603,7 @@ def create_router() -> APIRouter:
                 if isinstance(incoming_n8n, dict) and (
                     incoming_n8n.get("enabled") or incoming_n8n.get("webhookUrl")
                 ):
-                    import requests as _requests
-                    from src.masterdata_n8n import format_webhook_error, resolve_config
+                    from src.masterdata_n8n import probe_n8n_connectivity, resolve_config
 
                     persisted = get_store().load_app_settings()
                     merged = {
@@ -1237,32 +1611,11 @@ def create_router() -> APIRouter:
                         **incoming_n8n,
                     }
                     cfg = resolve_config(merged)
-                    url = str(cfg.get("webhookUrl") or "").strip()
-                    if not url:
-                        return {"status": "disconnected", "message": "URL webhook n8n manquante"}
-                    try:
-                        # Prefer OPTIONS/HEAD-less: POST with dryRun flag; many n8n webhooks accept POST only.
-                        headers = {"Accept": "application/json", "Content-Type": "application/json"}
-                        resp = _requests.post(
-                            url,
-                            headers=headers,
-                            json={"action": "masterdata_sync", "reason": "connectivity_test", "dryRun": True},
-                            timeout=min(10, int(cfg.get("timeoutSeconds") or 10)),
-                        )
-                        if resp.status_code < 500:
-                            return {
-                                "status": "connected",
-                                "message": f"Webhook n8n joignable (HTTP {resp.status_code}) — {url}",
-                            }
-                        return {
-                            "status": "disconnected",
-                            "message": f"Webhook n8n HTTP {resp.status_code} — {url}",
-                        }
-                    except Exception as exc:
-                        return {
-                            "status": "disconnected",
-                            "message": format_webhook_error(exc, url),
-                        }
+                    probe = probe_n8n_connectivity(cfg)
+                    return {
+                        "status": probe.get("status") or "disconnected",
+                        "message": probe.get("message") or "Webhook n8n injoignable",
+                    }
                 stats = masterdata_stats()
                 if not isinstance(stats, dict) or not stats:
                     return {"status": "disconnected", "message": "Aucune source CSV chargée"}
@@ -1474,6 +1827,139 @@ def create_router() -> APIRouter:
 
         raise HTTPException(status_code=400, detail=f"Provider non supporté: {provider}")
 
+    @router.get("/logs")
+    def get_app_logs(
+        req: Request,
+        limit: int = 200,
+        level: str = "INFO",
+        search: str = "",
+        file: str | None = None,
+        kind: str = "technical",
+        actor: str | None = None,
+        action: str | None = None,
+    ):
+        try:
+            ensure_admin(req)
+        except HTTPException:
+            raise
+        except Exception:
+            pass
+        kind_norm = (kind or "technical").strip().lower()
+        if kind_norm not in {"technical", "business", "all"}:
+            kind_norm = "technical"
+        limit_n = max(1, min(1000, int(limit or 200)))
+
+        technical_payload: dict | None = None
+        business_items: list[dict] = []
+
+        if kind_norm in {"technical", "all"}:
+            try:
+                from src.app_logs import ensure_ring_handler, get_recent_logs
+
+                ensure_ring_handler()
+                technical_payload = get_recent_logs(
+                    limit=limit_n,
+                    level=level,
+                    search=search,
+                    file_name=file,
+                )
+            except Exception as exc:
+                if kind_norm == "technical":
+                    raise HTTPException(500, f"Impossible de lire les logs: {exc}") from exc
+                technical_payload = {
+                    "items": [],
+                    "count": 0,
+                    "limit": limit_n,
+                    "level": level,
+                    "search": search or "",
+                    "logDir": "",
+                    "files": [],
+                    "generatedAt": datetime.now(timezone.utc).isoformat(),
+                    "error": str(exc),
+                }
+
+        if kind_norm in {"business", "all"}:
+            try:
+                business_items = get_store().list_business_events(
+                    limit=limit_n,
+                    search=search or "",
+                    actor=actor,
+                    action=action,
+                )
+            except Exception as exc:
+                if kind_norm == "business":
+                    raise HTTPException(500, f"Impossible de lire les logs métier: {exc}") from exc
+
+        if kind_norm == "business":
+            return {
+                "kind": "business",
+                "items": business_items,
+                "count": len(business_items),
+                "limit": limit_n,
+                "search": search or "",
+                "actor": actor or "",
+                "action": action or "",
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+
+        if kind_norm == "all":
+            tech_items = list((technical_payload or {}).get("items") or [])
+            merged: list[dict] = []
+            for item in tech_items:
+                merged.append({
+                    "kind": "technical",
+                    "id": item.get("id"),
+                    "timestamp": item.get("timestamp"),
+                    "level": item.get("level"),
+                    "logger": item.get("logger"),
+                    "message": item.get("message"),
+                    "source": item.get("source"),
+                    "raw": item.get("raw"),
+                })
+            for ev in business_items:
+                dur = ev.get("durationMs")
+                msg_parts = [
+                    str(ev.get("action") or ""),
+                    f"by {ev.get('actor') or '-'}",
+                    f"result={ev.get('result') or 'ok'}",
+                ]
+                if ev.get("orderId"):
+                    msg_parts.append(f"order={ev.get('orderId')}")
+                if dur is not None:
+                    msg_parts.append(f"{dur}ms")
+                merged.append({
+                    "kind": "business",
+                    "id": ev.get("eventId"),
+                    "timestamp": ev.get("createdAt"),
+                    "level": "INFO" if (ev.get("result") or "ok") == "ok" else "WARNING",
+                    "logger": "business",
+                    "message": " · ".join(msg_parts),
+                    "source": "business",
+                    "actor": ev.get("actor"),
+                    "action": ev.get("action"),
+                    "orderId": ev.get("orderId"),
+                    "result": ev.get("result"),
+                    "durationMs": dur,
+                    "details": ev.get("details") or {},
+                })
+            merged.sort(key=lambda row: str(row.get("timestamp") or ""), reverse=True)
+            merged = merged[:limit_n]
+            return {
+                "kind": "all",
+                "items": merged,
+                "count": len(merged),
+                "limit": limit_n,
+                "level": level,
+                "search": search or "",
+                "logDir": (technical_payload or {}).get("logDir") or "",
+                "files": (technical_payload or {}).get("files") or [],
+                "generatedAt": datetime.now(timezone.utc).isoformat(),
+            }
+
+        out = technical_payload or {}
+        out["kind"] = "technical"
+        return out
+
     return router
 
 
@@ -1589,8 +2075,8 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None, inc
     """List all orders with optional actor/role context (for future RBAC filtering).
     
     Args:
-        actor: Current user identity (email) — passed for PostgreSQL RLS context
-        role: Current user role ("admin" or "adv") — passed for PostgreSQL RLS context
+        actor: Current user identity (email) - passed for PostgreSQL RLS context
+        role: Current user role ("admin" or "adv") - passed for PostgreSQL RLS context
     
     Note: SQLite backend ignores actor/role. PostgreSQL backend uses them for RLS.
     """
@@ -1746,7 +2232,7 @@ def _order_list_item(o: dict) -> dict:
     return {
         "orderId": o["order_id"],
         "fileName": o["file_name"],
-        "clientName": o["client_name"] or "—",
+        "clientName": o["client_name"] or "-",
         "confidence": int(o.get("global_confidence") or 0),
         "issue": _issue_label(o),
         "date": updated_at or created_at,
@@ -1775,9 +2261,9 @@ def _issue_label(o: dict) -> str:
     status = o.get("status") or ""
     if status == "Confirmé SAP":
         vbeln = o.get("sap_vbeln") or ""
-        return f"Confirmé SAP{f' — {vbeln}' if vbeln else ''}"
+        return f"Confirmé SAP{f' - {vbeln}' if vbeln else ''}"
     if status == "Envoyé SAP":
-        return "Envoyé SAP — en attente de confirmation"
+        return "Envoyé SAP - en attente de confirmation"
     if status == "Rejeté":
         return "Commande rejetée par le moteur"
     if status == "Généré":
@@ -1845,7 +2331,7 @@ def _mandatory_review_errors(review: dict) -> list[str]:
     if not str(shipto.get("partnerCode") or "").strip():
         errors.append("Code ship-to SAP manquant")
     if not lines:
-        errors.append("Aucune ligne de commande — ajoutez au moins une ligne")
+        errors.append("Aucune ligne de commande - ajoutez au moins une ligne")
     else:
         for ln in lines:
             if not str(ln.get("boschArticle") or "").strip():
@@ -1859,10 +2345,10 @@ def _mandatory_review_errors(review: dict) -> list[str]:
     ]
     if pending:
         errors.append(
-            f"{len(pending)} anomalie(s) en attente — validez ou ignorez chacune avant de valider la commande"
+            f"{len(pending)} anomalie(s) en attente - validez ou ignorez chacune avant de valider la commande"
         )
         for anomaly in pending:
-            errors.append(f"Anomalie : {anomaly.get('message', '—')}")
+            errors.append(f"Anomalie : {anomaly.get('message', '-')}")
 
     return errors
 

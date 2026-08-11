@@ -1,11 +1,11 @@
 """FastAPI application for EDIFACT Standalone Orchestrator.
 
 Endpoints:
-  GET  /health            — service health + config summary
-  POST /jobs              — submit a PDF for processing
-  GET  /jobs              — list recent jobs
-  GET  /jobs/{job_id}     — get job detail
-  POST /jobs/{job_id}/retry — requeue a failed/rejected job
+  GET  /health            - service health + config summary
+  POST /jobs              - submit a PDF for processing
+  GET  /jobs              - list recent jobs
+  GET  /jobs/{job_id}     - get job detail
+  POST /jobs/{job_id}/retry - requeue a failed/rejected job
 """
 from __future__ import annotations
 
@@ -43,7 +43,7 @@ def _build_app() -> FastAPI:
 
     app = FastAPI(
         title="EDIFACT Standalone Orchestrator",
-        description="PDF → EDIFACT ORDERS D.96A → SFTP — ELM_STANDARD only",
+        description="PDF → EDIFACT ORDERS D.96A → SFTP - ELM_STANDARD only",
         version="1.0.0",
         lifespan=lifespan,
     )

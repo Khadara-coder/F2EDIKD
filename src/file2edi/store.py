@@ -1,4 +1,4 @@
-"""File2EDI persistence — PostgreSQL runtime (`PostgresFile2EdiStore`) with SQLite base class for tests."""
+"""File2EDI persistence - PostgreSQL runtime (`PostgresFile2EdiStore`) with SQLite base class for tests."""
 from __future__ import annotations
 
 import json
@@ -1173,6 +1173,32 @@ class File2EdiStore:
             self._sync_order_graph(self.load_order_review(order_id))
         return updated > 0
 
+    def find_partner_order_id(self, partner_id: str) -> str | None:
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT order_id FROM file2edi_order_partners WHERE partner_id=?",
+                [partner_id],
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return row["order_id"] if not isinstance(row, dict) else row.get("order_id")
+
+    def find_line_order_id(self, line_id: str) -> str | None:
+        conn = self._conn()
+        try:
+            row = conn.execute(
+                "SELECT order_id FROM file2edi_order_lines WHERE line_id=?",
+                [line_id],
+            ).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return None
+        return row["order_id"] if not isinstance(row, dict) else row.get("order_id")
+
     def update_order_header(self, order_id: str, payload: dict) -> dict | None:
         if not self.load_order_review(order_id):
             return None
@@ -1627,6 +1653,129 @@ class File2EdiStore:
 
         return self._execute_write(_write)
 
+    def log_business_event(
+        self,
+        *,
+        actor: str,
+        action: str,
+        entity_type: str | None = None,
+        entity_id: str | None = None,
+        order_id: str | None = None,
+        result: str = "ok",
+        duration_ms: int | None = None,
+        details: dict | None = None,
+    ) -> dict:
+        """Persist a métier / performance event (user actions, timings)."""
+        event_id = f"biz-{uuid.uuid4().hex[:12]}"
+        created_at = _now()
+        payload = {
+            "eventId": event_id,
+            "createdAt": created_at,
+            "actor": (actor or "system").strip() or "system",
+            "action": (action or "unknown").strip() or "unknown",
+            "entityType": entity_type,
+            "entityId": entity_id,
+            "orderId": order_id,
+            "result": (result or "ok").strip() or "ok",
+            "durationMs": int(duration_ms) if duration_ms is not None else None,
+            "details": details or {},
+        }
+
+        def _write():
+            conn = self._conn()
+            try:
+                conn.execute(
+                    """INSERT INTO file2edi_business_events
+                    (event_id, created_at, actor, action, entity_type, entity_id,
+                     order_id, result, duration_ms, details_json)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)""",
+                    [
+                        event_id,
+                        created_at,
+                        payload["actor"],
+                        payload["action"],
+                        entity_type,
+                        entity_id,
+                        order_id,
+                        payload["result"],
+                        payload["durationMs"],
+                        json.dumps(details or {}, ensure_ascii=False),
+                    ],
+                )
+                conn.commit()
+            finally:
+                conn.close()
+            return payload
+
+        try:
+            return self._execute_write(_write)
+        except Exception as exc:
+            _log.warning("log_business_event(%s) failed: %s", action, exc)
+            return payload
+
+    def list_business_events(
+        self,
+        *,
+        limit: int = 200,
+        search: str = "",
+        actor: str | None = None,
+        action: str | None = None,
+    ) -> list[dict]:
+        limit = max(1, min(1000, int(limit or 200)))
+        clauses: list[str] = []
+        params: list[Any] = []
+        if actor:
+            clauses.append("actor=?")
+            params.append(actor)
+        if action:
+            clauses.append("action=?")
+            params.append(action)
+        needle = str(search or "").strip()
+        if needle:
+            like = f"%{needle}%"
+            clauses.append(
+                "(actor LIKE ? OR action LIKE ? OR order_id LIKE ? OR entity_id LIKE ? OR details_json LIKE ? OR result LIKE ?)"
+            )
+            params.extend([like, like, like, like, like, like])
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        conn = self._conn()
+        try:
+            rows = conn.execute(
+                f"""SELECT event_id, created_at, actor, action, entity_type, entity_id,
+                           order_id, result, duration_ms, details_json
+                    FROM file2edi_business_events
+                    {where}
+                    ORDER BY created_at DESC
+                    LIMIT ?""",
+                params + [limit],
+            ).fetchall()
+        finally:
+            conn.close()
+        out: list[dict] = []
+        for row in rows:
+            details_raw = row["details_json"] if not isinstance(row, dict) else row.get("details_json")
+            details: dict = {}
+            if details_raw:
+                try:
+                    details = json.loads(details_raw) if isinstance(details_raw, str) else dict(details_raw)
+                except Exception:
+                    details = {"raw": str(details_raw)}
+            out.append(
+                {
+                    "eventId": row["event_id"] if not isinstance(row, dict) else row.get("event_id"),
+                    "createdAt": row["created_at"] if not isinstance(row, dict) else row.get("created_at"),
+                    "actor": row["actor"] if not isinstance(row, dict) else row.get("actor"),
+                    "action": row["action"] if not isinstance(row, dict) else row.get("action"),
+                    "entityType": row["entity_type"] if not isinstance(row, dict) else row.get("entity_type"),
+                    "entityId": row["entity_id"] if not isinstance(row, dict) else row.get("entity_id"),
+                    "orderId": row["order_id"] if not isinstance(row, dict) else row.get("order_id"),
+                    "result": row["result"] if not isinstance(row, dict) else row.get("result"),
+                    "durationMs": row["duration_ms"] if not isinstance(row, dict) else row.get("duration_ms"),
+                    "details": details,
+                }
+            )
+        return out
+
 
 class _PostgresCursor:
     """Tiny DB-API compatibility wrapper around psycopg cursors.
@@ -1850,6 +1999,22 @@ class PostgresFile2EdiStore(File2EdiStore):
           setting_value TEXT NOT NULL,
           updated_at    TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS file2edi_business_events (
+          event_id     TEXT PRIMARY KEY,
+          created_at   TEXT NOT NULL,
+          actor        TEXT NOT NULL,
+          action       TEXT NOT NULL,
+          entity_type  TEXT,
+          entity_id    TEXT,
+          order_id     TEXT,
+          result       TEXT,
+          duration_ms  INTEGER,
+          details_json TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_created ON file2edi_business_events(created_at);
+        CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_actor ON file2edi_business_events(actor);
+        CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_action ON file2edi_business_events(action);
 
         CREATE TABLE IF NOT EXISTS file2edi_users (
           user_id       TEXT PRIMARY KEY,

@@ -182,7 +182,7 @@ def _to_natural_qty(value: float | None) -> Optional[float]:
     # Allow tiny epsilon for floating point arithmetic
     if abs(value - rounded) < 1e-6:
         return float(rounded)
-    return None  # Genuine non-integer — reject
+    return None  # Genuine non-integer - reject
 
 
 _QTY_IN_DESC_RE = re.compile(

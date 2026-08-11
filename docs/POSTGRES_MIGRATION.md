@@ -168,7 +168,7 @@ FOR SELECT USING (
 
 ### Policy 2: Update Access
 
-Same logic for UPDATE — can only modify orders they can see.
+Same logic for UPDATE - can only modify orders they can see.
 
 ## SQLite note (tests / scripts only)
 

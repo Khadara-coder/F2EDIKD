@@ -51,12 +51,12 @@ env:
     value: "true"
   - name: ENABLE_PROFILE_LOGIN
     value: "true"
-  # ── Persistence Tier 2 (Workspace JSONL) — no admin required ─────────────
+  # ── Persistence Tier 2 (Workspace JSONL) - no admin required ─────────────
   # Grant app SP CAN_EDIT on chosen Workspace folder (if Tier 2 is enabled)
   # - name: DATABRICKS_PERSIST_PATH
   #   value: "/Users/rsr1dy@bosch.com/EDIFACT/data/persist"
   #
-  # ── Persistence Tier 1 (Delta / Unity Catalog) — requires admin grant ────
+  # ── Persistence Tier 1 (Delta / Unity Catalog) - requires admin grant ────
   # Run scripts/create_delta_tables.sql after granting schema access:
   #   GRANT CREATE, USAGE ON SCHEMA bci_rbs_prod.file2edi TO `<app-sp>`;
   # - name: DATABRICKS_WAREHOUSE_ID

@@ -1,4 +1,4 @@
-"""Tests for src/llm_client.py — direct REST Databricks client."""
+"""Tests for src/llm_client.py - direct REST Databricks client."""
 from __future__ import annotations
 
 import json

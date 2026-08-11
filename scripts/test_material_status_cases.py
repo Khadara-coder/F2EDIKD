@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
-# Real MATNRs from 10564_Materials.parquet (sync GHE) — use for revue commande manual tests.
+# Real MATNRs from 10564_Materials.parquet (sync GHE) - use for revue commande manual tests.
 CASES = [
     ("7739833464", "Article disponible - aucune anomalie"),
     ("87183105320", "no sale (VMSTA 92) - warning arrete"),
@@ -50,7 +50,7 @@ def main() -> int:
         kind = status.get("kind")
         repl = status.get("replacement")
         chain = status.get("replacement_chain")
-        print(f"MATNR {matnr} — {label}")
+        print(f"MATNR {matnr} - {label}")
         print(f"  kind={kind}  statut={status.get('statut')!r}  replacement={repl!r}")
         if chain:
             print(f"  chain={' -> '.join(chain)}")

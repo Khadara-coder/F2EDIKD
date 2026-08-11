@@ -102,7 +102,7 @@ def find_sap_confirmation(
     for candidate in candidates:
         erdat_date = candidate.get("erdat_date")
         if sent_day and erdat_date and erdat_date < sent_day:
-            # Historical SO with same BSTNK — not feedback for this send.
+            # Historical SO with same BSTNK - not feedback for this send.
             continue
         eligible.append(candidate)
 

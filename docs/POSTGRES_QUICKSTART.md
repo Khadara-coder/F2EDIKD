@@ -14,7 +14,7 @@ python migrate_to_postgres.py \
   --src data/file2edi.db \
   --dst "postgresql://edifact:edifact_dev_password@localhost:5432/edifact"
 
-# 4. Set environment (required — no SQLite runtime fallback)
+# 4. Set environment (required - no SQLite runtime fallback)
 export PG_DATABASE_URL="postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact"
 
 # 5. Start server
@@ -44,7 +44,7 @@ See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md#cloud-deployment-azure) for Az
 ## Troubleshooting
 
 **App fails at startup / store init?**
-- Check: `echo $PG_DATABASE_URL` — must be set before `python server.py`
+- Check: `echo $PG_DATABASE_URL` - must be set before `python server.py`
 - Install drivers: `pip install -r requirements-postgres.txt`
 - `get_store()` raises if `PG_DATABASE_URL` is missing (SQLite fallback disabled)
 
@@ -68,6 +68,6 @@ See [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md#cloud-deployment-azure) for Az
         + auth_user_adv_scope
 ```
 
-SQLite remains only for unit tests (`File2EdiStore` base class) and optional standalone/scripts — not for File2EDI runtime.
+SQLite remains only for unit tests (`File2EdiStore` base class) and optional standalone/scripts - not for File2EDI runtime.
 
 For details, see [POSTGRES_MIGRATION.md](POSTGRES_MIGRATION.md).

@@ -495,7 +495,7 @@ export function RevuePage() {
         {isConfirmedSap && order.sapVbeln && (
           <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-800">
             SAP {order.sapVbeln}
-            {order.sapConfirmedAt ? ` — ${formatDateTime(order.sapConfirmedAt)}` : ""}
+            {order.sapConfirmedAt ? ` - ${formatDateTime(order.sapConfirmedAt)}` : ""}
           </Badge>
         )}
         {cooldownActive && !isConfirmedSap && (
@@ -601,7 +601,7 @@ export function RevuePage() {
             <CardTitle className="text-base">Anomalies et commentaires</CardTitle>
             {pendingAnomalyCount > 0 && (
               <p className="text-sm text-amber-700">
-                {pendingAnomalyCount} anomalie{pendingAnomalyCount > 1 ? "s" : ""} à traiter — choisissez
+                {pendingAnomalyCount} anomalie{pendingAnomalyCount > 1 ? "s" : ""} à traiter - choisissez
                 une action pour chacune avant d&apos;envoyer vers SAP.
               </p>
             )}
@@ -614,9 +614,11 @@ export function RevuePage() {
                 const pending = isAnomalyPending(a);
                 const isValidated = a.status === "Corrigée";
                 const isIgnored = a.status === "Ignorée";
+                const acceptLabel = a.buttonAccept?.trim() || "Corrigé";
+                const rejectLabel = a.buttonReject?.trim() || "Refusé";
                 const statusLabel =
-                  a.status === "Corrigée" ? "Corrigé"
-                  : a.status === "Ignorée" ? "Refusé"
+                  a.status === "Corrigée" ? acceptLabel
+                  : a.status === "Ignorée" ? rejectLabel
                   : a.status;
                 return (
               <div key={a.anomalyId} className="flex items-start justify-between gap-4 rounded-lg border p-3">
@@ -626,7 +628,7 @@ export function RevuePage() {
                     {statusLabel}
                   </Badge>
                 </div>
-                <div className="flex shrink-0 flex-col gap-1 sm:max-w-[240px]">
+                <div className="flex shrink-0 flex-col gap-1 sm:max-w-[280px]">
                   <Button
                     variant={isValidated ? "secondary" : "ghost"}
                     size="sm"
@@ -634,7 +636,7 @@ export function RevuePage() {
                     onClick={() => api.resolveAnomaly(a.anomalyId, "corrected").then(invalidate)}
                     disabled={workflowLocked}
                   >
-                    Corrigé
+                    {acceptLabel}
                   </Button>
                   <Button
                     variant={isIgnored ? "secondary" : "ghost"}
@@ -643,7 +645,7 @@ export function RevuePage() {
                     onClick={() => api.resolveAnomaly(a.anomalyId, "ignored").then(invalidate)}
                     disabled={workflowLocked}
                   >
-                    Refusé
+                    {rejectLabel}
                   </Button>
                 </div>
               </div>

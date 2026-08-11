@@ -1,4 +1,4 @@
-"""Tests for src/repository.py — SQLite CRUD and 3-component dedupe key."""
+"""Tests for src/repository.py - SQLite CRUD and 3-component dedupe key."""
 from __future__ import annotations
 
 import os

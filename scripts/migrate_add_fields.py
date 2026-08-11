@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Migration Phase 3 — Ajout des nouvelles colonnes d'extraction.
+Migration Phase 3 - Ajout des nouvelles colonnes d'extraction.
 
 Ajoute à file2edi_order_lines:
   - payment_terms       TEXT   (conditions de paiement)
@@ -35,7 +35,7 @@ def migrate(db_path: str):
     added = []
     for col_name, col_type, col_default in NEW_COLUMNS:
         if col_name in existing:
-            print(f"  ⏭  {col_name} déjà présente — skip")
+            print(f"  ⏭  {col_name} déjà présente - skip")
             continue
         default_clause = f" DEFAULT {col_default}" if col_default is not None else ""
         sql = f"ALTER TABLE file2edi_order_lines ADD COLUMN {col_name} {col_type}{default_clause}"
@@ -51,9 +51,9 @@ def migrate(db_path: str):
     conn.close()
 
     if added:
-        print(f"\n  ✓ Migration terminée — {len(added)} colonnes ajoutées: {added}")
+        print(f"\n  ✓ Migration terminée - {len(added)} colonnes ajoutées: {added}")
     else:
-        print(f"\n  ✓ Aucune modification — toutes les colonnes déjà présentes")
+        print(f"\n  ✓ Aucune modification - toutes les colonnes déjà présentes")
 
 
 if __name__ == "__main__":

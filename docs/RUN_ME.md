@@ -1,4 +1,4 @@
-# RUN_ME — Référence CLI moteur batch
+# RUN_ME - Référence CLI moteur batch
 
 Ce document couvre l'exécution du **moteur Python batch** (`src/edifact_orders_engine.py`).
 Pour lancer l'application web complète, voir [FILE2EDI_DEPLOYMENT.md](FILE2EDI_DEPLOYMENT.md).
@@ -15,7 +15,7 @@ docker compose -f docker-compose.file2edi.yml up --build -d
 
 ---
 
-## Moteur batch — étapes manuelles
+## Moteur batch - étapes manuelles
 
 ### 1. Installer les dépendances
 

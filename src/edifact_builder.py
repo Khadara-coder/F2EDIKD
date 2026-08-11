@@ -295,7 +295,7 @@ def format_decimal(value: Any, scale: int = 6) -> Optional[str]:
     return s or None
 
 
-# Legacy alias — kept so existing callers that used _parse_decimal_fr still work.
+# Legacy alias - kept so existing callers that used _parse_decimal_fr still work.
 def _parse_decimal_fr(value: Any) -> str:
     """Legacy wrapper around format_decimal(); returns '' on None."""
     return format_decimal(value) or ""

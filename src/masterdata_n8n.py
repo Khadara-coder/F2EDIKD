@@ -73,10 +73,19 @@ def format_webhook_error(exc: BaseException, webhook_url: str = "") -> str:
             "Prod: https://…n8n.bosch.com/webhook/masterdata-sync-prod."
         )
         return f"Webhook n8n injoignable (DNS): {url or 'URL manquante'}. {hint}"
+    if re.search(r"RemoteDisconnected|Connection aborted|ConnectionReset", text, re.I):
+        hint = (
+            "n8n a fermé la connexion HTTP pendant le sync. "
+            "Le webhook doit répondre immédiatement (responseMode=onReceived) - "
+            "réimportez n8n_masterdata_github_sync_raw.json puis activez le workflow. "
+            "Un run manuel dans n8n ne teste pas ce lien webhook."
+        )
+        return f"Webhook n8n connexion coupée: {url or 'URL manquante'}. {hint}"
     if re.search(r"timed out|Read timed out|ConnectTimeout", text, re.I):
         hint = (
             "Timeout app → n8n. Vérifiez n8n sur :5678 et webhook actif. "
-            "En Docker, le relay localhost (N8N_LOCALHOST_RELAY) doit être actif."
+            "En Docker, le relay localhost (N8N_LOCALHOST_RELAY) doit être actif. "
+            "Le webhook doit être en responseMode=onReceived (ACK rapide)."
         )
         return f"Webhook n8n timeout: {url or 'URL manquante'}. {hint}"
     return f"Webhook n8n injoignable: {text}"
@@ -91,13 +100,93 @@ def _auth_token() -> str:
     ).strip()
 
 
+def _origin_from_webhook_url(webhook_url: str) -> str:
+    parsed = urlparse((webhook_url or "").strip())
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def probe_n8n_connectivity(config: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Fast connectivity check (n8n health), not a full masterdata sync.
+
+    The production webhook often keeps the HTTP request open until the workflow
+    finishes. A short POST to that URL therefore times out even when n8n is up
+    and Synchroniser (120s) succeeds. Probe ``/healthz`` on the same origin instead.
+    """
+    import requests
+
+    cfg = resolve_config(config)
+    url = str(cfg.get("webhookUrl") or "").strip()
+    if not url:
+        return {"status": "disconnected", "message": "URL webhook n8n manquante", "webhookUrl": ""}
+
+    origin = _origin_from_webhook_url(url)
+    if not origin:
+        return {"status": "disconnected", "message": f"URL webhook n8n invalide: {url}", "webhookUrl": url}
+
+    health_url = f"{origin}/healthz"
+    try:
+        health = requests.get(health_url, timeout=5)
+    except Exception as exc:
+        return {
+            "status": "disconnected",
+            "message": format_webhook_error(exc, url),
+            "webhookUrl": url,
+            "healthUrl": health_url,
+        }
+
+    if health.status_code >= 500:
+        return {
+            "status": "disconnected",
+            "message": f"n8n healthz HTTP {health.status_code} - {health_url}",
+            "webhookUrl": url,
+            "healthUrl": health_url,
+        }
+
+    auth_note = "clé auth présente" if _auth_token() else "clé auth absente (MASTERDATA_N8N_WEBHOOK_KEY)"
+    return {
+        "status": "connected",
+        "message": (
+            f"n8n joignable (healthz HTTP {health.status_code}) - {url}. "
+            f"Sync complète via Synchroniser (timeout {cfg.get('timeoutSeconds')}s). {auth_note}."
+        ),
+        "webhookUrl": url,
+        "healthUrl": health_url,
+    }
+
+
+def _file2edi_public_base() -> str:
+    return (
+        os.environ.get("FILE2EDI_PUBLIC_URL")
+        or os.environ.get("EDIFACT_API_BASE")
+        or os.environ.get("APP_PUBLIC_URL")
+        or "http://host.docker.internal:8000"
+    ).strip().rstrip("/")
+
+
+def _connection_dropped_early(exc: BaseException) -> bool:
+    text = str(exc)
+    return bool(
+        re.search(r"RemoteDisconnected|Connection aborted|Connection reset|Remote end closed", text, re.I)
+    )
+
+
 def trigger_masterdata_sync_workflow(
     config: dict[str, Any] | None = None,
     *,
     actor: str = "operator",
     reason: str = "manual",
 ) -> dict[str, Any]:
-    """POST the configured n8n webhook and return its JSON/text payload."""
+    """POST the configured n8n webhook.
+
+    Expected n8n setup: Webhook ``responseMode=onReceived`` so HTTP returns at once
+    while the workflow continues (GitHub → File2EDI import → reload-cache).
+
+    If n8n still uses ``lastNode``, it may close the HTTP connection mid-run
+    (RemoteDisconnected) even though the workflow keeps going - treat that as
+    ``async`` trigger started, not as hard failure.
+    """
     import requests
 
     cfg = resolve_config(config)
@@ -121,14 +210,60 @@ def trigger_masterdata_sync_workflow(
             "https://github.boschdevcloud.com/RSR1DY/masterdata.git",
         ),
         "branch": os.environ.get("MASTERDATA_REPO_BRANCH", "main"),
+        "file2ediApiBase": _file2edi_public_base(),
     }
-    log.info("Triggering n8n masterdata sync webhook: %s", cfg["webhookUrl"])
-    resp = requests.post(
+    # ACK should be fast with onReceived; keep a moderate read timeout for legacy lastNode.
+    connect_timeout = 10
+    read_timeout = min(90, int(cfg["timeoutSeconds"]))
+    log.info(
+        "Triggering n8n masterdata sync webhook: %s (timeout=%s/%ss)",
         cfg["webhookUrl"],
-        headers=headers,
-        json=body,
-        timeout=cfg["timeoutSeconds"],
+        connect_timeout,
+        read_timeout,
     )
+    try:
+        resp = requests.post(
+            cfg["webhookUrl"],
+            headers=headers,
+            json=body,
+            timeout=(connect_timeout, read_timeout),
+        )
+    except requests.Timeout as exc:
+        # Workflow likely still running under lastNode - n8n will call reload-cache.
+        log.warning("n8n webhook read timeout (treating as async start): %s", exc)
+        return {
+            "ok": True,
+            "async": True,
+            "assumed_started": True,
+            "webhookUrl": cfg["webhookUrl"],
+            "message": (
+                "Timeout en attendant la réponse n8n - le workflow a probablement démarré. "
+                "Passez le webhook en responseMode=onReceived (réimport JSON). "
+                "Les données seront mises à jour quand n8n appellera reload-cache."
+            ),
+        }
+    except requests.ConnectionError as exc:
+        if _connection_dropped_early(exc):
+            log.warning(
+                "n8n closed HTTP early after accept (treating as async start): %s",
+                exc,
+            )
+            return {
+                "ok": True,
+                "async": True,
+                "assumed_started": True,
+                "webhookUrl": cfg["webhookUrl"],
+                "message": (
+                    "Connexion webhook fermée avant la réponse finale. "
+                    "Le workflow n8n tourne souvent quand même - vérifiez l'exécution dans n8n. "
+                    "Corrigez: Webhook → Respond Immediately (onReceived), réimportez "
+                    "n8n_masterdata_github_sync_raw.json et activez le workflow."
+                ),
+            }
+        raise RuntimeError(format_webhook_error(exc, cfg["webhookUrl"])) from exc
+    except Exception as exc:
+        raise RuntimeError(format_webhook_error(exc, cfg["webhookUrl"])) from exc
+
     text = (resp.text or "").strip()
     payload: Any
     try:
@@ -140,16 +275,25 @@ def trigger_masterdata_sync_workflow(
         detail = payload if isinstance(payload, dict) else {"raw": text[:300]}
         raise RuntimeError(f"Webhook n8n HTTP {resp.status_code}: {detail}")
 
-    if isinstance(payload, dict):
-        return {
-            "ok": True,
-            "status_code": resp.status_code,
-            "webhookUrl": cfg["webhookUrl"],
-            **payload,
-        }
-    return {
+    # onReceived often returns an empty/minimal body; work continues in n8n.
+    base = {
         "ok": True,
+        "async": True,
         "status_code": resp.status_code,
         "webhookUrl": cfg["webhookUrl"],
-        "message": str(payload),
+        "message": (
+            "Workflow n8n déclenché. Import GitHub + reload-cache en cours "
+            "(suivez l'exécution dans n8n, puis rafraîchissez Données maîtres)."
+        ),
     }
+    if isinstance(payload, dict) and payload:
+        # Preserve aggregator message if n8n still uses lastNode and finished in time.
+        merged = {**base, **payload}
+        if payload.get("synced") or payload.get("files") or "cache_reloaded" in payload:
+            merged["async"] = False
+            if not merged.get("message"):
+                merged["message"] = base["message"]
+        return merged
+    if payload and not isinstance(payload, dict):
+        return {**base, "message": str(payload)}
+    return base

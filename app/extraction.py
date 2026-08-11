@@ -78,7 +78,7 @@ def _infer_quantity_from_price_total(price: float | None, total: float | None) -
     # Allow tiny epsilon for floating point arithmetic (e.g. 445.38/222.69 = 1.9999...)
     if abs(ratio - rounded_int) < 1e-6:
         return float(rounded_int)
-    # Quantities are natural integers — reject genuine non-integers (0.5, 1.5, etc.)
+    # Quantities are natural integers - reject genuine non-integers (0.5, 1.5, etc.)
     return None
 
 
@@ -156,7 +156,7 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
             qty = _infer_quantity_from_price_total(price, total)
         if qty is None:
             qty = _extract_qty_from_description(description)
-        # Fallback: calculate from total/price — only accept if result is a natural integer
+        # Fallback: calculate from total/price - only accept if result is a natural integer
         if qty is None and total is not None and price is not None and price > 0:
             calculated_qty = total / price
             qty = _to_natural_qty(calculated_qty)  # rejects 0.03, 0.5, 3.072 etc.

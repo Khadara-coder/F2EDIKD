@@ -6,7 +6,7 @@ from src.file2edi.router import overlay_sftp_config_from_env
 
 
 def test_overlay_replaces_legacy_inbox_even_if_env_polluted(monkeypatch):
-    """A prior UI test may have set SFTP_REMOTE_DIR=/inbox — still normalize to /."""
+    """A prior UI test may have set SFTP_REMOTE_DIR=/inbox - still normalize to /."""
     monkeypatch.setenv("SFTP_REMOTE_DIR", "/inbox")
     monkeypatch.setenv("SFTP_HOST", "sftp.intranet.bosch.com")
     out = overlay_sftp_config_from_env({"remotePath": "/inbox"})

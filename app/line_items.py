@@ -166,7 +166,7 @@ def _to_natural_qty_str(value: str) -> str:
     # Allow tiny epsilon for floating point arithmetic
     if abs(v - rounded) < 1e-6:
         return str(rounded)
-    return ""  # Genuine non-integer — reject
+    return ""  # Genuine non-integer - reject
 
 
 def _extract_table_quantity_and_unit(cells: list[str], article_idx: int, amount_indexes: list[int]) -> tuple[str, str]:
@@ -516,7 +516,7 @@ def extract_line_items(text: str, layout: dict | None, materials_by_id: dict[str
     if rows:
         # Only trust layout rows if at least one has a non-empty quantity.
         # When pdfplumber splits columns into separate lines, the layout has
-        # articles but no quantities — in that case fall through to text parsers.
+        # articles but no quantities - in that case fall through to text parsers.
         has_qty = any(r.get("quantity") for r in rows)
         if has_qty:
             return enrich_line_items_with_materials(rows, materials_by_id)

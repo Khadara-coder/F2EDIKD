@@ -1589,7 +1589,7 @@ def resolve_delivery_with_masterdata(
     buyer = apply_commercial_soldto_to_buyer(data, buyer) or buyer
     partners = data["partners_by_soldto"].get(buyer["id"], [])
     if not partners:
-        # Site id with empty partners_by_soldto — remap then retry parent family
+        # Site id with empty partners_by_soldto - remap then retry parent family
         remapped_id, _site = remap_customer_id_if_delivery_shipto(data, buyer["id"])
         if remapped_id and remapped_id != buyer["id"]:
             buyer = apply_commercial_soldto_to_buyer(data, buyer) or buyer

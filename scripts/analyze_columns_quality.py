@@ -7,7 +7,7 @@ conn = sqlite3.connect("data/file2edi.db")
 conn.row_factory = sqlite3.Row
 
 print("=" * 100)
-print("QUALITE EXTRACTION — TOUTES LES COLONNES LIGNES DE COMMANDE")
+print("QUALITE EXTRACTION - TOUTES LES COLONNES LIGNES DE COMMANDE")
 print("=" * 100)
 
 # Stats sur 533 lignes totales
@@ -41,7 +41,7 @@ print(f"  Prix unitaire        | {has_price:10} | {100*has_price//total:3}% | {'
 print(f"  Montant ligne        | {has_amount:10} | {100*has_amount//total:3}% | {'✓ Bon' if has_amount/total > 0.95 else '⚠ À améliorer' if has_amount/total > 0.80 else '❌ Mauvais'}")
 print(f"  Désignation          | {has_desc:10} | {100*has_desc//total:3}% | {'✓ Bon' if has_desc/total > 0.95 else '⚠ À améliorer' if has_desc/total > 0.80 else '❌ Mauvais'}")
 print(f"  Référence client     | {has_ref:10} | {100*has_ref//total:3}% | {'✓ Bon' if has_ref/total > 0.95 else '⚠ À améliorer' if has_ref/total > 0.80 else '❌ Mauvais'}")
-print(f"  Confiance moyenne    | —          | —   | {float(all_stats['avg_confidence'] or 0)*100:.0f}% " + ('✓' if float(all_stats['avg_confidence'] or 0) > 0.80 else '⚠'))
+print(f"  Confiance moyenne    | -          | -   | {float(all_stats['avg_confidence'] or 0)*100:.0f}% " + ('✓' if float(all_stats['avg_confidence'] or 0) > 0.80 else '⚠'))
 
 # Exemples de lignes incomplètes
 print(f"\n{'='*100}")
