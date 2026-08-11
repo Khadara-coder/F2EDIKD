@@ -446,6 +446,15 @@ export function ParametresPage() {
                             connector: c.key,
                             payload: c.key === "apiExtraction"
                               ? { connectorConfig: { apiBaseUrl: form.getValues("connectorConfig.apiBaseUrl") } }
+                              : c.key === "sftp"
+                              ? {
+                                  sftpConfig: {
+                                    host: form.getValues("sftpConfig.host"),
+                                    port: form.getValues("sftpConfig.port"),
+                                    username: form.getValues("sftpConfig.username"),
+                                    remotePath: form.getValues("sftpConfig.remotePath"),
+                                  },
+                                }
                               : undefined,
                           })}
                           disabled={testConnectorMutation.isPending}
@@ -562,12 +571,13 @@ export function ParametresPage() {
                   </div>
 
                   <p className="text-xs text-muted-foreground">
-                    Le bouton Synchroniser appelle ce webhook HTTP (stacks séparées). Depuis le
-                    conteneur API, utilisez <code>host.docker.internal</code> plutôt que{" "}
-                    <code>localhost</code>. Clé optionnelle :{" "}
-                    <code>MASTERDATA_N8N_WEBHOOK_KEY</code>. Workflow :{" "}
-                    <code>n8n_masterdata_github_sync.json</code> (repo{" "}
-                    <code>github.boschdevcloud.com/RSR1DY/masterdata</code>).
+                    <strong>Local :</strong>{" "}
+                    <code>http://localhost:5678/webhook/masterdata-sync</code>
+                    {" "}(en Docker, un relay fait répondre localhost:5678 vers n8n sur
+                    l&apos;hôte — pas de rewrite d&apos;URL). <strong>Prod :</strong>{" "}
+                    <code>https://i1-d.n8n.bosch.com/webhook/masterdata-sync-prod</code>.
+                    Override : <code>MASTERDATA_N8N_WEBHOOK_URL</code>. Clé :{" "}
+                    <code>MASTERDATA_N8N_WEBHOOK_KEY</code>.
                   </p>
 
                   <div className="flex items-center gap-3">
@@ -986,6 +996,13 @@ export function ParametresPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">SFTP</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  En local, les valeurs viennent de <code>.env.local</code> (
+                  <code>SFTP_HOST</code>, <code>SFTP_USERNAME</code>, <code>SFTP_REMOTE_DIR</code>,{" "}
+                  <code>SFTP_PASSWORD</code>). Si les champs restent vides après un changement
+                  d&apos;env, recréez le conteneur API :{" "}
+                  <code>docker compose -f docker-compose.dev.yml up -d --force-recreate api</code>.
+                </p>
               </CardHeader>
               <CardContent className="space-y-6">
                 <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
@@ -1025,11 +1042,15 @@ export function ParametresPage() {
                     value={form.watch("sftpConfig.username")}
                     onChange={(v) => form.setValue("sftpConfig.username", v)}
                   />
-                  <EditableField
+                    <EditableField
                     label="Répertoire distant"
                     value={form.watch("sftpConfig.remotePath")}
                     onChange={(v) => form.setValue("sftpConfig.remotePath", v)}
                   />
+                  <p className="text-xs text-muted-foreground -mt-2">
+                    Bosch local : utilisez <code>/</code> (pas <code>/inbox</code> — ce dossier
+                    n&apos;existe pas sur le serveur).
+                  </p>
                 </div>
 
                 <EditableField

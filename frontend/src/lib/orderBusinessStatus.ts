@@ -5,7 +5,6 @@ export type BusinessStatusGroup =
   | "toProcess"
   | "inProgress"
   | "sentSap"
-  | "confirmedSap"
   | "rejected"
   | "deliveryFailed";
 
@@ -31,11 +30,8 @@ export function statusToBusinessGroup(status: OrderStatus): BusinessStatusGroup 
   if (IN_PROGRESS_STATUSES.has(status)) {
     return "inProgress";
   }
-  if (status === "Envoyé SAP") {
+  if (status === "Envoyé SAP" || status === "Confirmé SAP") {
     return "sentSap";
-  }
-  if (status === "Confirmé SAP") {
-    return "confirmedSap";
   }
   if (status === "Rejeté" || status === "Doublon") {
     return "rejected";
@@ -54,8 +50,6 @@ export function businessStatusLabel(group: BusinessStatusGroup): string {
       return "En cours";
     case "sentSap":
       return "Envoyé SAP";
-    case "confirmedSap":
-      return "Confirmé SAP";
     case "rejected":
       return "Rejeté";
     case "deliveryFailed":
@@ -73,8 +67,6 @@ export function businessStatusVariant(
       return "info";
     case "sentSap":
       return "success";
-    case "confirmedSap":
-      return "success";
     case "rejected":
       return "destructive";
     case "deliveryFailed":
@@ -89,8 +81,7 @@ export function displayStatusLabel(status: OrderStatus): string {
 const BUSINESS_GROUP_STATUSES: Record<BusinessStatusGroup, OrderStatus[]> = {
   toProcess: ["Revue requise", "À revoir", "À vérifier", "Bloqué", "À traiter"],
   inProgress: ["En attente", "Transféré", "Généré", "Validé"],
-  sentSap: ["Envoyé SAP"],
-  confirmedSap: ["Confirmé SAP"],
+  sentSap: ["Envoyé SAP", "Confirmé SAP"],
   rejected: ["Rejeté", "Doublon"],
   deliveryFailed: ["SFTP échoué", "Échec SAP"],
 };
@@ -104,24 +95,41 @@ export function workflowMotif(row: Pick<
   "status" | "holdReason" | "issue" | "transferredFrom" | "transferNote" | "sapVbeln"
 > & { transferredFrom?: string | null }, getDisplayName?: (username?: string | null) => string | null): string | null {
   const status = row.status as OrderStatus;
-  if (status === "En attente" && row.holdReason) {
-    return `En attente — ${row.holdReason}`;
+  const group = statusToBusinessGroup(status);
+
+  if (group === "sentSap" || group === "toProcess") {
+    return null;
   }
-  if (status === "Transféré") {
-    const from = getDisplayName?.(row.transferredFrom) || row.transferredFrom || "—";
-    return row.transferNote ? `Transféré par ${from} — ${row.transferNote}` : `Transféré par ${from}`;
+
+  if (group === "inProgress") {
+    if (status === "En attente" && row.holdReason) {
+      return `En attente — ${row.holdReason}`;
+    }
+    if (status === "Transféré") {
+      const from = getDisplayName?.(row.transferredFrom) || row.transferredFrom || "—";
+      return row.transferNote ? `Transféré par ${from} — ${row.transferNote}` : `Transféré par ${from}`;
+    }
+    if (status === "Généré" || status === "Validé") {
+      return "Traité — EDIFACT prêt, en attente envoi SAP";
+    }
+    return null;
   }
-  if (status === "Généré" || status === "Validé") {
-    return "Traité — EDIFACT prêt, en attente envoi SAP";
-  }
-  if (status === "Envoyé SAP") {
-    return "Envoyé SAP — en attente de confirmation";
-  }
-  if (status === "Confirmé SAP") {
-    return row.sapVbeln ? `Confirmé SAP — ${row.sapVbeln}` : "Confirmé SAP";
-  }
-  if (status === "Rejeté" && row.issue) {
+
+  if (group === "rejected" && row.issue) {
     return row.issue;
   }
+
+  if (group === "deliveryFailed") {
+    if (row.issue) {
+      return row.issue;
+    }
+    if (status === "SFTP échoué") {
+      return "Échec envoi SFTP";
+    }
+    if (status === "Échec SAP") {
+      return "Échec envoi SAP";
+    }
+  }
+
   return null;
 }

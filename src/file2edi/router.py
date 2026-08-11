@@ -128,7 +128,9 @@ def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
     """Apply SFTP settings to runtime env used by legacy send/test helpers.
 
     Non-empty settings override env. Empty settings never wipe values already
-    provided by ``.env.local`` / process environment.
+    provided by ``.env.local`` / process environment. Legacy UI default
+    ``/inbox`` is normalized to ``/`` (Bosch local root) so tests don't probe
+    a folder that does not exist on the server.
     """
     if not isinstance(settings_payload, dict):
         return
@@ -138,7 +140,10 @@ def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
 
     host = str(sftp.get("host") or "").strip()
     username = str(sftp.get("username") or "").strip()
-    remote = str(sftp.get("remotePath") or "").strip()
+    remote = _normalize_sftp_remote_path(
+        str(sftp.get("remotePath") or "").strip(),
+        os.environ.get("SFTP_REMOTE_DIR") or "",
+    )
 
     if host:
         os.environ["SFTP_HOST"] = host
@@ -158,6 +163,79 @@ def _apply_runtime_sftp_config(settings_payload: dict | None) -> None:
         os.environ["SFTP_PORT"] = str(max(1, min(65535, port)))
     elif host:
         os.environ["SFTP_PORT"] = "22"
+
+
+def _is_legacy_sftp_remote(remote: str) -> bool:
+    """Old UI/store default that does not exist on Bosch SFTP."""
+    cleaned = (remote or "").strip().rstrip("/")
+    return cleaned in {"", "inbox", "/inbox"}
+
+
+def _normalize_sftp_remote_path(remote: str, env_remote: str = "") -> str:
+    """Prefer env / root over legacy ``/inbox`` placeholder."""
+    if _is_legacy_sftp_remote(remote):
+        env_r = (env_remote or "").strip()
+        if env_r and not _is_legacy_sftp_remote(env_r):
+            return env_r
+        return "/"
+    return (remote or "").strip() or "/"
+
+
+def overlay_sftp_config_from_env(sftp: dict | None = None) -> dict:
+    """Merge UI ``sftpConfig`` with process env (``.env.local`` / compose).
+
+    Empty UI fields are filled from ``SFTP_*``. Env never exposes the password
+    value — only ``hasPassword``. Used by GET ``/api/settings`` so Paramètres
+    shows the local defaults without requiring a manual Save.
+    """
+    base = dict(sftp) if isinstance(sftp, dict) else {}
+    env_host = (os.environ.get("SFTP_HOST") or "").strip()
+    env_user = (os.environ.get("SFTP_USERNAME") or "").strip()
+    env_remote = (os.environ.get("SFTP_REMOTE_DIR") or "").strip()
+    env_port_raw = (os.environ.get("SFTP_PORT") or "").strip()
+    env_enabled = (os.environ.get("SFTP_ENABLED") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+    host = str(base.get("host") or "").strip() or env_host
+    username = str(base.get("username") or "").strip() or env_user
+    remote = _normalize_sftp_remote_path(str(base.get("remotePath") or "").strip(), env_remote)
+
+    port = 22
+    raw_port = base.get("port")
+    if raw_port is not None and str(raw_port).strip() != "":
+        try:
+            port = int(raw_port)
+        except (TypeError, ValueError):
+            port = 22
+    elif env_port_raw:
+        try:
+            port = int(env_port_raw)
+        except (TypeError, ValueError):
+            port = 22
+    port = max(1, min(65535, port))
+
+    enabled = bool(base.get("enabled"))
+    if env_enabled or env_host:
+        # Prefer env enable flag; if host comes from env and UI never set enabled, turn on.
+        if env_enabled:
+            enabled = True
+        elif env_host and not str((sftp or {}).get("host") or "").strip():
+            enabled = True
+
+    return {
+        **base,
+        "enabled": enabled,
+        "host": host,
+        "port": port,
+        "username": username,
+        "remotePath": remote,
+        "fileNamePattern": str(base.get("fileNamePattern") or "ORDERS_{orderId}.edi"),
+        "hasPassword": bool(os.environ.get("SFTP_PASSWORD", "")),
+    }
 
 def create_router() -> APIRouter:
     router = APIRouter(tags=["file2edi"])
@@ -643,6 +721,16 @@ def create_router() -> APIRouter:
             raise HTTPException(404)
         return review
 
+    @router.post("/orders/{order_id}/lines/bulk")
+    async def post_lines_bulk(order_id: str, payload: dict = Body(...)):
+        lines = payload.get("lines")
+        if not isinstance(lines, list) or not lines:
+            raise HTTPException(400, "Au moins une ligne est requise.")
+        review = get_store().add_lines_bulk(order_id, lines)
+        if not review:
+            raise HTTPException(404)
+        return review
+
     @router.delete("/orders/lines/{line_id}")
     async def delete_line(line_id: str):
         review = get_store().delete_line(line_id)
@@ -1007,26 +1095,19 @@ def create_router() -> APIRouter:
                 },
                 "validation": persisted.get("validation", _default_settings().get("validation", {})),
                 "notifications": persisted.get("notifications", _default_settings().get("notifications", {})),
-                "sftpConfig": {
+                "sftpConfig": overlay_sftp_config_from_env({
                     **_default_settings().get("sftpConfig", {}),
                     **(persisted.get("sftpConfig") or {}),
-                    "hasPassword": bool(os.environ.get("SFTP_PASSWORD", "")),
-                },
+                }),
                 "security": persisted.get("security", _default_settings().get("security", {})),
                 "options": persisted.get("options", _default_settings().get("options", {})),
             }
-            # Overlay process env (.env.local) when UI settings left host empty.
-            sftp_out = result.get("sftpConfig") or {}
-            if not str(sftp_out.get("host") or "").strip() and (os.environ.get("SFTP_HOST") or "").strip():
-                result["sftpConfig"] = {
-                    **sftp_out,
-                    "enabled": True,
-                    "host": (os.environ.get("SFTP_HOST") or "").strip(),
-                    "port": int(os.environ.get("SFTP_PORT") or sftp_out.get("port") or 22),
-                    "username": (os.environ.get("SFTP_USERNAME") or "").strip() or sftp_out.get("username") or "",
-                    "remotePath": (os.environ.get("SFTP_REMOTE_DIR") or "").strip() or sftp_out.get("remotePath") or "",
-                    "hasPassword": bool(os.environ.get("SFTP_PASSWORD", "")),
-                }
+            try:
+                from src.masterdata_n8n import resolve_config
+
+                result["masterdataN8nConfig"] = resolve_config(result.get("masterdataN8nConfig") or {})
+            except Exception:
+                pass
             return result
         except Exception:
             return _default_settings()
@@ -1041,6 +1122,23 @@ def create_router() -> APIRouter:
             pass
 
         persisted = get_store().save_app_settings(payload or {})
+        try:
+            from src.masterdata_n8n import resolve_config
+
+            n8n_cfg = resolve_config((persisted or {}).get("masterdataN8nConfig") or {})
+            if n8n_cfg.get("webhookUrl") and n8n_cfg.get("webhookUrl") != str(
+                ((payload or {}).get("masterdataN8nConfig") or {}).get("webhookUrl") or ""
+            ).strip():
+                # Persist normalized prod path (masterdata-sync → masterdata-sync-prod).
+                persisted = get_store().save_app_settings({
+                    **(payload or {}),
+                    "masterdataN8nConfig": {
+                        **((payload or {}).get("masterdataN8nConfig") or {}),
+                        **n8n_cfg,
+                    },
+                })
+        except Exception:
+            pass
         try:
             from src.ai_status import apply_runtime_ai_config
 
@@ -1067,8 +1165,10 @@ def create_router() -> APIRouter:
         settings["customAiConfig"] = {**settings.get("customAiConfig", {}), **(persisted.get("customAiConfig") or {})}
         settings["validation"] = {**settings.get("validation", {}), **(persisted.get("validation") or {})}
         settings["notifications"] = {**settings.get("notifications", {}), **(persisted.get("notifications") or {})}
-        settings["sftpConfig"] = {**settings.get("sftpConfig", {}), **(persisted.get("sftpConfig") or {})}
-        settings["sftpConfig"]["hasPassword"] = bool(os.environ.get("SFTP_PASSWORD", ""))
+        settings["sftpConfig"] = overlay_sftp_config_from_env({
+            **settings.get("sftpConfig", {}),
+            **(persisted.get("sftpConfig") or {}),
+        })
         settings["security"] = {**settings.get("security", {}), **(persisted.get("security") or {})}
         settings["options"] = {**settings["options"], **(persisted.get("options") or {})}
         return settings
@@ -1082,6 +1182,7 @@ def create_router() -> APIRouter:
                 incoming_sftp = (payload or {}).get("sftpConfig")
                 if isinstance(incoming_sftp, dict):
                     merged_sftp.update(incoming_sftp)
+                merged_sftp = overlay_sftp_config_from_env(merged_sftp)
                 _apply_runtime_sftp_config({"sftpConfig": merged_sftp})
                 ok, msg = test_connection_from_env()
                 return {"status": "connected" if ok else "disconnected", "message": msg}
@@ -1128,33 +1229,40 @@ def create_router() -> APIRouter:
                     incoming_n8n.get("enabled") or incoming_n8n.get("webhookUrl")
                 ):
                     import requests as _requests
+                    from src.masterdata_n8n import format_webhook_error, resolve_config
 
                     persisted = get_store().load_app_settings()
                     merged = {
                         **((persisted or {}).get("masterdataN8nConfig") or {}),
                         **incoming_n8n,
                     }
-                    url = str(merged.get("webhookUrl") or "").strip()
+                    cfg = resolve_config(merged)
+                    url = str(cfg.get("webhookUrl") or "").strip()
                     if not url:
                         return {"status": "disconnected", "message": "URL webhook n8n manquante"}
                     try:
                         # Prefer OPTIONS/HEAD-less: POST with dryRun flag; many n8n webhooks accept POST only.
+                        headers = {"Accept": "application/json", "Content-Type": "application/json"}
                         resp = _requests.post(
                             url,
+                            headers=headers,
                             json={"action": "masterdata_sync", "reason": "connectivity_test", "dryRun": True},
-                            timeout=10,
+                            timeout=min(10, int(cfg.get("timeoutSeconds") or 10)),
                         )
                         if resp.status_code < 500:
                             return {
                                 "status": "connected",
-                                "message": f"Webhook n8n joignable (HTTP {resp.status_code})",
+                                "message": f"Webhook n8n joignable (HTTP {resp.status_code}) — {url}",
                             }
                         return {
                             "status": "disconnected",
-                            "message": f"Webhook n8n HTTP {resp.status_code}",
+                            "message": f"Webhook n8n HTTP {resp.status_code} — {url}",
                         }
                     except Exception as exc:
-                        return {"status": "disconnected", "message": f"Webhook n8n injoignable: {exc}"}
+                        return {
+                            "status": "disconnected",
+                            "message": format_webhook_error(exc, url),
+                        }
                 stats = masterdata_stats()
                 if not isinstance(stats, dict) or not stats:
                     return {"status": "disconnected", "message": "Aucune source CSV chargée"}
@@ -1392,7 +1500,7 @@ def _default_settings() -> dict:
         },
         "masterdataN8nConfig": {
             "enabled": True,
-            "webhookUrl": "http://host.docker.internal:5678/webhook/masterdata-sync",
+            "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
             "authHeader": "x-api-key",
             "timeoutSeconds": 120,
         },
@@ -1444,7 +1552,7 @@ def _default_settings() -> dict:
             "host": "",
             "port": 22,
             "username": "",
-            "remotePath": "/inbox",
+            "remotePath": "/",
             "fileNamePattern": "ORDERS_{orderId}.edi",
             "hasPassword": False,
         },

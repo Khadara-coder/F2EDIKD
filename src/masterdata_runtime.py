@@ -142,19 +142,23 @@ def normalize_article_code(art: str) -> str:
     return s
 
 
-def _materials_df_and_cols() -> tuple[Any, str | None, str | None, str | None]:
+def _materials_df_and_cols() -> tuple[Any, str | None, str | None, str | None, str | None]:
     entry = CACHE.get("materials") or {}
     df = entry.get("df")
     if df is None or getattr(df, "empty", True):
-        return None, None, None, None
+        return None, None, None, None, None
     cols = {str(c).strip().lower(): c for c in df.columns}
     matnr_col = cols.get("matnr")
     statut_col = next(
-        (cols[k] for k in ("statut", "status", "statut sap", "replacement", "remplace_par", "remplacé_par") if k in cols),
+        (cols[k] for k in ("statut", "status", "replacement", "remplace_par", "remplacé_par") if k in cols),
         None,
     )
     vmsta_col = cols.get("vmsta")
-    return df, matnr_col, statut_col, vmsta_col
+    commentaire_col = next(
+        (cols[k] for k in ("commentaire", "comment", "comments", "bemerkung") if k in cols),
+        None,
+    )
+    return df, matnr_col, statut_col, vmsta_col, commentaire_col
 
 
 def _statut_is_available(statut: str, vmsta: str = "") -> bool:
@@ -188,9 +192,44 @@ def _statut_as_replacement_matnr(statut: str) -> str | None:
     return None
 
 
-def _material_row_fields(code: str) -> tuple[str, str] | None:
-    """Return ``(statut, vmsta)`` for a normalized MATNR, or ``None`` if absent."""
-    df, matnr_col, statut_col, vmsta_col = _materials_df_and_cols()
+def _parse_replacement_since(commentaire: str) -> str | None:
+    """Extract replacement date from Materials ``Commentaire`` (often DD/MM/YYYY alone)."""
+    text = str(commentaire or "").strip()
+    if not text or text.lower() in {"nan", "none", "null", "-", "n/a", "na"}:
+        return None
+    m = re.search(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})\b", text)
+    if not m:
+        return None
+    day, month, year = m.group(1), m.group(2), m.group(3)
+    if len(year) == 2:
+        year = f"20{year}"
+    return f"{int(day):02d}/{int(month):02d}/{year}"
+
+
+def format_material_replacement_commentaire(
+    *,
+    replacement: str,
+    commentaire: str = "",
+    article: str = "",
+) -> str:
+    """Human-readable Materials comment for a replaced article."""
+    repl = str(replacement or "").strip()
+    if not repl:
+        return str(commentaire or "").strip()
+    existing = str(commentaire or "").strip()
+    if re.search(r"remplac[ée]s?\s+depuis\s+le", existing, re.I):
+        return existing
+    since = _parse_replacement_since(existing)
+    if since:
+        return f"Cette référence a été remplacée depuis le {since} par {repl}"
+    if existing and not _parse_replacement_since(existing) and not existing.isdigit():
+        return f"Cette référence a été remplacée par {repl} ({existing})"
+    return f"Cette référence a été remplacée par {repl}"
+
+
+def _material_row_fields(code: str) -> tuple[str, str, str] | None:
+    """Return ``(statut, vmsta, commentaire)`` for a normalized MATNR, or ``None`` if absent."""
+    df, matnr_col, statut_col, vmsta_col, commentaire_col = _materials_df_and_cols()
     if df is None or matnr_col is None:
         return None
     try:
@@ -201,7 +240,13 @@ def _material_row_fields(code: str) -> tuple[str, str] | None:
         row = matches.iloc[0]
         statut = str(row[statut_col] or "").strip() if statut_col else ""
         vmsta = str(row[vmsta_col] or "").strip() if vmsta_col else ""
-        return statut, vmsta
+        commentaire = ""
+        if commentaire_col:
+            raw = row[commentaire_col]
+            commentaire = "" if raw is None else str(raw).strip()
+            if commentaire.lower() in {"nan", "none", "null"}:
+                commentaire = ""
+        return statut, vmsta, commentaire
     except Exception:
         return None
 
@@ -215,6 +260,8 @@ def _material_direct_status(code: str) -> dict[str, Any]:
             "matnr": "",
             "statut": None,
             "replacement": None,
+            "replacement_since": None,
+            "commentaire": None,
         }
 
     row_fields = _material_row_fields(code)
@@ -225,9 +272,12 @@ def _material_direct_status(code: str) -> dict[str, Any]:
             "matnr": code,
             "statut": None,
             "replacement": None,
+            "replacement_since": None,
+            "commentaire": None,
         }
 
-    statut, vmsta = row_fields
+    statut, vmsta, commentaire = row_fields
+    since = _parse_replacement_since(commentaire)
     replacement = _statut_as_replacement_matnr(statut)
     if replacement and replacement != code:
         return {
@@ -236,6 +286,8 @@ def _material_direct_status(code: str) -> dict[str, Any]:
             "matnr": code,
             "statut": statut,
             "replacement": replacement,
+            "replacement_since": since,
+            "commentaire": commentaire or None,
         }
     if _statut_is_no_sale(statut, vmsta):
         return {
@@ -244,6 +296,8 @@ def _material_direct_status(code: str) -> dict[str, Any]:
             "matnr": code,
             "statut": statut,
             "replacement": None,
+            "replacement_since": None,
+            "commentaire": commentaire or None,
         }
     if _statut_is_available(statut, vmsta):
         return {
@@ -252,6 +306,8 @@ def _material_direct_status(code: str) -> dict[str, Any]:
             "matnr": code,
             "statut": statut,
             "replacement": None,
+            "replacement_since": None,
+            "commentaire": commentaire or None,
         }
     return {
         "found": True,
@@ -259,6 +315,8 @@ def _material_direct_status(code: str) -> dict[str, Any]:
         "matnr": code,
         "statut": statut,
         "replacement": None,
+        "replacement_since": None,
+        "commentaire": commentaire or None,
     }
 
 
@@ -287,16 +345,23 @@ def material_line_status(matnr: str) -> dict[str, Any]:
     if direct["kind"] != "replacement":
         return direct
 
+    since = direct.get("replacement_since")
     chain: list[str] = [code]
     visited: set[str] = {code}
     current = str(direct.get("replacement") or "").strip()
     max_hops = 25
 
+    def _with_since(payload: dict[str, Any]) -> dict[str, Any]:
+        out = dict(payload)
+        out.setdefault("replacement_since", since)
+        out.setdefault("commentaire", direct.get("commentaire"))
+        return out
+
     for _ in range(max_hops):
         if not current:
             break
         if current in visited:
-            return {
+            return _with_since({
                 "found": True,
                 "kind": "replacement",
                 "matnr": code,
@@ -304,7 +369,7 @@ def material_line_status(matnr: str) -> dict[str, Any]:
                 "replacement": current,
                 "replacement_chain": chain + [current],
                 "replacement_cycle": True,
-            }
+            })
         visited.add(current)
         chain.append(current)
         hop = _material_direct_status(current)
@@ -314,7 +379,7 @@ def material_line_status(matnr: str) -> dict[str, Any]:
                 current = nxt
                 continue
         if hop["kind"] == "missing":
-            return {
+            return _with_since({
                 "found": True,
                 "kind": "replacement",
                 "matnr": code,
@@ -322,9 +387,9 @@ def material_line_status(matnr: str) -> dict[str, Any]:
                 "replacement": current,
                 "replacement_chain": chain,
                 "replacement_missing": True,
-            }
+            })
         if hop["kind"] == "no_sale":
-            return {
+            return _with_since({
                 "found": True,
                 "kind": "no_sale",
                 "matnr": code,
@@ -332,17 +397,17 @@ def material_line_status(matnr: str) -> dict[str, Any]:
                 "replacement": current,
                 "replacement_chain": chain,
                 "via_replacement": True,
-            }
-        return {
+            })
+        return _with_since({
             "found": True,
             "kind": "replacement",
             "matnr": code,
             "statut": hop.get("statut"),
             "replacement": current,
             "replacement_chain": chain,
-        }
+        })
 
-    return {
+    return _with_since({
         "found": True,
         "kind": "replacement",
         "matnr": code,
@@ -350,7 +415,8 @@ def material_line_status(matnr: str) -> dict[str, Any]:
         "replacement": current or str(direct.get("replacement") or ""),
         "replacement_chain": chain,
         "replacement_cycle": True,
-    }
+    })
+
 
 
 def material_status_replacement(matnr: str) -> str | None:
@@ -946,12 +1012,28 @@ def format_materials(rows: list[dict], sync_at: str = "") -> list[dict]:
     out: list[dict] = []
     for i, row in enumerate(rows):
         matnr = row_value(row, "MATNR", "matnr", "material")
+        fields = {str(k): str(v) if v is not None else "" for k, v in row.items()}
+        # Enrich Commentaire for replaced articles: date alone → full sentence.
+        statut = row_value(row, "Statut", "statut", "status")
+        commentaire = row_value(row, "Commentaire", "commentaire", "comment")
+        replacement = _statut_as_replacement_matnr(statut)
+        if replacement and replacement != normalize_article_code(matnr):
+            enriched = format_material_replacement_commentaire(
+                replacement=replacement,
+                commentaire=commentaire,
+                article=matnr,
+            )
+            for key in list(fields.keys()):
+                if str(key).strip().lower() in {"commentaire", "comment", "comments", "bemerkung"}:
+                    fields[key] = enriched
+            if not any(str(k).strip().lower() == "commentaire" for k in fields):
+                fields["Commentaire"] = enriched
         out.append({
             "id": matnr or f"mat-{i}",
             "materialId": matnr,
             "description": row_value(row, "MAKTX", "maktx", "description"),
             "updatedAt": sync_at,
-            "fields": {str(k): str(v) if v is not None else "" for k, v in row.items()},
+            "fields": fields,
         })
     return out
 

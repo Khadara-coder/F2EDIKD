@@ -469,7 +469,7 @@
     "severity": "BLOCKER",
     "businessStatus": "REJECTED",
     "mode": "Manuel",
-    "message": "L'adresse de livraison n'a pas pu être associée aux données maîtres (confiance trop faible).",
+    "message": "L'adresse de livraison n'a pas pu être associée aux données maîtres en raison d'une mauvaise détection ou de données client manquantes.",
     "messageEn": "The delivery address could not be matched to masterdata (confidence too low).",
     "retryAllowed": true,
     "manualReview": true,

@@ -1,4 +1,4 @@
-﻿import type {
+import type {
   AppSettings,
   ConversionHistoryItem,
   DashboardMetrics,
@@ -472,7 +472,7 @@ export const mockSettings: AppSettings = {
   },
   masterdataN8nConfig: {
     enabled: true,
-    webhookUrl: "http://host.docker.internal:5678/webhook/masterdata-sync",
+    webhookUrl: "http://localhost:5678/webhook/masterdata-sync",
     authHeader: "x-api-key",
     timeoutSeconds: 120,
   },
@@ -524,7 +524,7 @@ export const mockSettings: AppSettings = {
     host: "",
     port: 22,
     username: "",
-    remotePath: "/inbox",
+    remotePath: "/",
     fileNamePattern: "ORDERS_{orderId}.edi",
     hasPassword: false,
   },

@@ -156,3 +156,22 @@ def test_manual_line_update_invalidates_generated_edifact_and_tracks_corrections
     snapshot = json.loads(row["corrections_json"])
     assert snapshot["lines"][0]["quantity"] == 2
     assert snapshot["lines"][0]["manuallyEdited"] is True
+
+
+def test_add_lines_bulk_appends_numbered_lines(tmp_path):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-bulk"
+    store.save_order_review(_review(order_id))
+
+    updated = store.add_lines_bulk(order_id, [
+        {"boschArticle": "111", "quantity": 2, "unitPrice": 5},
+        {"boschArticle": "222", "quantity": 1, "unitPrice": 10},
+    ])
+
+    assert updated is not None
+    assert len(updated["lines"]) == 3
+    assert updated["lines"][1]["lineNumber"] == 2
+    assert updated["lines"][1]["boschArticle"] == "111"
+    assert updated["lines"][2]["lineNumber"] == 3
+    assert updated["lines"][2]["boschArticle"] == "222"
+    assert updated["lines"][1]["status"] == "Corrigé manuellement"

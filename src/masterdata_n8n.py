@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import logging
 import os
-from pathlib import Path
+import re
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
 log = logging.getLogger("edifact.masterdata_n8n")
 
-# From inside the API container, localhost:5678 is the container itself — not host n8n.
-# Prefer host.docker.internal (published host port). Stacks stay separate; HTTP only.
-DEFAULT_WEBHOOK_URL = "http://host.docker.internal:5678/webhook/masterdata-sync"
+# Configure the same style of URL locally and in prod (hostname swap only).
+# Local Docker: http://localhost:5678/... works via n8n_localhost_relay (no URL rewrite).
+# Prod: https://i1-d.n8n.bosch.com/webhook/masterdata-sync-prod
+DEFAULT_WEBHOOK_URL = "http://localhost:5678/webhook/masterdata-sync"
+PROD_WEBHOOK_PATH = "/webhook/masterdata-sync-prod"
+LEGACY_WEBHOOK_PATH = "/webhook/masterdata-sync"
 
 
 def default_config() -> dict[str, Any]:
@@ -24,38 +27,23 @@ def default_config() -> dict[str, Any]:
     }
 
 
-def _running_in_docker() -> bool:
-    return Path("/.dockerenv").exists() or os.environ.get("IN_DOCKER", "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-
-
-def _docker_safe_webhook_url(url: str) -> str:
-    """Rewrite localhost/127.0.0.1 webhook targets when the API runs in Docker."""
-    raw = (url or "").strip()
+def normalize_webhook_url(url: str) -> str:
+    """Normalize for storage/UI: env override + Bosch prod path fix. No host rewrite."""
+    env_url = (os.environ.get("MASTERDATA_N8N_WEBHOOK_URL") or "").strip()
+    raw = env_url or (url or "").strip()
     if not raw:
         return raw
-    env_url = (os.environ.get("MASTERDATA_N8N_WEBHOOK_URL") or "").strip()
-    if env_url:
-        return env_url
-    if not _running_in_docker():
-        return raw
+
     parsed = urlparse(raw)
     host = (parsed.hostname or "").lower()
-    if host not in {"localhost", "127.0.0.1"}:
-        return raw
-    # Keep path/query; swap host so the published n8n port on the Docker host is reachable.
-    netloc = "host.docker.internal"
-    if parsed.port:
-        netloc = f"{netloc}:{parsed.port}"
-    elif parsed.scheme == "https":
-        netloc = f"{netloc}:443"
-    else:
-        netloc = f"{netloc}:80"
-    return urlunparse((parsed.scheme, netloc, parsed.path, parsed.params, parsed.query, parsed.fragment))
+    path = parsed.path or ""
+
+    path_norm = path.rstrip("/") or ""
+    last = path_norm.rsplit("/", 1)[-1] if path_norm else ""
+    if last == "masterdata-sync" and ("n8n.bosch.com" in host or host.endswith(".n8n.bosch.com")):
+        parsed = parsed._replace(path=PROD_WEBHOOK_PATH)
+
+    return urlunparse(parsed)
 
 
 def resolve_config(raw: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -65,13 +53,33 @@ def resolve_config(raw: dict[str, Any] | None = None) -> dict[str, Any]:
             if key in raw and raw.get(key) is not None:
                 cfg[key] = raw.get(key)
     cfg["enabled"] = bool(cfg.get("enabled"))
-    cfg["webhookUrl"] = _docker_safe_webhook_url(str(cfg.get("webhookUrl") or "").strip())
+    cfg["webhookUrl"] = normalize_webhook_url(str(cfg.get("webhookUrl") or "").strip())
     cfg["authHeader"] = str(cfg.get("authHeader") or "x-api-key").strip() or "x-api-key"
     try:
         cfg["timeoutSeconds"] = max(5, min(600, int(cfg.get("timeoutSeconds") or 120)))
     except (TypeError, ValueError):
         cfg["timeoutSeconds"] = 120
     return cfg
+
+
+def format_webhook_error(exc: BaseException, webhook_url: str = "") -> str:
+    """User-facing error for n8n connectivity tests / sync."""
+    text = str(exc)
+    url = (webhook_url or "").strip()
+    if re.search(r"NameResolutionError|Failed to resolve|Name or service not known", text, re.I):
+        hint = (
+            "DNS/réseau: l'API n'atteint pas n8n. "
+            "Local: http://localhost:5678/... (relay Docker si besoin). "
+            "Prod: https://…n8n.bosch.com/webhook/masterdata-sync-prod."
+        )
+        return f"Webhook n8n injoignable (DNS): {url or 'URL manquante'}. {hint}"
+    if re.search(r"timed out|Read timed out|ConnectTimeout", text, re.I):
+        hint = (
+            "Timeout app → n8n. Vérifiez n8n sur :5678 et webhook actif. "
+            "En Docker, le relay localhost (N8N_LOCALHOST_RELAY) doit être actif."
+        )
+        return f"Webhook n8n timeout: {url or 'URL manquante'}. {hint}"
+    return f"Webhook n8n injoignable: {text}"
 
 
 def _auth_token() -> str:

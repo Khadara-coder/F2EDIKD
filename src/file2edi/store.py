@@ -74,7 +74,7 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "host": "",
         "port": 22,
         "username": "",
-        "remotePath": "/inbox",
+        "remotePath": "/",
         "fileNamePattern": "ORDERS_{orderId}.edi",
         "hasPassword": False,
     },
@@ -94,7 +94,7 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
     },
     "masterdataN8nConfig": {
         "enabled": True,
-        "webhookUrl": "http://host.docker.internal:5678/webhook/masterdata-sync",
+        "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
         "authHeader": "x-api-key",
         "timeoutSeconds": 120,
     },
@@ -1420,6 +1420,50 @@ class File2EdiStore:
                 payload.get("specialInstructions"), payload.get("warnings"),
             ],
         )
+        self._recalc_order_total(conn, order_id)
+        self._invalidate_generated_edifact(conn, order_id)
+        self._refresh_corrections_json(conn, order_id)
+        conn.commit()
+        conn.close()
+        review = self.load_order_review(order_id)
+        self._sync_order_graph(review)
+        return review
+
+    def add_lines_bulk(self, order_id: str, lines: list[dict]) -> dict | None:
+        if not lines:
+            return None
+        conn = self._conn()
+        exists = conn.execute(
+            "SELECT order_id FROM file2edi_orders WHERE order_id=?", [order_id]
+        ).fetchone()
+        if not exists:
+            conn.close()
+            return None
+        row = conn.execute(
+            "SELECT COALESCE(MAX(line_number),0)+1 AS next_num FROM file2edi_order_lines WHERE order_id=?",
+            [order_id],
+        ).fetchone()
+        line_num = int(row["next_num"]) if row else 1
+        for payload in lines:
+            line_id = f"ln-{uuid.uuid4().hex[:8]}"
+            qty = float(payload.get("quantity", 1))
+            price = float(payload.get("unitPrice", 0))
+            conn.execute(
+                """INSERT INTO file2edi_order_lines
+                (line_id,order_id,line_number,customer_reference,bosch_article,designation,
+                 quantity,unit,unit_price,amount,confidence,status,manually_edited,
+                 payment_terms,delivery_date,special_instructions,warnings)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)""",
+                [
+                    line_id, order_id, line_num, payload.get("customerReference", ""),
+                    payload.get("boschArticle", ""), payload.get("designation", ""),
+                    qty, payload.get("unit", "PCE"), price, qty * price,
+                    100, payload.get("status", "Corrigé manuellement"),
+                    payload.get("paymentTerms"), payload.get("deliveryDate"),
+                    payload.get("specialInstructions"), payload.get("warnings"),
+                ],
+            )
+            line_num += 1
         self._recalc_order_total(conn, order_id)
         self._invalidate_generated_edifact(conn, order_id)
         self._refresh_corrections_json(conn, order_id)

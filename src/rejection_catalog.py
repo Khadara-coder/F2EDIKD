@@ -105,8 +105,17 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "business_status": "PENDING_USER_INPUT",
         "retry_allowed": True,
         "manual_review_required": True,
-        "message_fr": "Le statut matière bloque la vente (arrêté, remplacement ou introuvable).",
-        "message_en": "Material status blocks sales (discontinued, replacement, or not found).",
+        "message_fr": (
+            "Cette référence Bosch ne peut pas être vendue telle quelle : "
+            "elle est arrêtée (plus commercialisée), remplacée par un autre code, "
+            "ou introuvable dans le référentiel Articles. "
+            "Le détail de la ligne précise le cas (date et nouvelle référence si remplacement)."
+        ),
+        "message_en": (
+            "This Bosch reference cannot be sold as-is: it is discontinued, "
+            "replaced by another code, or missing from the articles master. "
+            "The line detail states which case applies (date and successor if replaced)."
+        ),
     },
     "RESUBMISSION_DETECTED": {
         "severity": "TECHNICAL",
@@ -294,8 +303,8 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "business_status": "REJECTED",
         "retry_allowed": True,
         "manual_review_required": True,
-        "message_fr": "L'adresse de livraison n'a pas pu être associée aux données maîtres (confiance trop faible).",
-        "message_en": "The delivery address could not be matched to masterdata (confidence too low).",
+        "message_fr": "L'adresse de livraison n'a pas pu être associée aux données maîtres en raison d'une mauvaise détection ou de données client manquantes.",
+        "message_en": "The delivery address could not be matched to master data due to poor detection or missing customer data.",
     },
     "NO_DELIVERY_ADDRESS": {
         "severity": "BLOCKER",
@@ -389,7 +398,11 @@ REJECTION_ACTION_TEXT: dict[str, str] = {
     "ORDER_CHANGE": "Merci de soumettre un bon de commande initial, pas une modification.",
     "MASTERDATA_MISSING": "Merci de synchroniser les données maîtres (Clients / Articles) puis de relancer.",
     "MASTERDATA_SCHEMA_INVALID": "Merci de vérifier le fichier masterdata et de resynchroniser.",
-    "MATERIAL_STATUS_INVALID": "Merci de vérifier le code matière Bosch (statut vente / remplacement).",
+    "MATERIAL_STATUS_INVALID": (
+        "Ouvrez la ligne concernée : si la référence est remplacée, utilisez le nouveau code Bosch ; "
+        "si elle est arrêtée, retirez ou substituez la ligne ; si elle est introuvable, corrigez le code "
+        "ou synchronisez les données maîtres Articles."
+    ),
     "RESUBMISSION_DETECTED": "Vérifier si le retraitement est intentionnel avant validation.",
     "NO_VALID_ARTICLE": "Merci de fournir les codes articles Bosch valides ou de corriger les codes client.",
     "CONTRACT_KEYWORD": "Merci de soumettre uniquement des bons de commande, pas des contrats ou devis.",
@@ -483,10 +496,10 @@ REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
         "mode": "Semi-auto",
     },
     "MATERIAL_STATUS_INVALID": {
-        "button_accept": "Matière acceptée / corrigée",
-        "button_reject": "Rejeter la ligne matière",
-        "auto_action_accept": "Continuer avec la matière validée",
-        "auto_action_reject": "Retirer ou bloquer la ligne",
+        "button_accept": "Référence corrigée (nouveau code / ligne OK)",
+        "button_reject": "Impossible de corriger la référence",
+        "auto_action_accept": "Continuer avec la référence validée",
+        "auto_action_reject": "Bloquer ou retirer la ligne",
         "mode": "Manuel",
     },
     "RESUBMISSION_DETECTED": {

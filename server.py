@@ -1455,6 +1455,30 @@ async def _startup_sync_masterdata() -> None:
         log.info("startup file2edi: order schema ready")
     except Exception as exc:
         log.warning("startup file2edi schema: %s", exc)
+    try:
+        from src.n8n_localhost_relay import start_n8n_localhost_relay
+
+        if start_n8n_localhost_relay():
+            log.info("startup n8n: localhost:5678 relay active (Docker → host n8n)")
+    except Exception as exc:
+        log.warning("startup n8n localhost relay: %s", exc)
+    try:
+        host = (os.environ.get("SFTP_HOST") or "").strip()
+        if host:
+            log.info(
+                "startup sftp: env host=%s user=%s remote=%s password=%s",
+                host,
+                (os.environ.get("SFTP_USERNAME") or "").strip() or "(none)",
+                (os.environ.get("SFTP_REMOTE_DIR") or "").strip() or "(none)",
+                "set" if (os.environ.get("SFTP_PASSWORD") or "").strip() else "missing",
+            )
+        else:
+            log.info(
+                "startup sftp: SFTP_HOST empty — fill .env.local then recreate api "
+                "(docker compose -f docker-compose.dev.yml up -d --force-recreate api)"
+            )
+    except Exception as exc:
+        log.warning("startup sftp check: %s", exc)
     # ── Masterdata ────────────────────────────────────────────────────────
     try:
         dst = Path(MASTER_DATA_RUNTIME)
@@ -1816,117 +1840,107 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
         n8n_cfg = {}
 
     if n8n_cfg.get("enabled") and str(n8n_cfg.get("webhookUrl") or "").strip() and not from_repo:
-        webhook_url = str(n8n_cfg.get("webhookUrl") or "").strip()
-        # Local Docker webhook is often unreachable outside compose — use Git sync instead.
-        if "host.docker.internal" in webhook_url and (os.environ.get("MASTERDATA_REPO_URL") or "").strip():
-            log.info(
-                "masterdata sync: skip local n8n webhook (%s), using git repo sync",
-                webhook_url,
-            )
-            from_repo = True
-        else:
-            from src.masterdata_n8n import trigger_masterdata_sync_workflow
+        from src.masterdata_n8n import trigger_masterdata_sync_workflow
 
+        actor = "operator"
+        try:
+            actor = _resolve_actor(req) or "operator"
+        except Exception:
             actor = "operator"
-            try:
-                actor = _resolve_actor(req) or "operator"
-            except Exception:
-                actor = "operator"
 
+        save_audit_event(
+            "__masterdata__",
+            "masterdata_sync_attempted",
+            actor,
+            {"source": "n8n_webhook", "manual": True, "webhookUrl": n8n_cfg.get("webhookUrl")},
+        )
+        try:
+            n8n_payload = trigger_masterdata_sync_workflow(
+                n8n_cfg,
+                actor=actor,
+                reason="manual_ui",
+            )
+        except Exception as exc:
+            err = str(exc)[:400]
+            log.warning("masterdata sync (n8n) failed: %s", err)
             save_audit_event(
                 "__masterdata__",
-                "masterdata_sync_attempted",
+                "masterdata_sync_failed",
                 actor,
-                {"source": "n8n_webhook", "manual": True, "webhookUrl": n8n_cfg.get("webhookUrl")},
+                {"source": "n8n_webhook", "error": err},
             )
+            # Fallback Git / reload so "Dernière synchronisation" still advances.
+            repo_payload = None
+            repo_error = None
             try:
-                n8n_payload = trigger_masterdata_sync_workflow(
-                    n8n_cfg,
-                    actor=actor,
-                    reason="manual_ui",
-                )
-            except Exception as exc:
-                err = str(exc)[:400]
-                log.warning("masterdata sync (n8n) failed: %s", err)
-                save_audit_event(
-                    "__masterdata__",
-                    "masterdata_sync_failed",
-                    actor,
-                    {"source": "n8n_webhook", "error": err},
-                )
-                # Local / no-n8n: try Git snapshot sync so "Dernière synchronisation" advances.
-                repo_payload = None
-                repo_error = None
-                try:
-                    from src.masterdata_autosync import run_repo_sync
+                from src.masterdata_autosync import run_repo_sync
 
-                    repo_payload = run_repo_sync(
-                        target_dir=MASTER_DATA_RUNTIME,
-                        notify_api_url="",
-                    )
-                except Exception as repo_exc:
-                    repo_error = str(repo_exc)[:300]
-                    log.warning("masterdata sync git fallback after n8n failure: %s", repo_error)
-
-                now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-                if repo_payload is not None:
-                    _mdr.bump_sync_metadata(
-                        synced_at_utc=str(repo_payload.get("synced_at_utc") or now_iso),
-                        commit=str(repo_payload.get("commit") or "") or None,
-                        source="api_sync_n8n_fallback_git",
-                        files=repo_payload.get("files") if isinstance(repo_payload.get("files"), dict) else None,
-                        repo_url=str(repo_payload.get("repo_url") or "") or None,
-                        branch=str(repo_payload.get("branch") or "") or None,
-                    )
-                else:
-                    _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_fallback_reload")
-                for key in _MD_FILES:
-                    _MD_LAST_SYNC[key] = now_iso
-                _apply_masterdata_sync_metadata_to_cache_state()
-                _load_masterdata_cache()
-                return {
-                    "synced": len(repo_payload.get("files") or {}) if isinstance(repo_payload, dict) else 0,
-                    "failed": 0 if repo_payload is not None else 1,
-                    "files": [],
-                    "cache_reloaded": True,
-                    "source": "git" if repo_payload is not None else "n8n",
-                    "fallback": True,
-                    "sync": _masterdata_sync_freshness(),
-                    "message": (
-                        f"Échec n8n — sync git OK (commit {str((repo_payload or {}).get('commit') or '')[:12]})"
-                        if repo_payload is not None
-                        else f"Échec déclenchement n8n — cache local rechargé ({err}"
-                        + (f" ; git: {repo_error}" if repo_error else "")
-                        + ")"
-                    ),
-                }
+                repo_payload = run_repo_sync(
+                    target_dir=MASTER_DATA_RUNTIME,
+                    notify_api_url="",
+                )
+            except Exception as repo_exc:
+                repo_error = str(repo_exc)[:300]
+                log.warning("masterdata sync git fallback after n8n failure: %s", repo_error)
 
             now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            if repo_payload is not None:
+                _mdr.bump_sync_metadata(
+                    synced_at_utc=str(repo_payload.get("synced_at_utc") or now_iso),
+                    commit=str(repo_payload.get("commit") or "") or None,
+                    source="api_sync_n8n_fallback_git",
+                    files=repo_payload.get("files") if isinstance(repo_payload.get("files"), dict) else None,
+                    repo_url=str(repo_payload.get("repo_url") or "") or None,
+                    branch=str(repo_payload.get("branch") or "") or None,
+                )
+            else:
+                _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_fallback_reload")
             for key in _MD_FILES:
                 _MD_LAST_SYNC[key] = now_iso
-            # n8n workflow updates files asynchronously; stamp UI now, refresh again on reload-cache.
-            _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_trigger")
             _apply_masterdata_sync_metadata_to_cache_state()
             _load_masterdata_cache()
-            save_audit_event(
-                "__masterdata__",
-                "masterdata_sync_succeeded",
-                actor,
-                {"source": "n8n_webhook", "result": n8n_payload},
-            )
-            message = ""
-            if isinstance(n8n_payload, dict):
-                message = str(n8n_payload.get("message") or n8n_payload.get("status") or "")
             return {
-                "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
-                "failed": 0,
-                "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
+                "synced": len(repo_payload.get("files") or {}) if isinstance(repo_payload, dict) else 0,
+                "failed": 0 if repo_payload is not None else 1,
+                "files": [],
                 "cache_reloaded": True,
-                "source": "n8n",
-                "n8n": n8n_payload,
+                "source": "git" if repo_payload is not None else "n8n",
+                "fallback": True,
                 "sync": _masterdata_sync_freshness(),
-                "message": message or "Workflow n8n masterdata déclenché et terminé",
+                "message": (
+                    f"Échec n8n — sync git OK (commit {str((repo_payload or {}).get('commit') or '')[:12]})"
+                    if repo_payload is not None
+                    else f"Échec déclenchement n8n — cache local rechargé ({err}"
+                    + (f" ; git: {repo_error}" if repo_error else "")
+                    + ")"
+                ),
             }
+
+        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        for key in _MD_FILES:
+            _MD_LAST_SYNC[key] = now_iso
+        _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_trigger")
+        _apply_masterdata_sync_metadata_to_cache_state()
+        _load_masterdata_cache()
+        save_audit_event(
+            "__masterdata__",
+            "masterdata_sync_succeeded",
+            actor,
+            {"source": "n8n_webhook", "result": n8n_payload},
+        )
+        message = ""
+        if isinstance(n8n_payload, dict):
+            message = str(n8n_payload.get("message") or n8n_payload.get("status") or "")
+        return {
+            "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
+            "failed": 0,
+            "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
+            "cache_reloaded": True,
+            "source": "n8n",
+            "n8n": n8n_payload,
+            "sync": _masterdata_sync_freshness(),
+            "message": message or "Workflow n8n masterdata déclenché et terminé",
+        }
 
     if from_repo:
         from src.masterdata_autosync import run_repo_sync
@@ -2153,22 +2167,38 @@ def api_settings():
         pass
     dbx = _runtime_databricks_config()
 
-    sftp_password_set = bool(os.environ.get("SFTP_PASSWORD", ""))
     if isinstance(persisted, dict):
         persisted_sftp = persisted.get("sftpConfig") if isinstance(persisted.get("sftpConfig"), dict) else {}
-        persisted["sftpConfig"] = {
-            "enabled": False,
-            "host": "",
-            "port": 22,
-            "username": "",
-            "remotePath": "/inbox",
-            "fileNamePattern": "ORDERS_{orderId}.edi",
-            **persisted_sftp,
-            "hasPassword": sftp_password_set,
-        }
+        try:
+            from src.file2edi.router import overlay_sftp_config_from_env
 
-    sftp_host  = os.environ.get("SFTP_HOST", "")
-    sftp_ok    = bool(sftp_host)
+            persisted["sftpConfig"] = overlay_sftp_config_from_env({
+                "enabled": False,
+                "host": "",
+                "port": 22,
+                "username": "",
+                "remotePath": "/",
+                "fileNamePattern": "ORDERS_{orderId}.edi",
+                **persisted_sftp,
+            })
+        except Exception:
+            persisted["sftpConfig"] = {
+                "enabled": False,
+                "host": "",
+                "port": 22,
+                "username": "",
+                "remotePath": "/",
+                "fileNamePattern": "ORDERS_{orderId}.edi",
+                **persisted_sftp,
+                "hasPassword": bool(os.environ.get("SFTP_PASSWORD", "")),
+            }
+
+    sftp_host = (
+        str((persisted.get("sftpConfig") or {}).get("host") or "").strip()
+        if isinstance(persisted, dict)
+        else ""
+    ) or (os.environ.get("SFTP_HOST") or "").strip()
+    sftp_ok = bool(sftp_host)
     email_ok   = bool(os.environ.get("SMTP_HOST", ""))
     # Mask SFTP host: show last 4 chars only
     _h = sftp_host
@@ -2192,7 +2222,13 @@ def api_settings():
             "configured":  sftp_ok,
             "status":      "CONFIGURED" if sftp_ok else "NOT_CONFIGURED",
             "host":        masked_host if sftp_ok else "—",
-            "remote_path": os.environ.get("SFTP_REMOTE_DIR", "—"),
+            "remote_path": (
+                str((persisted.get("sftpConfig") or {}).get("remotePath") or "").strip()
+                if isinstance(persisted, dict)
+                else ""
+            )
+            or os.environ.get("SFTP_REMOTE_DIR")
+            or "—",
             "last_error":  None,
         },
         "email": {
@@ -2203,9 +2239,21 @@ def api_settings():
         "storage_mode": get_storage_mode(),
         "app_settings": persisted,
         # ── Legacy flat fields (backward compat) ───────────────────────────
-        "sftp_host":         os.environ.get("SFTP_HOST", "(non configuré)"),
-        "sftp_username":     os.environ.get("SFTP_USERNAME", "(non configuré)"),
-        "sftp_remote_dir":   os.environ.get("SFTP_REMOTE_DIR", "(non configuré)"),
+        "sftp_host":         sftp_host or "(non configuré)",
+        "sftp_username":     (
+            str((persisted.get("sftpConfig") or {}).get("username") or "").strip()
+            if isinstance(persisted, dict)
+            else ""
+        )
+        or os.environ.get("SFTP_USERNAME")
+        or "(non configuré)",
+        "sftp_remote_dir":   (
+            str((persisted.get("sftpConfig") or {}).get("remotePath") or "").strip()
+            if isinstance(persisted, dict)
+            else ""
+        )
+        or os.environ.get("SFTP_REMOTE_DIR")
+        or "(non configuré)",
         "sender_gln":        UNB_SENDER_GLN,
         "receiver_gln":      UNB_RECEIVER_GLN,
         "model_endpoint":    dbx["model_endpoint"],

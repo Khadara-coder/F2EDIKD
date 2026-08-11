@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Check, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, Plus, TableProperties, Trash2 } from "lucide-react";
 import type { OrderLine } from "@/types";
 import { REVIEW_LINES_PAGE_SIZE, REVIEW_PANEL_BODY_MIN_HEIGHT } from "@/lib/reviewLayout";
+import { BulkOrderLinesDialog } from "@/components/file2edi/BulkOrderLinesDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -18,6 +19,7 @@ interface OrderLinesEditPanelProps {
   onUpdateLine: (lineId: string, payload: Partial<OrderLine>) => Promise<void>;
   onDeleteLine: (lineId: string) => Promise<void>;
   onAddLine: () => void;
+  onAddBulkLines: (lines: Array<{ boschArticle: string; quantity: number; unitPrice: number }>) => Promise<void>;
 }
 
 type LineDraft = {
@@ -31,10 +33,12 @@ export function OrderLinesEditPanel({
   onUpdateLine,
   onDeleteLine,
   onAddLine,
+  onAddBulkLines,
 }: OrderLinesEditPanelProps) {
   const [drafts, setDrafts] = useState<Record<string, LineDraft>>({});
   const [savingId, setSavingId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const totalPages = Math.max(1, Math.ceil(lines.length / REVIEW_LINES_PAGE_SIZE));
   const pageStart = page * REVIEW_LINES_PAGE_SIZE;
@@ -215,10 +219,22 @@ export function OrderLinesEditPanel({
         </div>
       )}
 
-      <Button variant="outline" size="sm" onClick={onAddLine} className="gap-2 self-start">
-        <Plus className="h-4 w-4" />
-        Ajouter une ligne de commande
-      </Button>
+      <div className="flex flex-wrap gap-2 self-start">
+        <Button variant="outline" size="sm" onClick={onAddLine} className="gap-2">
+          <Plus className="h-4 w-4" />
+          Ajouter une ligne de commande
+        </Button>
+        <Button variant="outline" size="sm" onClick={() => setBulkOpen(true)} className="gap-2">
+          <TableProperties className="h-4 w-4" />
+          Ajouter plusieurs lignes
+        </Button>
+      </div>
+
+      <BulkOrderLinesDialog
+        open={bulkOpen}
+        onOpenChange={setBulkOpen}
+        onImport={onAddBulkLines}
+      />
     </div>
   );
 }

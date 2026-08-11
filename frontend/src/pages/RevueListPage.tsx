@@ -31,7 +31,7 @@ import {
 function SourceBadge({ source }: { source?: string }) {
   const map: Record<string, { label: string; className: string }> = {
     n8n:     { label: "n8n",    className: "bg-blue-100 text-blue-800 border-blue-200" },
-    ui:      { label: "UI",     className: "bg-green-100 text-green-800 border-green-200" },
+    ui:      { label: "Manuelle", className: "bg-green-100 text-green-800 border-green-200" },
     api:     { label: "API",    className: "bg-orange-100 text-orange-800 border-orange-200" },
     unknown: { label: "?",      className: "bg-gray-100 text-gray-500 border-gray-200" },
   };
@@ -51,6 +51,7 @@ type ReviewSortKey =
   | "issue"
   | "createdAt"
   | "processedAt"
+  | "sapVbeln"
   | "processedBy"
   | "status";
 type SortDirection = "asc" | "desc";
@@ -60,7 +61,6 @@ const STATUS_FILTERS: Array<{ value: ReviewStatusFilter; label: string; classNam
   { value: "toProcess",      label: "À traiter",     className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
   { value: "inProgress",     label: "En cours",      className: "border-sky-200 bg-sky-50 text-sky-700 hover:bg-sky-100" },
   { value: "sentSap",        label: "Envoyé SAP",    className: "border-teal-200 bg-teal-50 text-teal-700 hover:bg-teal-100" },
-  { value: "confirmedSap",   label: "Confirmé SAP",  className: "border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100" },
   { value: "rejected",       label: "Rejeté",         className: "border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100" },
   { value: "deliveryFailed", label: "Échec d'envoi",  className: "border-red-200 bg-red-50 text-red-700 hover:bg-red-100" },
 ];
@@ -127,7 +127,9 @@ export function RevueListPage() {
       case "createdAt":
         return row.createdAt || row.date || "";
       case "processedAt":
-        return row.processedAt || "";
+        return row.processedAt || row.sapSentAt || "";
+      case "sapVbeln":
+        return row.sapVbeln || "";
       case "processedBy":
         return (row.processedBy || "").toLowerCase();
       case "status":
@@ -147,7 +149,7 @@ export function RevueListPage() {
     const filtered = items.filter((row) => {
       const matchesSearch =
         !query ||
-        [row.fileName, row.clientName, row.issue, row.status, row.processedBy, row.date, row.createdAt, row.processedAt]
+        [row.fileName, row.clientName, row.issue, row.status, row.processedBy, row.date, row.createdAt, row.processedAt, row.sapSentAt, row.sapVbeln, row.sapSentBy]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToBusinessGroup(row.status as OrderStatus) === statusFilter;
@@ -335,9 +337,11 @@ export function RevueListPage() {
               </Button>
             </div>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
+                  {/* 1. Identification */}
                   <TableHead>
                     <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("fileName")}>
                       Fichier
@@ -350,6 +354,45 @@ export function RevueListPage() {
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </TableHead>
+                  {/* 2. État métier */}
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("status")}>
+                      Statut
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  <TableHead className="min-w-[220px]">Motif</TableHead>
+                  {/* 3. Bloc SAP */}
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("sapVbeln")}>
+                      N° commande SAP
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedAt")}>
+                      Envoyé vers SAP le
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  <TableHead>Envoyé vers SAP par</TableHead>
+                  {/* 4. Suivi dossier */}
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
+                      Gestionnaire
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("createdAt")}>
+                      Date import
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
+                  {/* 5. Métadonnées */}
+                  <TableHead>Source</TableHead>
+                  <TableHead>Action</TableHead>
+                  {/* 6. Diagnostic admin (fin de ligne) */}
                   {isAdmin && (
                     <TableHead>
                       <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("confidence")}>
@@ -366,29 +409,6 @@ export function RevueListPage() {
                       </button>
                     </TableHead>
                   )}
-                  <TableHead>
-                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("createdAt")}>
-                      Date import
-                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
-                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedAt")}>
-                      Envoyé vers SAP le
-                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                  </TableHead>
-                  <TableHead>Statut</TableHead>
-                  <TableHead>Motif</TableHead>
-                  <TableHead>
-                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
-                      Gestionnaire
-                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                  </TableHead>
-                  <TableHead>Envoyé vers SAP par</TableHead>
-                  <TableHead>Source</TableHead>
-                  <TableHead>Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -400,52 +420,69 @@ export function RevueListPage() {
                   >
                     <TableCell>
                       <div className="flex items-center gap-2">
-                        <FileIcon className="h-4 w-4 text-red-500" />
-                        <span className="max-w-[200px] truncate text-sm">{row.fileName}</span>
+                        <FileIcon className="h-4 w-4 shrink-0 text-red-500" />
+                        <span className="max-w-[180px] truncate text-sm">{row.fileName}</span>
                       </div>
                     </TableCell>
-                    <TableCell>{row.clientName}</TableCell>
-                    {isAdmin && (
-                      <TableCell className={confidenceColor(row.confidence)}>
-                        {row.confidence}%
-                      </TableCell>
-                    )}
-                    {isAdmin && <TableCell className="text-sm text-muted-foreground">{row.issue}</TableCell>}
-                    <TableCell className="text-sm">{formatDateTime(row.createdAt || row.date, displayTimeZone)}</TableCell>
-                    <TableCell className="text-sm">
-                      {row.processedAt ? formatDateTime(row.processedAt, displayTimeZone) : <span className="text-muted-foreground">—</span>}
-                    </TableCell>
+                    <TableCell className="max-w-[140px] truncate">{row.clientName}</TableCell>
                     <TableCell>
                       <Badge variant={businessStatusVariant(statusToBusinessGroup(row.status as OrderStatus))}>
                         {businessStatusLabel(statusToBusinessGroup(row.status as OrderStatus))}
                       </Badge>
                     </TableCell>
-                    <TableCell className="max-w-[200px] text-xs text-muted-foreground">
-                      {workflowMotif(row, getDisplayName) ? (
-                        <span className="text-sky-700">{workflowMotif(row, getDisplayName)}</span>
+                    <TableCell className="min-w-[220px] max-w-sm align-top text-xs leading-snug text-muted-foreground">
+                      {(() => {
+                        const motif = workflowMotif(row, getDisplayName);
+                        return motif ? (
+                          <span className="whitespace-normal break-words text-sky-700">{motif}</span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        );
+                      })()}
+                    </TableCell>
+                    <TableCell>
+                      {row.sapVbeln ? (
+                        <span className="font-mono text-sm font-medium">{row.sapVbeln}</span>
                       ) : (
                         <span className="text-muted-foreground">—</span>
                       )}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
+                    <TableCell className="whitespace-nowrap text-sm">
+                      {row.processedAt || row.sapSentAt
+                        ? formatDateTime(row.processedAt || row.sapSentAt, displayTimeZone)
+                        : <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
+                      {getDisplayName(row.sapSentBy) || <span className="text-muted-foreground">—</span>}
+                    </TableCell>
+                    <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
                       {getDisplayName(
                         row.status === "Transféré" ? (row.transferredTo || row.assignedTo) : row.assignedTo
                         || row.processedBy
                       ) || <span className="text-muted-foreground">—</span>}
                     </TableCell>
-                    <TableCell className="text-sm text-muted-foreground">
-                      {getDisplayName(row.sapSentBy) || <span className="text-muted-foreground">—</span>}
-                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-sm">{formatDateTime(row.createdAt || row.date, displayTimeZone)}</TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {row.action || <span className="text-muted-foreground">—</span>}
                     </TableCell>
+                    {isAdmin && (
+                      <TableCell className={confidenceColor(row.confidence)}>
+                        {row.confidence}%
+                      </TableCell>
+                    )}
+                    {isAdmin && (
+                      <TableCell className="max-w-[160px] truncate text-sm text-muted-foreground">
+                        {row.issue || "—"}
+                      </TableCell>
+                    )}
                   </TableRow>
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
         </CardContent>
       </Card>

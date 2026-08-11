@@ -306,16 +306,19 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 continue
             chain = mat_status.get("replacement_chain") or []
             final_ref = str(mat_status.get("replacement") or "").strip()
+            since = str(mat_status.get("replacement_since") or "").strip()
+            since_txt = f" depuis le {since}" if since else ""
             if kind == "missing":
                 msg = (
-                    f"Ligne {ln.get('lineNumber')} : article {art} absent du référentiel matières."
+                    f"Ligne {ln.get('lineNumber')} : référence {art} absente du référentiel Articles."
                 )
                 severity = "error"
             elif kind == "no_sale":
                 if mat_status.get("via_replacement") and final_ref:
                     msg = (
-                        f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                        f"{final_ref}, mais {final_ref} est arrêtée (plus commercialisée)."
+                        f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
+                        f"{since_txt} par {final_ref}, mais {final_ref} est arrêtée "
+                        f"(plus commercialisée)."
                     )
                 else:
                     msg = (
@@ -333,21 +336,22 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                     severity = "warning"
                 elif mat_status.get("replacement_missing") and final_ref:
                     msg = (
-                        f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                        f"{final_ref}, mais {final_ref} est absent du référentiel matières."
+                        f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
+                        f"{since_txt} par {final_ref}, mais {final_ref} est absent du "
+                        f"référentiel Articles."
                     )
                     severity = "error"
                 else:
                     if len(chain) > 2:
                         via = " → ".join(chain[1:-1])
                         msg = (
-                            f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                            f"{final_ref} (via {via})."
+                            f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
+                            f"{since_txt} par {final_ref} (via {via})."
                         )
                     else:
                         msg = (
-                            f"Ligne {ln.get('lineNumber')} : la référence {art} est remplacée par "
-                            f"{final_ref}."
+                            f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
+                            f"{since_txt} par {final_ref}."
                         )
                     severity = "warning"
             else:

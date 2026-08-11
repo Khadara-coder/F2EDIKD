@@ -231,6 +231,15 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  addOrderLinesBulk: (
+    orderId: string,
+    lines: Array<Pick<UpdateOrderLinePayload, "boschArticle" | "quantity" | "unitPrice" | "unit">>,
+  ) =>
+    request(`/orders/${orderId}/lines/bulk`, {
+      method: "POST",
+      body: JSON.stringify({ lines }),
+    }),
+
   deleteOrderLine: (lineId: string) =>
     request(`/orders/lines/${lineId}`, { method: "DELETE" }),
 

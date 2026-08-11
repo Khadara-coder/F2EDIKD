@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { api } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { FloatingLookupPanel } from "@/components/file2edi/FloatingLookupPanel";
+import { useFocusWithoutScroll } from "@/hooks/useFocusWithoutScroll";
 import { cn } from "@/lib/utils";
 import type { MasterDataCustomerRow, PartnerEditSource } from "@/types";
 
@@ -52,6 +54,8 @@ export function SoldtoNameSelectField({
   onSelect,
 }: SoldtoNameSelectFieldProps) {
   const [editing, setEditing] = useState(false);
+  const anchorRef = useRef<HTMLDivElement>(null);
+  const filterRef = useFocusWithoutScroll<HTMLInputElement>(editing);
   const [filter, setFilter] = useState("");
   const [saving, setSaving] = useState(false);
   const [selected, setSelected] = useState<MasterDataCustomerRow | null>(null);
@@ -137,17 +141,37 @@ export function SoldtoNameSelectField({
         )}
       </div>
 
-      {editing ? (
+      <div ref={anchorRef} className="flex min-w-0 items-center gap-2">
+        <span className="truncate text-sm font-medium">{value || "—"}</span>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setEditing(true);
+          }}
+          className="shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+        >
+          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+        </button>
+      </div>
+
+      <FloatingLookupPanel
+        anchorRef={anchorRef}
+        open={editing}
+        onClose={() => setEditing(false)}
+        minWidth={360}
+      >
         <div className="space-y-2">
           <Input
+            ref={filterRef}
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
             placeholder="Filtrer par nom, code sold-to, ville, TVA…"
             className="h-8 text-sm"
-            autoFocus
             disabled={saving}
           />
-          <div className="max-h-52 overflow-y-auto rounded-md border bg-background shadow-sm">
+          <div className="max-h-52 overflow-y-auto rounded-md border bg-background">
             {isLoading ? (
               <p className="p-3 text-sm text-muted-foreground">Chargement des clients…</p>
             ) : filteredOptions.length === 0 ? (
@@ -188,18 +212,7 @@ export function SoldtoNameSelectField({
           {error && <p className="text-xs text-red-600">{error}</p>}
           <p className="text-xs text-muted-foreground">Cliquez sur une ligne pour appliquer · Échap pour fermer</p>
         </div>
-      ) : (
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="truncate text-sm font-medium">{value || "—"}</span>
-          <button
-            type="button"
-            onClick={() => setEditing(true)}
-            className="shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
-          >
-            <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-          </button>
-        </div>
-      )}
+      </FloatingLookupPanel>
     </div>
   );
 }

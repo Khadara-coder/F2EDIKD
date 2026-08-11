@@ -44,7 +44,6 @@ const STATUS_OPTIONS: ReviewStatusFilter[] = [
   "toProcess",
   "inProgress",
   "sentSap",
-  "confirmedSap",
   "rejected",
   "deliveryFailed",
 ];

@@ -111,7 +111,7 @@ def test_material_line_status(monkeypatch):
         [
             {"MATNR": "111", "MAKTX": "OK", "Statut": "Article disponible", "VMSTA": ""},
             {"MATNR": "222", "MAKTX": "STOP", "Statut": "no sale", "VMSTA": "92"},
-            {"MATNR": "333", "MAKTX": "OLD", "Statut": "999888", "VMSTA": "97"},
+            {"MATNR": "333", "MAKTX": "OLD", "Statut": "999888", "VMSTA": "97", "Commentaire": "14/02/2023"},
             {"MATNR": "999888", "MAKTX": "NEW", "Statut": "Article disponible", "VMSTA": ""},
             {"MATNR": "444", "MAKTX": "ALT", "Statut": "substitute, segmenti", "VMSTA": "97"},
         ]
@@ -128,7 +128,15 @@ def test_material_line_status(monkeypatch):
     replaced = mdr.material_line_status("333")
     assert replaced["kind"] == "replacement"
     assert replaced["replacement"] == "999888"
+    assert replaced["replacement_since"] == "14/02/2023"
     assert mdr.material_status_replacement("333") == "999888"
+
+    enriched = mdr.format_materials(
+        [{"MATNR": "333", "MAKTX": "OLD", "Statut": "999888", "Commentaire": "14/02/2023"}]
+    )
+    assert enriched[0]["fields"]["Commentaire"] == (
+        "Cette référence a été remplacée depuis le 14/02/2023 par 999888"
+    )
 
     other = mdr.material_line_status("444")
     assert other["kind"] == "available"

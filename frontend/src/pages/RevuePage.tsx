@@ -19,7 +19,12 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/textarea";
+import { MotifTemplateField } from "@/components/file2edi/MotifTemplateField";
+import {
+  HOLD_MOTIF_TEMPLATES,
+  REJECT_MOTIF_TEMPLATES,
+  TRANSFER_MOTIF_TEMPLATES,
+} from "@/lib/motifTemplates";
 import { formatCurrency, formatDate, formatDateTime, downloadTextFile } from "@/lib/utils";
 import { collectReviewBlockers, countPendingAnomalies, isAnomalyPending } from "@/lib/reviewValidation";
 import type { GestionnaireUser } from "@/types";
@@ -564,6 +569,18 @@ export function RevuePage() {
                   unitPrice: 0,
                 }).then(invalidate);
               }}
+              onAddBulkLines={async (bulkLines) => {
+                await api.addOrderLinesBulk(
+                  orderId,
+                  bulkLines.map((line) => ({
+                    boschArticle: line.boschArticle,
+                    quantity: line.quantity,
+                    unitPrice: line.unitPrice,
+                    unit: "PCE",
+                  })),
+                );
+                invalidate();
+              }}
             />
           </CardContent>
         </Card>
@@ -597,14 +614,16 @@ export function RevuePage() {
                 const pending = isAnomalyPending(a);
                 const isValidated = a.status === "Corrigée";
                 const isIgnored = a.status === "Ignorée";
-                const acceptLabel = a.buttonAccept || "Valider";
-                const rejectLabel = a.buttonReject || "Ignorer";
+                const statusLabel =
+                  a.status === "Corrigée" ? "Corrigé"
+                  : a.status === "Ignorée" ? "Refusé"
+                  : a.status;
                 return (
               <div key={a.anomalyId} className="flex items-start justify-between gap-4 rounded-lg border p-3">
                 <div className="min-w-0">
                   <p className="text-sm">{a.message}</p>
                   <Badge variant={pending ? "warning" : "success"} className="mt-1">
-                    {a.status}
+                    {statusLabel}
                   </Badge>
                 </div>
                 <div className="flex shrink-0 flex-col gap-1 sm:max-w-[240px]">
@@ -613,16 +632,18 @@ export function RevuePage() {
                     size="sm"
                     className="h-auto whitespace-normal px-2 py-1.5 text-left text-xs leading-snug"
                     onClick={() => api.resolveAnomaly(a.anomalyId, "corrected").then(invalidate)}
+                    disabled={workflowLocked}
                   >
-                    {acceptLabel}
+                    Corrigé
                   </Button>
                   <Button
                     variant={isIgnored ? "secondary" : "ghost"}
                     size="sm"
                     className="h-auto whitespace-normal px-2 py-1.5 text-left text-xs leading-snug"
                     onClick={() => api.resolveAnomaly(a.anomalyId, "ignored").then(invalidate)}
+                    disabled={workflowLocked}
                   >
-                    {rejectLabel}
+                    Refusé
                   </Button>
                 </div>
               </div>
@@ -782,8 +803,8 @@ export function RevuePage() {
       )}
 
       {/* ── Modal : Mise en attente ───────────────────────────────────── */}
-      <Dialog open={holdOpen} onOpenChange={setHoldOpen}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={holdOpen} onOpenChange={(open) => { setHoldOpen(open); if (!open) setHoldReason(""); }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <PauseCircle className="h-5 w-5 text-orange-500" />
@@ -794,15 +815,14 @@ export function RevuePage() {
             <p className="text-sm text-muted-foreground">
               Précisez le motif. Le dossier sera suspendu jusqu'à nouvel ordre.
             </p>
-            <div className="space-y-1.5">
-              <Label>Motif *</Label>
-              <Textarea
-                value={holdReason}
-                onChange={(e) => setHoldReason(e.target.value)}
-                placeholder="Ex: En attente de validation client, information manquante…"
-                rows={3}
-              />
-            </div>
+            <MotifTemplateField
+              id="hold-reason"
+              label="Motif"
+              value={holdReason}
+              onChange={setHoldReason}
+              templates={HOLD_MOTIF_TEMPLATES}
+              placeholder="Ex: En attente de bon de commande signé…"
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setHoldOpen(false)}>Annuler</Button>
@@ -819,8 +839,8 @@ export function RevuePage() {
       </Dialog>
 
       {/* ── Modal : Rejet ─────────────────────────────────────────────── */}
-      <Dialog open={rejectOpen} onOpenChange={setRejectOpen}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={rejectOpen} onOpenChange={(open) => { setRejectOpen(open); if (!open) setRejectReason(""); }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <XCircle className="h-5 w-5 text-rose-500" />
@@ -831,15 +851,14 @@ export function RevuePage() {
             <p className="text-sm text-muted-foreground">
               Indiquez le motif du rejet. La commande passera au statut Rejeté.
             </p>
-            <div className="space-y-1.5">
-              <Label>Motif *</Label>
-              <Textarea
-                value={rejectReason}
-                onChange={(e) => setRejectReason(e.target.value)}
-                placeholder="Ex: Document illisible, client inconnu, commande annulée par le client…"
-                rows={3}
-              />
-            </div>
+            <MotifTemplateField
+              id="reject-reason"
+              label="Motif"
+              value={rejectReason}
+              onChange={setRejectReason}
+              templates={REJECT_MOTIF_TEMPLATES}
+              placeholder="Ex: Commande hors périmètre commercial…"
+            />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectOpen(false)}>Annuler</Button>
@@ -857,8 +876,11 @@ export function RevuePage() {
       </Dialog>
 
       {/* ── Modal : Transfert ─────────────────────────────────────────── */}
-      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
-        <DialogContent className="max-w-sm">
+      <Dialog open={transferOpen} onOpenChange={(open) => {
+        setTransferOpen(open);
+        if (!open) { setTransferTo(""); setTransferNote(""); }
+      }}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <UserCheck className="h-5 w-5 text-sky-500" />
@@ -885,12 +907,15 @@ export function RevuePage() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label>Note (optionnel)</Label>
-              <Textarea
+              <MotifTemplateField
+                id="transfer-note"
+                label="Note"
                 value={transferNote}
-                onChange={(e) => setTransferNote(e.target.value)}
+                onChange={setTransferNote}
+                templates={TRANSFER_MOTIF_TEMPLATES}
                 placeholder="Instructions ou contexte pour le destinataire…"
                 rows={2}
+                required={false}
               />
             </div>
           </div>

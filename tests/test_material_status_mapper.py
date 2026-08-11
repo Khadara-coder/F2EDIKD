@@ -54,6 +54,7 @@ def materials_cache(monkeypatch):
                 "MAKTX": "OLD",
                 "Statut": "444444",
                 "VMSTA": "97",
+                "Commentaire": "17/05/2023",
             },
             {
                 "MATNR": "444444",
@@ -66,6 +67,7 @@ def materials_cache(monkeypatch):
                 "MAKTX": "CHAIN",
                 "Statut": "666666",
                 "VMSTA": "97",
+                "Commentaire": "01/03/2025",
             },
             {
                 "MATNR": "666666",
@@ -94,20 +96,24 @@ def test_mapper_warning_no_sale(materials_cache):
 def test_mapper_warning_replacement_final_available(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("333333"))
     msgs = [a["message"] for a in review["anomalies"]]
-    assert any("remplacée par 444444" in m for m in msgs)
-    assert not any("statut matière" in m for m in msgs)
+    assert any(
+        "a été remplacée depuis le 17/05/2023 par 444444" in m for m in msgs
+    )
+    assert not any("statut référence" in m for m in msgs)
 
 
 def test_mapper_warning_chain_ends_no_sale(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("555555"))
     msgs = [a["message"] for a in review["anomalies"]]
     assert any(
-        "remplacée par 666666" in m and "arrêtée (plus commercialisée)" in m for m in msgs
+        "a été remplacée depuis le 01/03/2025 par 666666" in m
+        and "arrêtée (plus commercialisée)" in m
+        for m in msgs
     )
 
 
 def test_mapper_error_missing_article(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("999999999"))
     msgs = [a["message"] for a in review["anomalies"]]
-    assert any("absent du référentiel matières" in m for m in msgs)
+    assert any("absente du référentiel Articles" in m for m in msgs)
     assert any(a.get("severity") == "error" for a in review["anomalies"])

@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn, formatDate } from "@/lib/utils";
+import { useFocusWithoutScroll } from "@/hooks/useFocusWithoutScroll";
 
 import type { PartnerEditSource } from "@/types";
 
@@ -33,6 +34,7 @@ export function EditableField({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const inputRef = useFocusWithoutScroll<HTMLInputElement>(editing && !readOnly);
 
   useEffect(() => {
     if (!editing) setDraft(value);
@@ -75,11 +77,11 @@ export function EditableField({
       {editing && !readOnly ? (
         <div className="flex items-center gap-2">
           <Input
+            ref={inputRef}
             type={type}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             className="h-8 text-sm"
-            autoFocus
           />
           <Button size="icon" variant="ghost" className="h-8 w-8" onClick={handleSave} disabled={saving}>
             <Check className="h-4 w-4 text-emerald-600" />
@@ -102,7 +104,9 @@ export function EditableField({
           {!readOnly && onSave && (
             <button
               type="button"
-              onClick={() => {
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
                 setDraft(value);
                 setEditing(true);
               }}
