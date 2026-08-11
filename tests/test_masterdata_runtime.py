@@ -202,3 +202,87 @@ def test_material_line_status_replacement_cycle(monkeypatch):
     status = mdr.material_line_status("100001")
     assert status["kind"] == "replacement"
     assert status.get("replacement_cycle") is True
+
+
+def test_format_material_status_anomaly_message_replacement(monkeypatch):
+    import pandas as pd
+
+    from src import masterdata_runtime as mdr
+
+    df = pd.DataFrame(
+        [
+            {"MATNR": "333333", "MAKTX": "OLD", "Statut": "444444", "VMSTA": "97", "Commentaire": "17/05/2023"},
+            {"MATNR": "444444", "MAKTX": "NEW", "Statut": "Article disponible", "VMSTA": ""},
+        ]
+    )
+    monkeypatch.setitem(mdr.CACHE, "materials", {"df": df, "rows": 2})
+
+    built = mdr.format_material_status_anomaly_message(
+        line_number=1,
+        matnr="333333",
+    )
+    assert built is not None
+    assert "remplacée depuis le 17/05/2023 par 444444" in built["message"]
+    assert built["severity"] == "warning"
+
+
+def test_format_material_status_anomaly_message_available(monkeypatch):
+    import pandas as pd
+
+    from src import masterdata_runtime as mdr
+
+    df = pd.DataFrame(
+        [{"MATNR": "111111", "MAKTX": "OK", "Statut": "Article disponible", "VMSTA": ""}]
+    )
+    monkeypatch.setitem(mdr.CACHE, "materials", {"df": df, "rows": 1})
+
+    assert mdr.format_material_status_anomaly_message(line_number=1, matnr="111111") is None
+
+
+def test_format_material_status_anomaly_message_chain_a_b_c(monkeypatch):
+    import pandas as pd
+
+    from src import masterdata_runtime as mdr
+
+    df = pd.DataFrame(
+        [
+            {
+                "MATNR": "100001",
+                "MAKTX": "A",
+                "Statut": "200002",
+                "VMSTA": "97",
+                "Commentaire": "01/01/2024",
+            },
+            {"MATNR": "200002", "MAKTX": "B", "Statut": "300003", "VMSTA": "97"},
+            {"MATNR": "300003", "MAKTX": "C", "Statut": "Article disponible", "VMSTA": ""},
+        ]
+    )
+    monkeypatch.setitem(mdr.CACHE, "materials", {"df": df, "rows": 3})
+
+    built = mdr.format_material_status_anomaly_message(line_number=2, matnr="100001")
+    assert built is not None
+    assert built["message"] == (
+        "Ligne 2 : la référence 100001 a été remplacée depuis le 01/01/2024 par 300003 "
+        "(via 200002)."
+    )
+
+
+def test_format_material_status_anomaly_message_chain_a_b_c_d(monkeypatch):
+    import pandas as pd
+
+    from src import masterdata_runtime as mdr
+
+    df = pd.DataFrame(
+        [
+            {"MATNR": "100001", "MAKTX": "A", "Statut": "200002", "VMSTA": "97"},
+            {"MATNR": "200002", "MAKTX": "B", "Statut": "300003", "VMSTA": "97"},
+            {"MATNR": "300003", "MAKTX": "C", "Statut": "400004", "VMSTA": "97"},
+            {"MATNR": "400004", "MAKTX": "D", "Statut": "Article disponible", "VMSTA": ""},
+        ]
+    )
+    monkeypatch.setitem(mdr.CACHE, "materials", {"df": df, "rows": 4})
+
+    built = mdr.format_material_status_anomaly_message(line_number=1, matnr="100001")
+    assert built is not None
+    assert "par 400004 (via 200002 → 300003)." in built["message"]
+    assert "100001" in built["message"]

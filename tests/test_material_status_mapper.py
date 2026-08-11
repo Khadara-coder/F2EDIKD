@@ -112,6 +112,33 @@ def test_mapper_warning_chain_ends_no_sale(materials_cache):
     )
 
 
+def test_mapper_warning_chain_a_b_c_final_available(materials_cache, monkeypatch):
+    import pandas as pd
+
+    from src import masterdata_runtime as mdr
+
+    df = pd.DataFrame(
+        [
+            {
+                "MATNR": "777777",
+                "MAKTX": "A",
+                "Statut": "888888",
+                "VMSTA": "97",
+                "Commentaire": "15/06/2024",
+            },
+            {"MATNR": "888888", "MAKTX": "B", "Statut": "999999", "VMSTA": "97"},
+            {"MATNR": "999999", "MAKTX": "C", "Statut": "Article disponible", "VMSTA": ""},
+        ]
+    )
+    monkeypatch.setitem(mdr.CACHE, "materials", {"df": df, "rows": 3})
+
+    review = engine_to_order_review("hash-mat", "upl-1", _engine_result("777777"))
+    msgs = [a["message"] for a in review["anomalies"]]
+    assert any(
+        "a été remplacée depuis le 15/06/2024 par 999999 (via 888888)." in m for m in msgs
+    )
+
+
 def test_mapper_error_missing_article(materials_cache):
     review = engine_to_order_review("hash-mat", "upl-1", _engine_result("999999999"))
     msgs = [a["message"] for a in review["anomalies"]]

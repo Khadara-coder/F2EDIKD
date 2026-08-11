@@ -106,15 +106,12 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "retry_allowed": True,
         "manual_review_required": True,
         "message_fr": (
-            "Cette référence Bosch ne peut pas être vendue telle quelle : "
-            "elle est arrêtée (plus commercialisée), remplacée par un autre code, "
-            "ou introuvable dans le référentiel Articles. "
-            "Le détail de la ligne précise le cas (date et nouvelle référence si remplacement)."
+            "Le statut matière bloque la vente (arrêté, remplacement ou introuvable). "
+            "Le message de la ligne précise la référence, la date et le code de remplacement."
         ),
         "message_en": (
-            "This Bosch reference cannot be sold as-is: it is discontinued, "
-            "replaced by another code, or missing from the articles master. "
-            "The line detail states which case applies (date and successor if replaced)."
+            "Material status blocks sales (discontinued, replacement, or not found). "
+            "The line message states the reference, date, and replacement code."
         ),
     },
     "RESUBMISSION_DETECTED": {
@@ -823,6 +820,26 @@ def format_rejection_message(
 
     if code == "ORDER_CHANGE" and details.get("detected_type"):
         return f"Document de modification de commande (type : {details['detected_type']})."
+
+    if code == "MATERIAL_STATUS_INVALID":
+        fallback_msg = str(fallback or "").strip()
+        if fallback_msg:
+            return fallback_msg
+        matnr = str(details.get("matnr") or details.get("article") or "").strip()
+        if matnr:
+            try:
+                from src.masterdata_runtime import format_material_status_anomaly_message
+
+                line_number = details.get("line_number") or details.get("lineNumber")
+                built = format_material_status_anomaly_message(
+                    line_number=line_number,
+                    matnr=matnr,
+                )
+                if built:
+                    return built["message"]
+            except Exception:
+                pass
+        return base
 
     return base
 

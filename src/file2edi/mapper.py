@@ -292,70 +292,22 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
 
     # Materials Statut: disponible OK; no sale = arrêté; Statut MATNR = remplacement; absent = erreur.
     try:
-        from src.masterdata_runtime import material_line_status
+        from src.masterdata_runtime import format_material_status_anomaly_message
     except Exception:
-        material_line_status = None  # type: ignore[assignment]
-    if material_line_status is not None:
+        format_material_status_anomaly_message = None  # type: ignore[assignment]
+    if format_material_status_anomaly_message is not None:
         for ln in parsed_lines:
             art = str(ln.get("boschArticle") or "").strip()
             if not art or "?" in art:
                 continue
-            mat_status = material_line_status(art)
-            kind = mat_status.get("kind")
-            if kind == "available":
+            built = format_material_status_anomaly_message(
+                line_number=ln.get("lineNumber"),
+                matnr=art,
+            )
+            if not built:
                 continue
-            chain = mat_status.get("replacement_chain") or []
-            final_ref = str(mat_status.get("replacement") or "").strip()
-            since = str(mat_status.get("replacement_since") or "").strip()
-            since_txt = f" depuis le {since}" if since else ""
-            if kind == "missing":
-                msg = (
-                    f"Ligne {ln.get('lineNumber')} : référence {art} absente du référentiel Articles."
-                )
-                severity = "error"
-            elif kind == "no_sale":
-                if mat_status.get("via_replacement") and final_ref:
-                    msg = (
-                        f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
-                        f"{since_txt} par {final_ref}, mais {final_ref} est arrêtée "
-                        f"(plus commercialisée)."
-                    )
-                else:
-                    msg = (
-                        f"Ligne {ln.get('lineNumber')} : la référence {art} est arrêtée "
-                        f"(plus commercialisée)."
-                    )
-                severity = "warning"
-            elif kind == "replacement":
-                if mat_status.get("replacement_cycle"):
-                    chain_txt = " → ".join(chain) if chain else art
-                    msg = (
-                        f"Ligne {ln.get('lineNumber')} : chaîne de remplacement circulaire "
-                        f"pour {art} ({chain_txt})."
-                    )
-                    severity = "warning"
-                elif mat_status.get("replacement_missing") and final_ref:
-                    msg = (
-                        f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
-                        f"{since_txt} par {final_ref}, mais {final_ref} est absent du "
-                        f"référentiel Articles."
-                    )
-                    severity = "error"
-                else:
-                    if len(chain) > 2:
-                        via = " → ".join(chain[1:-1])
-                        msg = (
-                            f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
-                            f"{since_txt} par {final_ref} (via {via})."
-                        )
-                    else:
-                        msg = (
-                            f"Ligne {ln.get('lineNumber')} : la référence {art} a été remplacée"
-                            f"{since_txt} par {final_ref}."
-                        )
-                    severity = "warning"
-            else:
-                continue
+            msg = built["message"]
+            severity = built["severity"]
             _add_anomaly({
                 "anomalyId": f"an-mat-status-{order_id}-{ln.get('lineNumber')}-{art}",
                 "orderId": order_id,

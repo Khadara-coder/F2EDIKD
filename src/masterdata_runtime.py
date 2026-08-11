@@ -429,6 +429,68 @@ def material_status_replacement(matnr: str) -> str | None:
     return None
 
 
+def format_material_status_anomaly_message(
+    *,
+    line_number: int | str | None,
+    matnr: str,
+    mat_status: dict[str, Any] | None = None,
+) -> dict[str, str] | None:
+    """Build a line-level MATERIAL_STATUS_INVALID message from Articles masterdata."""
+    art = str(matnr or "").strip()
+    if not art:
+        return None
+    status = mat_status if mat_status is not None else material_line_status(art)
+    kind = status.get("kind")
+    if kind == "available":
+        return None
+
+    line_prefix = f"Ligne {line_number} : " if line_number is not None else ""
+    chain = status.get("replacement_chain") or []
+    final_ref = str(status.get("replacement") or "").strip()
+    since = str(status.get("replacement_since") or "").strip()
+    since_txt = f" depuis le {since}" if since else ""
+
+    if kind == "missing":
+        return {
+            "severity": "error",
+            "message": f"{line_prefix}référence {art} absente du référentiel Articles.",
+        }
+    if kind == "no_sale":
+        if status.get("via_replacement") and final_ref:
+            msg = (
+                f"{line_prefix}la référence {art} a été remplacée{since_txt} par {final_ref}, "
+                f"mais {final_ref} est arrêtée (plus commercialisée)."
+            )
+        else:
+            msg = f"{line_prefix}la référence {art} est arrêtée (plus commercialisée)."
+        return {"severity": "warning", "message": msg}
+    if kind == "replacement":
+        if status.get("replacement_cycle"):
+            chain_txt = " → ".join(chain) if chain else art
+            msg = (
+                f"{line_prefix}chaîne de remplacement circulaire pour {art} ({chain_txt})."
+            )
+            return {"severity": "warning", "message": msg}
+        if status.get("replacement_missing") and final_ref:
+            msg = (
+                f"{line_prefix}la référence {art} a été remplacée{since_txt} par {final_ref}, "
+                f"mais {final_ref} est absent du référentiel Articles."
+            )
+            return {"severity": "error", "message": msg}
+        if len(chain) > 2:
+            via = " → ".join(chain[1:-1])
+            msg = (
+                f"{line_prefix}la référence {art} a été remplacée{since_txt} par {final_ref} "
+                f"(via {via})."
+            )
+        else:
+            msg = (
+                f"{line_prefix}la référence {art} a été remplacée{since_txt} par {final_ref}."
+            )
+        return {"severity": "warning", "message": msg}
+    return None
+
+
 def validate_schema(key: str, df) -> dict:
     required = MD_REQUIRED_COLS.get(key, [])
     present = list(df.columns) if df is not None else []

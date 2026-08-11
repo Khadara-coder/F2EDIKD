@@ -147,6 +147,34 @@ def test_format_rejection_message_po_duplicate_french():
     assert "already exists" not in msg.lower()
 
 
+def test_format_rejection_message_material_status_preserves_line_detail():
+    specific = (
+        "Ligne 1 : la référence 333333 a été remplacée depuis le 17/05/2023 par 444444."
+    )
+    msg = rc.format_rejection_message("MATERIAL_STATUS_INVALID", {}, fallback=specific)
+    assert msg == specific
+    assert "Le statut matière bloque" not in msg
+
+
+def test_format_rejection_message_material_status_builds_from_article(monkeypatch):
+    import pandas as pd
+
+    from src import masterdata_runtime as mdr
+
+    df = pd.DataFrame(
+        [{"MATNR": "222222", "MAKTX": "STOP", "Statut": "no sale", "VMSTA": "92"}]
+    )
+    monkeypatch.setitem(mdr.CACHE, "materials", {"df": df, "rows": 1})
+
+    msg = rc.format_rejection_message(
+        "MATERIAL_STATUS_INVALID",
+        {"matnr": "222222", "line_number": 2},
+    )
+    assert "Ligne 2" in msg
+    assert "222222" in msg
+    assert "arrêtée (plus commercialisée)" in msg
+
+
 def test_messages_not_empty():
     for code, entry in rc.REJECTION_CATALOG.items():
         assert entry["message_fr"].strip(), f"{code} has empty message_fr"
