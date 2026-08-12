@@ -13,6 +13,7 @@ env/
 /dist/
 
 # Node / frontend (dist versionné pour déploiement sans npm)
+/node_modules/
 frontend/node_modules/
 *.tsbuildinfo
 
