@@ -2,7 +2,7 @@ import { useState } from "react";
 import { ArrowRight } from "lucide-react";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
@@ -42,7 +42,6 @@ export function LoginPage() {
               if (!img.src.endsWith("file.png")) img.src = logoFallback;
             }}
           />
-          <CardTitle className="text-xl">File2EDI</CardTitle>
           <p className="text-xs text-muted-foreground text-center">Connectez-vous avec votre identifiant</p>
         </CardHeader>
 
