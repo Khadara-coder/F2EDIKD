@@ -1,6 +1,0 @@
-﻿"fileName","orderId","status","confidence","soldto","shipto","orderDate","requestedDeliveryDate","lineCount","hasOrderDate","hasDeliveryDate","hasLines"
-"1.1 ISERBA SO 16973130.PDF","57be110370bd3817351fa6427e6e4c8521a26128e39b7e4a7449bade288d4260","Revue requise","0,0","15015760","15018929",,,"0","False","False","False"
-"2.1 ROUTHIAU AUBIGNY-LES CLOUZEAU SO 16990444.pdf","55899ed6c475efda362e57d7a9b2e1100a8107d93a27c1fe14bb566e78a3b2ef","Revue requise","75,0","15021385","15021800",,,"16","False","False","True"
-"3.1 Scanned_GARANKA LE COUDRAY SO 16942264 PO A2400182.pdf","71ddd20d80eadb436c3c769d33aeeaec902255848778f2d11faae8f00ac00306","Rejet├⌐","0,0","","",,,"0","False","False","False"
-"CDEA142310ELMLEBLANC.PDF","9ba7f054d2374790be9f3e1032173ef66041c1a93a56f7b76476d6b6afb0f094","Rejet├⌐","65,0","15014759","15014759",,,"12","False","False","True"
-"Copie de Copie de PRE SAISON RICHARDSON (002) (002).pdf","c9aea85cee3c3666676ac7755e610cbaf5769c324f553a81c739883f6d426214","Rejet├⌐","0,0","","",,,"0","False","False","False"

@@ -425,15 +425,15 @@ export function ParametresPage() {
       />
 
       <div className="grid gap-6 lg:grid-cols-12">
-        <Card className="lg:col-span-2 h-fit">
-          <CardContent className="p-2">
+        <Card className="h-fit lg:col-span-2">
+          <CardContent className="flex gap-1 overflow-x-auto p-2 lg:flex-col lg:overflow-visible">
             {SECTIONS.map((s) => (
               <button
                 key={s.id}
                 type="button"
                 onClick={() => selectSection(s.id)}
                 className={cn(
-                  "w-full rounded-lg px-3 py-2 text-left text-sm transition-colors",
+                  "shrink-0 rounded-lg px-3 py-2 text-left text-sm transition-colors whitespace-nowrap lg:w-full",
                   activeSection === s.id
                     ? "bg-primary/10 text-primary font-medium"
                     : "text-muted-foreground hover:bg-muted",
@@ -445,7 +445,7 @@ export function ParametresPage() {
           </CardContent>
         </Card>
 
-        <div className="lg:col-span-10 space-y-6">
+        <div className="min-w-0 space-y-6 lg:col-span-10">
           {activeSection === "general" && (
             <Card>
               <CardHeader>

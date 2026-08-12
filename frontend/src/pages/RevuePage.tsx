@@ -505,7 +505,7 @@ export function RevuePage() {
         )}
       </div>
 
-      <div className="mb-6 grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-7">
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
         <StatCard compact label="Client" value={order.clientName} />
         <StatCard compact label="N° commande client" value={order.customerOrderNumber} />
         <StatCard
@@ -545,10 +545,12 @@ export function RevuePage() {
         }}
       />
 
-      <div className="mb-6 grid items-stretch gap-6 lg:grid-cols-[13fr_7fr]">
-        <PdfPreviewPanel fileName={order.fileName} orderId={order.orderId} pdfUrl={data.pdfUrl} />
+      <div className="mb-6 grid min-w-0 items-stretch gap-6 lg:grid-cols-[13fr_7fr]">
+        <div className="min-w-0">
+          <PdfPreviewPanel fileName={order.fileName} orderId={order.orderId} pdfUrl={data.pdfUrl} />
+        </div>
 
-        <Card className="flex h-full flex-col">
+        <Card className="flex h-full min-w-0 flex-col">
           <CardHeader>
             <CardTitle className="text-base">Lignes de commande</CardTitle>
           </CardHeader>

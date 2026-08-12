@@ -238,8 +238,8 @@ export function RevueListPage() {
                 : "Tous les dossiers"}
             </Button>
           </div>
-          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_190px_310px_auto] lg:items-center">
-            <div className="relative">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_190px_310px_auto] lg:items-center">
+            <div className="relative sm:col-span-2 lg:col-span-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 value={search}
@@ -265,25 +265,25 @@ export function RevueListPage() {
             </Select>
 
             {/* Filtre par dates d'import */}
-            <div className="flex items-center gap-1">
+            <div className="flex min-w-0 flex-wrap items-center gap-1">
               <Input
                 type="date"
                 value={dateFrom}
                 onChange={(e) => setDateFrom(e.target.value)}
-                className="h-10 w-[138px] text-xs"
+                className="h-10 min-w-0 flex-1 text-xs sm:w-[138px] sm:flex-none"
                 title="Date d'import - début"
               />
-              <span className="shrink-0 text-muted-foreground text-xs">→</span>
+              <span className="shrink-0 text-xs text-muted-foreground">→</span>
               <Input
                 type="date"
                 value={dateTo}
                 onChange={(e) => setDateTo(e.target.value)}
-                className="h-10 w-[138px] text-xs"
+                className="h-10 min-w-0 flex-1 text-xs sm:w-[138px] sm:flex-none"
                 title="Date d'import - fin"
               />
             </div>
 
-            <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+            <div className="flex flex-wrap items-center gap-2 sm:col-span-2 lg:col-span-1 lg:justify-end">
               <Button
                 variant="ghost"
                 className="gap-2 text-muted-foreground"

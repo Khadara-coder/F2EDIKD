@@ -14,7 +14,6 @@ env/
 
 # Node / frontend (dist versionné pour déploiement sans npm)
 frontend/node_modules/
-backend/node_modules/
 *.tsbuildinfo
 
 # Secrets & local config
@@ -40,6 +39,7 @@ logs/
 
 # Large master data (bundled/downloaded at deploy)
 data/masterdata/*.csv
+data/masterdata/*.parquet
 data/masterdata/.masterdata_sync_metadata.json
 data/masterdata.previous/
 data/.masterdata_repo_cache/
@@ -69,6 +69,10 @@ static/*.bak*
 
 # Misc
 n8n workflow.txt
+tmp_*.json
+reports/
+data/duplicate_ledger.csv
+data/sftp_delivery_ledger.csv
 
 # RAG data (local only)
 RAG Purchase Orders/

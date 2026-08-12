@@ -37,11 +37,11 @@ export function PdfPreviewPanel({ fileName, orderId, pdfUrl }: PdfPreviewPanelPr
 
   return (
     <Card className="flex h-full flex-col">
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-        <CardTitle className="text-base font-semibold">
+      <CardHeader className="flex flex-col gap-3 space-y-0 pb-3 sm:flex-row sm:items-center sm:justify-between">
+        <CardTitle className="truncate text-base font-semibold">
           Aperçu PDF / Extraction
         </CardTitle>
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           <Button
             variant="ghost"
             size="icon"

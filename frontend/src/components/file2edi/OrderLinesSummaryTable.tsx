@@ -21,6 +21,7 @@ export function OrderLinesSummaryTable({
   currency = "EUR",
 }: OrderLinesSummaryTableProps) {
   return (
+    <div className="w-full overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -81,5 +82,6 @@ export function OrderLinesSummaryTable({
         })}
       </TableBody>
     </Table>
+    </div>
   );
 }

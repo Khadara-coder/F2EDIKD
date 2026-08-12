@@ -79,7 +79,7 @@ export function HistoriquePage() {
         subtitle="Consultez toutes les commandes traitées et leur statut"
       />
 
-      <div className="mb-6 grid gap-4 md:grid-cols-4">
+      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-4">
         <StatCard
           label="Total traités"
           value={data?.kpis.totalProcessed.toLocaleString("fr-FR") ?? "-"}

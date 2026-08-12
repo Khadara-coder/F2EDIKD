@@ -241,17 +241,19 @@ export function DonneesMaitresPage() {
       />
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as TabKey)}>
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-4">
-          <TabsList>
-            <TabsTrigger value="clients" className="gap-2">
-              <Building2 className="h-4 w-4" /> Clients
-            </TabsTrigger>
-            <TabsTrigger value="shipto">Ship-to</TabsTrigger>
-            <TabsTrigger value="articles">Articles Bosch</TabsTrigger>
-            <TabsTrigger value="rules">Règles de validation</TabsTrigger>
-          </TabsList>
-          <div className="flex flex-col items-end gap-1">
-            <div className="flex gap-2">
+        <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+          <div className="w-full overflow-x-auto">
+            <TabsList className="inline-flex h-auto min-w-max max-w-none">
+              <TabsTrigger value="clients" className="gap-2">
+                <Building2 className="h-4 w-4" /> Clients
+              </TabsTrigger>
+              <TabsTrigger value="shipto">Ship-to</TabsTrigger>
+              <TabsTrigger value="articles">Articles Bosch</TabsTrigger>
+              <TabsTrigger value="rules">Règles de validation</TabsTrigger>
+            </TabsList>
+          </div>
+          <div className="flex flex-col items-stretch gap-1 sm:items-end">
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" size="sm" className="gap-2" onClick={openImport}>
                 <Upload className="h-4 w-4" /> Importer CSV
               </Button>
@@ -284,8 +286,8 @@ export function DonneesMaitresPage() {
           </div>
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-12">
-          <div className="lg:col-span-2 space-y-3">
+        <div className="grid min-w-0 gap-6 lg:grid-cols-12">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:col-span-2 lg:grid-cols-1 lg:space-y-3">
             <StatCard
               label="Clients actifs"
               value={summary?.activeClients?.toLocaleString("fr-FR") ?? "-"}
@@ -310,7 +312,7 @@ export function DonneesMaitresPage() {
               sublabel={growthLabel(summary?.monthlyGrowth.rules)}
               icon={Shield}
             />
-            <p className="text-xs text-muted-foreground px-1">
+            <p className="col-span-2 px-1 text-xs text-muted-foreground sm:col-span-4 lg:col-span-1">
               Dernière synchronisation
               <br />
               {summary?.lastSync ? formatDateTime(summary.lastSync, displayTimeZone) : "-"}
@@ -324,12 +326,12 @@ export function DonneesMaitresPage() {
             </p>
           </div>
 
-          <div className="lg:col-span-7">
+          <div className="min-w-0 lg:col-span-7">
             <Card>
-              <CardHeader className="flex flex-row flex-wrap items-center gap-4 space-y-0 pb-4">
+              <CardHeader className="flex flex-col gap-3 space-y-0 pb-4 sm:flex-row sm:flex-wrap sm:items-center">
                 <Input
                   placeholder={searchPlaceholder}
-                  className="max-w-sm"
+                  className="w-full max-w-sm"
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
                 />
@@ -583,7 +585,7 @@ export function DonneesMaitresPage() {
             </Card>
           </div>
 
-          <div className="lg:col-span-3">
+          <div className="min-w-0 lg:col-span-3">
             {selectedClient && tab === "clients" && (
               <DetailCard
                 title={selectedClient.name}
