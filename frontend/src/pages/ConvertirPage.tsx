@@ -1,12 +1,12 @@
-import { useState } from "react";
+import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { Eye, ArrowRight, Loader2 } from "lucide-react";
-import { api } from "@/lib/api";
-import type { ExtractionPreview } from "@/types";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { Header } from "@/components/layout/Header";
 import { UploadDropzone } from "@/components/file2edi/UploadDropzone";
+import { UploadQueuePanel } from "@/components/file2edi/UploadQueuePanel";
 import { ProgressStepper } from "@/components/file2edi/ProgressStepper";
 import { ExtractedDataTable } from "@/components/file2edi/ExtractedDataTable";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,47 +17,40 @@ export function ConvertirPage() {
   const queryClient = useQueryClient();
   const meQuery = useCurrentUser();
   const isAdv = meQuery.data?.role === "adv";
-  const [preview, setPreview] = useState<ExtractionPreview | null>(null);
 
-  const extractMutation = useMutation({
-    mutationFn: async (file: File) => {
-      const { uploadId } = await api.uploadPdf(file);
-      return api.launchExtractionJob(uploadId);
-    },
-    onSuccess: (data) => {
-      setPreview(data);
-      void queryClient.invalidateQueries({ queryKey: ["orders"] });
-      void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-    },
-  });
+  const invalidateDashboard = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["orders"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  }, [queryClient]);
 
-  const isProcessing = extractMutation.isPending;
+  const { jobs, activeCount, enqueueFiles, selectedJob, selectedJobId, setSelectedJobId } =
+    useUploadQueue(invalidateDashboard);
+
+  const preview = selectedJob?.preview ?? null;
 
   return (
     <>
       <Header
         title="Déposer une commande"
-        subtitle="Déposer un PDF commande pour le convertir en fichier EDIFACT .tst"
+        subtitle="Déposez un ou plusieurs PDF — le traitement continue en arrière-plan"
       />
 
       <div className="space-y-6">
-        <UploadDropzone
-          onFileSelect={(file) => extractMutation.mutate(file)}
-          disabled={isProcessing}
-        />
+        <UploadDropzone onFilesSelect={enqueueFiles} />
 
-        {isProcessing && (
+        {activeCount > 0 && (
           <div className="flex items-center justify-center gap-2 rounded-lg border bg-primary/5 py-4 text-sm text-primary">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Extraction en cours…
+            {activeCount} extraction{activeCount > 1 ? "s" : ""} en cours…
           </div>
         )}
 
-        {extractMutation.isError && (
-          <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-            {(extractMutation.error as Error).message || "Échec de l'extraction"}
-          </p>
-        )}
+        <UploadQueuePanel
+          jobs={jobs}
+          selectedJobId={selectedJobId}
+          onSelectJob={setSelectedJobId}
+          onNavigateToReview={(orderId) => navigate(`/revue/${orderId}`)}
+        />
 
         {!isAdv && (
           <Card>
@@ -71,7 +64,7 @@ export function ConvertirPage() {
                 <ProgressStepper steps={preview.steps} orientation="horizontal" />
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  La progression apparaîtra après l'extraction d'un PDF.
+                  La progression apparaîtra après l&apos;extraction d&apos;un PDF.
                 </p>
               )}
             </CardContent>
@@ -82,6 +75,11 @@ export function ConvertirPage() {
           <CardHeader>
             <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
               Aperçu des données extraites
+              {preview?.fileName ? (
+                <span className="ml-2 font-normal normal-case text-foreground">
+                  — {preview.fileName}
+                </span>
+              ) : null}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -89,7 +87,7 @@ export function ConvertirPage() {
               <ExtractedDataTable preview={preview} />
             ) : (
               <p className="text-sm text-muted-foreground">
-                Aucun aperçu disponible. Importez un PDF pour lancer l'extraction.
+                Aucun aperçu disponible. Importez un PDF pour lancer l&apos;extraction.
               </p>
             )}
           </CardContent>

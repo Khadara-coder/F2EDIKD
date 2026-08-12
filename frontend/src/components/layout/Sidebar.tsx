@@ -14,7 +14,6 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
 import { useSidebar } from "./SidebarContext";
 
 const navItems = [
@@ -136,27 +135,12 @@ export function Sidebar() {
         </nav>
 
         <div className="border-t border-sidebar-border px-4 py-4">
-          <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
-            Profil EDI
-          </p>
-          <div className="flex flex-wrap gap-1.5">
-            <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-[10px] text-amber-400">
-              ELM_STANDARD
-            </Badge>
-            <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-[10px] text-amber-400">
-              UNOC : 3
-            </Badge>
-            <Badge variant="outline" className="border-amber-500/50 bg-amber-500/10 text-[10px] text-amber-400">
-              D. 96A
-            </Badge>
-          </div>
-          <div className="mt-4 flex items-center gap-3">
+          <div className="flex items-center gap-3">
             <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary text-sm font-semibold text-white">
               {initials}
             </div>
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium text-white">{displayName}</p>
-              <p className="text-xs text-slate-400">{role.toUpperCase()} · Genie Commande</p>
             </div>
             <button
               onClick={handleLogout}

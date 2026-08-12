@@ -2,28 +2,52 @@ import { useCallback, useState } from "react";
 import { FileText, Upload } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+const MAX_FILE_SIZE = 20 * 1024 * 1024;
+const MAX_FILES_PER_DROP = 20;
+
 interface UploadDropzoneProps {
-  onFileSelect: (file: File) => void;
+  onFilesSelect: (files: File[]) => void;
   disabled?: boolean;
   className?: string;
 }
 
-export function UploadDropzone({ onFileSelect, disabled, className }: UploadDropzoneProps) {
+function validatePdfFiles(files: FileList | File[]): File[] {
+  const valid: File[] = [];
+  const errors: string[] = [];
+
+  for (const file of Array.from(files)) {
+    if (!file.name.toLowerCase().endsWith(".pdf")) {
+      errors.push(`${file.name} : seuls les PDF sont acceptés.`);
+      continue;
+    }
+    if (file.size > MAX_FILE_SIZE) {
+      errors.push(`${file.name} : dépasse la limite de 20 Mo.`);
+      continue;
+    }
+    valid.push(file);
+  }
+
+  if (errors.length) {
+    alert(errors.join("\n"));
+  }
+
+  if (valid.length > MAX_FILES_PER_DROP) {
+    alert(`Maximum ${MAX_FILES_PER_DROP} fichiers PDF par dépôt.`);
+    return valid.slice(0, MAX_FILES_PER_DROP);
+  }
+
+  return valid;
+}
+
+export function UploadDropzone({ onFilesSelect, disabled, className }: UploadDropzoneProps) {
   const [isDragging, setIsDragging] = useState(false);
 
-  const handleFile = useCallback(
-    (file: File) => {
-      if (!file.name.toLowerCase().endsWith(".pdf")) {
-        alert("Seuls les fichiers PDF sont acceptés.");
-        return;
-      }
-      if (file.size > 20 * 1024 * 1024) {
-        alert("Le fichier dépasse la limite de 20 Mo.");
-        return;
-      }
-      onFileSelect(file);
+  const handleFiles = useCallback(
+    (incoming: FileList | File[]) => {
+      const files = validatePdfFiles(incoming);
+      if (files.length) onFilesSelect(files);
     },
-    [onFileSelect],
+    [onFilesSelect],
   );
 
   const onDrop = useCallback(
@@ -31,10 +55,9 @@ export function UploadDropzone({ onFileSelect, disabled, className }: UploadDrop
       e.preventDefault();
       setIsDragging(false);
       if (disabled) return;
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
+      if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
     },
-    [disabled, handleFile],
+    [disabled, handleFiles],
   );
 
   return (
@@ -58,9 +81,9 @@ export function UploadDropzone({ onFileSelect, disabled, className }: UploadDrop
         const input = document.createElement("input");
         input.type = "file";
         input.accept = ".pdf";
+        input.multiple = true;
         input.onchange = () => {
-          const file = input.files?.[0];
-          if (file) handleFile(file);
+          if (input.files?.length) handleFiles(input.files);
         };
         input.click();
       }}
@@ -68,11 +91,13 @@ export function UploadDropzone({ onFileSelect, disabled, className }: UploadDrop
       <div className="flex h-16 w-16 items-center justify-center rounded-2xl bg-primary/10">
         <FileText className="h-8 w-8 text-primary" />
       </div>
-      <p className="mt-4 text-base font-semibold text-foreground">Glisser un PDF ici</p>
+      <p className="mt-4 text-base font-semibold text-foreground">Glisser des PDF ici</p>
       <p className="mt-1 text-sm text-muted-foreground">
-        ou cliquez pour sélectionner un fichier
+        ou cliquez pour sélectionner un ou plusieurs fichiers
       </p>
-      <p className="mt-2 text-xs text-muted-foreground">Fichier PDF uniquement, max 20 Mo</p>
+      <p className="mt-2 text-xs text-muted-foreground">
+        PDF uniquement, max 20 Mo par fichier, {MAX_FILES_PER_DROP} fichiers max par dépôt
+      </p>
       <Upload className="absolute right-4 top-4 h-5 w-5 text-muted-foreground/40" />
     </div>
   );
