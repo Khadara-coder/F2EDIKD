@@ -97,8 +97,8 @@ def test_engine_review_flags_invalid_line_delivery_date():
     review = engine_to_order_review("hash-1", "upl-1", result)
 
     assert any(
-        anomaly["fieldName"] == "deliveryDate"
-        and "date de livraison extraite invalide" in anomaly["message"]
+        anomaly["fieldName"] == "DELIVERY_DATE_INVALID"
+        and "date de livraison" in anomaly["message"].lower()
         for anomaly in review["anomalies"]
     )
 

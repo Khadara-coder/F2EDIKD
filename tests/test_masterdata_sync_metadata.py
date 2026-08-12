@@ -1,6 +1,7 @@
 """Tests for masterdata sync metadata bump (UI last-sync stamp)."""
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src import masterdata_runtime as mdr
@@ -22,14 +23,15 @@ def test_bump_sync_metadata_updates_file_and_freshness(tmp_path: Path, monkeypat
     assert before["synced_at_utc"] == "2026-08-06T07:26:28Z"
     assert before["status"] == "stale"
 
+    fresh_sync_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     bumped = mdr.bump_sync_metadata(
-        synced_at_utc="2026-08-10T14:30:00Z",
+        synced_at_utc=fresh_sync_at,
         commit="abc12345",
         source="test",
     )
-    assert bumped["synced_at_utc"] == "2026-08-10T14:30:00Z"
+    assert bumped["synced_at_utc"] == fresh_sync_at
 
     after = mdr.sync_freshness()
-    assert after["synced_at_utc"] == "2026-08-10T14:30:00Z"
+    assert after["synced_at_utc"] == fresh_sync_at
     assert after["commit"] == "abc12345"
     assert after["status"] == "fresh"

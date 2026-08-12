@@ -73,7 +73,7 @@ class FakeStore:
     def load_order_review(self, order_id: str):
         return None
 
-    def mark_sftp_delivery(self, order_id: str, ok: bool, detail: str = "") -> None:
+    def mark_sftp_delivery(self, order_id: str, ok: bool, detail: str = "", sent_by: str | None = None) -> None:
         self.delivery_marks.append((order_id, ok, detail))
 
 
