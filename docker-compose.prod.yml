@@ -27,8 +27,13 @@ services:
     container_name: geniecommande-prod-file2edi
     ports:
       - "8090:8000"
+    env_file:
+      - path: .env
+        required: false
+      - path: .env.vm
+        required: false
     environment:
-      MOCK_MODE: "true"
+      MOCK_MODE: "${MOCK_MODE:-false}"
       ENABLE_PROFILE_LOGIN: "${ENABLE_PROFILE_LOGIN:-true}"
       APP_REQUIRE_AUTH: "${APP_REQUIRE_AUTH:-true}"
       APP_ADMIN_USERS: "${APP_ADMIN_USERS:-dik1dy@bosch.com,dik1dy,khadara}"
@@ -56,10 +61,16 @@ services:
       EDIFACT_SCHEMA: ${DATABRICKS_SCHEMA:-file2edi}
       DATABRICKS_WAREHOUSE_ID: ${DATABRICKS_WAREHOUSE_ID:-}
       DATABRICKS_PERSIST_PATH: ${DATABRICKS_PERSIST_PATH:-}
+      SFTP_ENABLED: "${SFTP_ENABLED:-true}"
       SFTP_HOST: ${SFTP_HOST:-}
+      SFTP_PORT: "${SFTP_PORT:-22}"
       SFTP_USERNAME: ${SFTP_USERNAME:-}
       SFTP_PASSWORD: ${SFTP_PASSWORD:-}
-      SFTP_REMOTE_DIR: ${SFTP_REMOTE_DIR:-}
+      SFTP_PRIVATE_KEY_PATH: ${SFTP_PRIVATE_KEY_PATH:-}
+      SFTP_PRIVATE_KEY_PASSPHRASE: ${SFTP_PRIVATE_KEY_PASSPHRASE:-}
+      SFTP_REMOTE_DIR: "${SFTP_REMOTE_DIR:-/}"
+      SFTP_MAX_RETRIES: "${SFTP_MAX_RETRIES:-3}"
+      SAP_RESEND_COOLDOWN_SECONDS: "${SAP_RESEND_COOLDOWN_SECONDS:-300}"
     volumes:
       - geniecommande_prod_file2edi_data:/app/data
       - ./data/masterdata:/app/data/masterdata
