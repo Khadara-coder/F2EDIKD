@@ -72,7 +72,8 @@ python -m uvicorn server:app --host 0.0.0.0 --port 8000
 - **UI :** http://localhost:8000
 - **API :** http://localhost:8000/api/health/system
 
-Pages : Cockpit · Convertir · Revue · Historique · Données maîtres · Paramètres
+Pages : Cockpit · Convertir · Revue · Historique · Données maîtres · Paramètres  
+UI responsive (desktop + mobile) avec sidebar, hamburger menu, dialogs adaptatifs.
 
 ---
 
@@ -178,7 +179,9 @@ GenieCommande/
     file2edi/
       store.py            # Persistance File2EDI (PostgreSQL obligatoire en runtime)
       mapper.py           # Mapping engine → React API contract
-  frontend/               # Interface React + TypeScript + Tailwind
+    masterdata_runtime.py # Cache masterdata + sync metadata
+    masterdata_n8n.py     # Déclenchement webhook n8n pour sync GitHub
+  frontend/               # Interface React + TypeScript + Tailwind (responsive)
     dist/                 # Build React versionné (prêt à servir)
   config/
     extraction.yaml       # Anchors OCR, scoring, keywords
@@ -192,6 +195,8 @@ GenieCommande/
     migrate_add_fields.py # Migration DB Phase 3
     backfill_new_fields.py # Backfill historique Phase 3
     test_random_pdfs.py   # Test extraction sur N PDFs aléatoires
+    browser_smoke.mjs     # Tests navigateur Playwright (responsive)
+    smoke_file2edi_api.py # Smoke API rapide
   databricks/             # Role Databricks: Model Serving + masterdata
 ```
 
@@ -203,7 +208,8 @@ GenieCommande/
 python -m pytest tests/ -v
 ```
 
-La suite couvre extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines.
+La suite couvre extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines, auth profil, logs métier.  
+**371 tests** passent (août 2026).
 
 Smoke API locale (serveur démarré) :
 
@@ -212,6 +218,17 @@ python scripts/smoke_file2edi_api.py
 # Endpoints protégés (optionnel) :
 python scripts/smoke_file2edi_api.py --actor <user> --password <password>
 ```
+
+### Tests navigateur (Playwright)
+
+```powershell
+npm install playwright@1.49.1 --no-save
+npx playwright install chromium
+$env:F2EDI_USER='<user>'; $env:F2EDI_PASSWORD='<password>'
+node scripts/browser_smoke.mjs
+```
+
+Vérifie : page login, routes desktop/mobile, sidebar responsive, hamburger menu.
 
 ```bash
 # Test extraction sur 50 PDFs aléatoires (RAG Purchase Orders)
@@ -296,6 +313,20 @@ docker compose exec api python scripts/migrate_add_fields.py
 # Backfill lignes existantes
 docker compose exec api python scripts/backfill_new_fields.py
 ```
+
+---
+
+## Logs métier (Business Events)
+
+L'application trace toutes les actions utilisateur dans `file2edi_business_events` :
+- `auth.login`, `auth.logout`
+- `order.patch_header`, `order.patch_partner`, `order.patch_line`
+- `order.generate_edifact`, `order.send_sftp`
+- `masterdata.sync`, `settings.update`
+
+Chaque événement capture acteur, action, résultat, durée, et les valeurs `from`/`to` des champs modifiés.
+
+Visible dans l'onglet **Paramètres → Logs → Métier**.
 
 ---
 
