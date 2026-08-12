@@ -328,7 +328,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
 
     trace_steps = [
         {"id": "1", "label": "PDF reçu", "status": "completed", "timestamp": _now()},
-        {"id": "2", "label": "Extraction OCR", "status": "completed"},
+        {"id": "2", "label": "Extraction OCR" + (" (fallback IA)" if result.get("salvage") else ""), "status": "completed"},
         {"id": "3", "label": "Mapping client", "status": "completed"},
         {"id": "4", "label": "Contrôles métier", "status": "completed"},
         {"id": "5", "label": "Revue manuelle", "status": "current" if status in ("Revue requise", "À revoir") else "completed"},

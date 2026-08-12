@@ -44,6 +44,22 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "message_fr": "Le PDF n'a pas pu être lu ou analysé correctement.",
         "message_en": "The PDF could not be read or parsed correctly.",
     },
+    "EXTRACTION_LLM_SALVAGE": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": False,
+        "manual_review_required": True,
+        "message_fr": "Extraction déterministe en échec — données récupérées par fallback IA (revue obligatoire).",
+        "message_en": "Deterministic extraction failed — data recovered via AI fallback (manual review required).",
+    },
+    "PARTNER_UNRESOLVED": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": False,
+        "manual_review_required": True,
+        "message_fr": "Sold-to / Ship-to non validés automatiquement — saisie manuelle requise.",
+        "message_en": "Sold-to / Ship-to could not be auto-validated — manual entry required.",
+    },
     "NOT_A_PDF": {
         "severity": "BLOCKER",
         "business_status": "REJECTED",
@@ -388,6 +404,8 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
 # Action text shown in rejection emails (French)
 REJECTION_ACTION_TEXT: dict[str, str] = {
     "PDF_PARSE_FAILURE": "Merci de vérifier la lisibilité du PDF ou de déposer un PDF non scanné si disponible.",
+    "EXTRACTION_LLM_SALVAGE": "Vérifiez les données extraites par l'IA (lignes, client, adresse) avant validation.",
+    "PARTNER_UNRESOLVED": "Merci de sélectionner manuellement le sold-to et le ship-to dans la revue.",
     "NOT_A_PDF": "Merci de déposer un fichier PDF valide.",
     "ORDER_KEY_MISSING": "Merci de renseigner le numéro de commande client.",
     "ORDER_DATE_INVALID": "Merci de corriger la date de commande (format JJ/MM/AAAA).",
@@ -511,6 +529,20 @@ REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
         "button_reject": "Rejeter le fichier",
         "auto_action_accept": "Relancer l'extraction OCR",
         "auto_action_reject": "Clôturer la commande comme rejetée",
+        "mode": "Manuel",
+    },
+    "EXTRACTION_LLM_SALVAGE": {
+        "button_accept": "Données IA validées",
+        "button_reject": "Données IA incorrectes",
+        "auto_action_accept": "Continuer la revue avec les données pré-remplies",
+        "auto_action_reject": "Rejeter et re-saisir manuellement",
+        "mode": "Manuel",
+    },
+    "PARTNER_UNRESOLVED": {
+        "button_accept": "Partners sélectionnés",
+        "button_reject": "Partners introuvables",
+        "auto_action_accept": "Continuer avec les partners choisis",
+        "auto_action_reject": "Clôturer faute de partners",
         "mode": "Manuel",
     },
     "NOT_A_PDF": {

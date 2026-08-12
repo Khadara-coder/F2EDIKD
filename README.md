@@ -334,7 +334,7 @@ Visible dans l'onglet **Paramètres → Logs → Métier**.
 
 | Doc | Contenu |
 |-----|---------|
-| [docs/FILE2EDI_DEPLOYMENT.md](docs/FILE2EDI_DEPLOYMENT.md) | Build, Docker, VM Azure |
+| [docs/EXTRACTION_PIPELINE.md](docs/EXTRACTION_PIPELINE.md) | Schéma complet extraction PDF → revue → EDIFACT |
 | [docs/RUN_ME.md](docs/RUN_ME.md) | Référence CLI moteur batch |
 | [docs/N8N_API_INTEGRATION.md](docs/N8N_API_INTEGRATION.md) | Runbook VM Azure + n8n |
 | [docs/SFTP_DELIVERY.md](docs/SFTP_DELIVERY.md) | Livraison SFTP détaillée |

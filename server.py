@@ -1127,6 +1127,7 @@ def _local_process_and_respond(payload: bytes, filename: str, actor: str | None 
         return r
 
     t0 = _t.time()
+    partial_text = ""
     try:
         from app.pdf_reader import pdf_pages_to_text
         from app.ocr import ocr_image_with_layout
@@ -1155,6 +1156,7 @@ def _local_process_and_respond(payload: bytes, filename: str, actor: str | None 
 
         # Concaténer tout le texte pour l'extraction des lignes
         text   = "\n".join(p["text"] for p in all_pages if p.get("text"))
+        partial_text = text
         layout = pages_p1[0].get("layout")  # layout de la page 1 pour l'entête
         fields = extract_candidate_fields(text, "", filename, layout, {})
         structured = fields.get("structured", {})
@@ -1162,25 +1164,49 @@ def _local_process_and_respond(payload: bytes, filename: str, actor: str | None 
     except Exception as exc:
         log.exception("_local_process_and_respond failed for %s", filename)
         elapsed = round(_t.time() - t0, 1)
-        response = {
-            "status": "ERROR", "filename": filename, "pdf_hash": pdf_hash,
-            "cached": False, "processing_time_s": elapsed,
-            "order":   {"po_number": None, "order_date": None, "delivery_date": None},
-            "customer": {
-                "soldto": None, "shipto": None, "name": None, "confidence": 0,
-                "delivery_address": {"street": "", "postal_code": "", "city": "", "country": ""},
-                "detected_address": {"name": "", "street": "", "postal_code": "", "city": "", "raw": ""},
-            },
-            "lines":     {"count": 0, "items": []},
-            "rejection": {
-                "decision": "REJECTED", "reason": "PDF_PARSE_FAILURE",
-                "blocking_count": 1, "warning_count": 0,
-                "details": [{"code": "PDF_PARSE_FAILURE", "message": str(exc),
-                              "severity": "blocking", "details": {}}],
-            },
-            "edifact":   {"generated": False, "message": None, "warnings": [], "errors": None},
-            "error": str(exc),
-        }
+        salvaged = None
+        try:
+            from app.llm_salvage import salvage_with_llm
+
+            salvaged = salvage_with_llm(
+                payload,
+                filename,
+                partial_text=partial_text,
+                original_error=str(exc),
+                elapsed_s=elapsed,
+                pdf_hash=pdf_hash,
+            )
+        except Exception as salvage_exc:
+            log.debug("LLM salvage unavailable for %s: %s", filename, salvage_exc)
+
+        if salvaged:
+            log.info(
+                "LLM salvage succeeded for %s (recovery=%s, lines=%s)",
+                filename,
+                salvaged.get("salvage_recovery_method"),
+                (salvaged.get("lines") or {}).get("count", 0),
+            )
+            response = salvaged
+        else:
+            response = {
+                "status": "ERROR", "filename": filename, "pdf_hash": pdf_hash,
+                "cached": False, "processing_time_s": elapsed,
+                "order":   {"po_number": None, "order_date": None, "delivery_date": None},
+                "customer": {
+                    "soldto": None, "shipto": None, "name": None, "confidence": 0,
+                    "delivery_address": {"street": "", "postal_code": "", "city": "", "country": ""},
+                    "detected_address": {"name": "", "street": "", "postal_code": "", "city": "", "raw": ""},
+                },
+                "lines":     {"count": 0, "items": []},
+                "rejection": {
+                    "decision": "REJECTED", "reason": "PDF_PARSE_FAILURE",
+                    "blocking_count": 1, "warning_count": 0,
+                    "details": [{"code": "PDF_PARSE_FAILURE", "message": str(exc),
+                                  "severity": "blocking", "details": {}}],
+                },
+                "edifact":   {"generated": False, "message": None, "warnings": [], "errors": None},
+                "error": str(exc),
+            }
 
     if response["status"] == "OK":
         _f2edi_cache.put(pdf_hash, response.copy())
