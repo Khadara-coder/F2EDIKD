@@ -7,13 +7,13 @@ services:
     environment:
       POSTGRES_USER: edifact
       POSTGRES_PASSWORD: edifact_dev_password
-      POSTGRES_DB: edifact
+      POSTGRES_DB: edifact_quality
     ports:
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - edifact_postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U edifact -d edifact"]
+      test: ["CMD-SHELL", "pg_isready -U edifact -d edifact_quality"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -54,7 +54,7 @@ services:
       OUTBOX_DIR: /app/data/outbox
       LOG_DIR: /app/data/logs
       INTAKE_DIR: /app/data/intake
-      PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact"
+      PG_DATABASE_URL: "postgresql+psycopg://edifact:edifact_dev_password@postgres:5432/edifact_quality"
       FILE2EDI_POSTGRES_STRICT: "true"
       # Databricks (production - set in .env)
       DATABRICKS_SERVER_HOSTNAME: ${DATABRICKS_SERVER_HOSTNAME:-}
