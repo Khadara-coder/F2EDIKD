@@ -386,7 +386,9 @@ export function RevuePage() {
   const sendSapLabel = !isSentToSap
     ? "Envoyer vers SAP"
     : !isAdmin
-      ? "Envoyé vers SAP"
+      ? cooldownActive
+        ? `Envoyé vers SAP (${formatCooldownMmSs(cooldownRemaining)})`
+        : "Envoyé vers SAP"
       : cooldownActive
         ? `Renvoyer (${formatCooldownMmSs(cooldownRemaining)})`
         : "Renvoyer vers SAP";
@@ -500,7 +502,9 @@ export function RevuePage() {
         )}
         {cooldownActive && !isConfirmedSap && (
           <Badge variant="outline" className="border-amber-200 bg-amber-50 text-amber-800">
-            Renvoi possible dans {formatCooldownMmSs(cooldownRemaining)}
+            {isAdmin
+              ? `Renvoi possible dans ${formatCooldownMmSs(cooldownRemaining)}`
+              : `Délai d'attente : ${formatCooldownMmSs(cooldownRemaining)}`}
           </Badge>
         )}
       </div>
