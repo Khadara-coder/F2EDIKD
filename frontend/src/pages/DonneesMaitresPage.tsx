@@ -12,7 +12,14 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { useDisplayTimeZone, useMasterData } from "@/hooks/useFile2Edi";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { api } from "@/lib/api";
+import {
+  detectMasterDataKindFromFilename,
+  masterDataKindLabel,
+  MASTERDATA_ACCEPT,
+  MASTERDATA_FILENAME_HINT,
+} from "@/lib/masterdataFiles";
 import { Header } from "@/components/layout/Header";
 import { StatCard } from "@/components/file2edi/StatCard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -89,12 +96,17 @@ export function DonneesMaitresPage() {
   const [page, setPage] = useState(1);
   const [syncMessage, setSyncMessage] = useState<string | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
+  const [bulkFiles, setBulkFiles] = useState<File[]>([]);
   const [addOpen, setAddOpen] = useState(false);
   const [addFields, setAddFields] = useState<Record<string, string>>({});
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bulkFileInputRef = useRef<HTMLInputElement>(null);
   const queryClient = useQueryClient();
   const displayTimeZone = useDisplayTimeZone();
+  const meQuery = useCurrentUser();
+  const isAdmin = meQuery.data?.role === "admin";
   const pageSize = 8;
   const { data, refetch, isFetching } = useMasterData(tab, search);
 
@@ -190,6 +202,19 @@ export function DonneesMaitresPage() {
     },
   });
 
+  const bulkImportMutation = useMutation({
+    mutationFn: (files: File[]) => api.importMasterDataBatch(files),
+    onSuccess: (res) => {
+      setActionMessage(res.message || "Import terminé");
+      setBulkImportOpen(false);
+      setBulkFiles([]);
+      invalidateMasterData();
+    },
+    onError: (err) => {
+      setActionMessage(err instanceof Error ? err.message : "Échec de l'import");
+    },
+  });
+
   const addMutation = useMutation({
     mutationFn: () => api.addMasterDataRow(tab === "shipto" ? "shipto" : tab, addFields),
     onSuccess: (res) => {
@@ -254,12 +279,27 @@ export function DonneesMaitresPage() {
           </div>
           <div className="flex flex-col items-stretch gap-1 sm:items-end">
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" className="gap-2" onClick={openImport}>
-                <Upload className="h-4 w-4" /> Importer CSV
-              </Button>
-              <Button size="sm" className="gap-2" onClick={openAdd}>
-                <Plus className="h-4 w-4" /> Ajouter
-              </Button>
+              {isAdmin && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-2"
+                    onClick={() => {
+                      setBulkFiles([]);
+                      setBulkImportOpen(true);
+                    }}
+                  >
+                    <Upload className="h-4 w-4" /> Dépôt multi-fichiers
+                  </Button>
+                  <Button variant="outline" size="sm" className="gap-2" onClick={openImport}>
+                    <Upload className="h-4 w-4" /> Importer (onglet)
+                  </Button>
+                  <Button size="sm" className="gap-2" onClick={openAdd}>
+                    <Plus className="h-4 w-4" /> Ajouter
+                  </Button>
+                </>
+              )}
               <Button
                 variant="outline"
                 size="sm"
@@ -275,7 +315,7 @@ export function DonneesMaitresPage() {
             {(syncMessage || actionMessage) && (
               <p
                 className={`max-w-lg text-right text-xs ${
-                  syncMutation.isError || addMutation.isError || importMutation.isError
+                  syncMutation.isError || addMutation.isError || importMutation.isError || bulkImportMutation.isError
                     ? "text-red-600"
                     : "text-muted-foreground"
                 }`}
@@ -671,18 +711,18 @@ export function DonneesMaitresPage() {
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Importer un CSV</DialogTitle>
+            <DialogTitle>Importer CSV / Parquet</DialogTitle>
           </DialogHeader>
           <p className="text-sm text-muted-foreground mb-4">
             Remplace le fichier runtime pour l’onglet courant (
             {tab === "clients" ? "Clients" : tab === "shipto" ? "Ship-to" : "Articles"}
-            ). Séparateur <code>;</code>, colonnes attendues selon le schéma masterdata.
-            Une synchronisation Git ultérieure pourra écraser cet import.
+            ). Formats acceptés : CSV (<code>;</code>) ou Parquet. Une synchronisation n8n ultérieure
+            écrasera cet import.
           </p>
           <input
             ref={fileInputRef}
             type="file"
-            accept=".csv,.parquet,text/csv,application/vnd.apache.parquet"
+            accept={MASTERDATA_ACCEPT}
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0];
@@ -700,6 +740,70 @@ export function DonneesMaitresPage() {
               onClick={() => fileInputRef.current?.click()}
             >
               {importMutation.isPending ? "Import…" : "Choisir un fichier"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={bulkImportOpen}
+        onOpenChange={(open) => {
+          setBulkImportOpen(open);
+          if (!open) setBulkFiles([]);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Dépôt masterdata (admin)</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Déposez un ou plusieurs fichiers Bosch reconnus automatiquement :{" "}
+            <span className="font-mono text-xs">{MASTERDATA_FILENAME_HINT}</span>.
+            Le cache applicatif est rechargé après import.
+          </p>
+          <input
+            ref={bulkFileInputRef}
+            type="file"
+            multiple
+            accept={MASTERDATA_ACCEPT}
+            className="hidden"
+            onChange={(e) => {
+              const picked = Array.from(e.target.files ?? []);
+              if (picked.length) setBulkFiles(picked);
+              e.target.value = "";
+            }}
+          />
+          {bulkFiles.length > 0 && (
+            <ul className="max-h-48 space-y-2 overflow-y-auto rounded-md border p-3 text-sm">
+              {bulkFiles.map((file) => {
+                const kind = detectMasterDataKindFromFilename(file.name);
+                return (
+                  <li key={`${file.name}-${file.size}`} className="flex items-center justify-between gap-2">
+                    <span className="truncate font-mono text-xs">{file.name}</span>
+                    <Badge variant={kind ? "secondary" : "destructive"}>
+                      {masterDataKindLabel(kind)}
+                    </Badge>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          <div className="flex flex-wrap justify-end gap-2">
+            <Button variant="outline" onClick={() => setBulkImportOpen(false)}>
+              Annuler
+            </Button>
+            <Button variant="outline" onClick={() => bulkFileInputRef.current?.click()}>
+              Choisir des fichiers
+            </Button>
+            <Button
+              disabled={
+                bulkImportMutation.isPending
+                || bulkFiles.length === 0
+                || bulkFiles.some((f) => !detectMasterDataKindFromFilename(f.name))
+              }
+              onClick={() => bulkImportMutation.mutate(bulkFiles)}
+            >
+              {bulkImportMutation.isPending ? "Import…" : `Importer ${bulkFiles.length || ""} fichier(s)`}
             </Button>
           </div>
         </DialogContent>

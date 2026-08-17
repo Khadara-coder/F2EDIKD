@@ -135,15 +135,8 @@ Repo source quotidien (job sync prod) : `https://github.boschdevcloud.com/RSR1DY
 | `DB_Materials.csv` | Index matières (MATNR;MAKTX + colonnes Statut si présentes) |
 | `DB_Salesorder.csv` | Référence historique (comparaison uniquement) |
 
-Sync quotidienne en production :
-
-```bash
-python scripts/sync_masterdata_repo.py \
-  --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
-  --branch main \
-  --target-dir /Volumes/hcdap_prod/silver_hcfrdashlog/f2edi/masterdata/ \
-  --notify-api-url https://file2edi-5555213114570927.7.azure.databricksapps.com/api/masterdata/sync
-```
+Sync quotidienne en production : webhook n8n (bouton Synchroniser ou cron n8n).
+Mise à jour manuelle : import CSV/Parquet par un administrateur dans Données maîtres.
 
 ---
 

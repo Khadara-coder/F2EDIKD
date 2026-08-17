@@ -14,17 +14,15 @@ import json
 import logging
 import os
 import re
-import shutil
 from datetime import datetime as _datetime
 import sys
 import tempfile
-import urllib.parse
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -535,6 +533,16 @@ def _ensure_admin(req: Request | None = None, payload: dict | None = None) -> tu
     return actor, role
 
 
+def _ensure_masterdata_importer(req: Request | None = None, payload: dict | None = None) -> tuple[str, str]:
+    """Admin UI deposit, or trusted API key (n8n workflow). ADV sessions are rejected."""
+    actor, role = _ensure_can_mutate(req, payload)
+    if role == "admin":
+        return actor, role
+    if _api_key_authenticated(req):
+        return actor, role
+    raise HTTPException(status_code=403, detail="Accès réservé aux administrateurs")
+
+
 # ── FILE2EDI engine conversion ─────────────────────────────────────────────────
 def _file2edi_convert(pdf_path: Path) -> dict:
     """Primary: FILE2EDI FullCodeEngine + app/edifact_generator.build_orders_d96a."""
@@ -642,103 +650,6 @@ def _apply_masterdata_sync_metadata_to_cache_state() -> None:
 
 def _masterdata_stats() -> dict:
     return _mdr.stats()
-
-
-def _download_workspace_file(ws_path: str, dst_path: Path) -> None:
-    """Download a single workspace file via the Databricks REST API.
-
-    Inside legacy Databricks-hosted containers the /Workspace FUSE mount is not
-    available, so we fall back to the HTTP export endpoint which works
-    on every platform as long as the app SP has CAN_READ on the file.
-
-    Uses ``direct_download=true`` to stream raw bytes - no base64, no
-    10 MB limit.
-    """
-    import requests as _req
-
-    host = _runtime_databricks_config()["host"].rstrip("/")
-    if not host.startswith("http"):
-        host = f"https://{host}"
-    encoded = urllib.parse.quote(ws_path, safe="")
-    url = (f"{host}/api/2.0/workspace/export"
-           f"?path={encoded}&format=AUTO&direct_download=true")
-    headers = {k: v for k, v in _auth_headers().items()
-               if not k.startswith("_")}  # drop error keys
-    resp = _req.get(url, headers=headers, timeout=120, stream=True)
-    resp.raise_for_status()
-    dst_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(dst_path, "wb") as fh:
-        for chunk in resp.iter_content(chunk_size=65_536):
-            fh.write(chunk)
-
-
-def _sync_masterdata() -> list[list]:
-    """Copy master data CSVs from source to runtime directory.
-
-    Two modes:
-    - Filesystem copy: local path, /Workspace mounted path, or /Volumes UC path → shutil.copy2
-    - Databricks Workspace API export fallback: only for /Workspace/* when FUSE is not mounted
-    """
-    rows = []
-    src = Path(MASTER_DATA_SRC)
-    dst = Path(MASTER_DATA_RUNTIME)
-    dst.mkdir(parents=True, exist_ok=True)
-
-    first_source_file = src / _MASTER_FILES[0]
-    src_str = MASTER_DATA_SRC.strip()
-    is_workspace_path = src_str.startswith("/Workspace/")
-
-    # Use Workspace export API only for /Workspace paths when FUSE is unavailable.
-    # UC Volumes (/Volumes/...) must be accessed as regular filesystem paths.
-    use_api = is_workspace_path and not first_source_file.exists()
-    log.info("masterdata sync: mode=%s src=%s dst=%s",
-             "api" if use_api else "fs", src, dst)
-
-    for fname in _MASTER_FILES:
-        df = dst / fname
-        try:
-            if use_api:
-                ws_path = f"{MASTER_DATA_SRC.rstrip('/')}/{fname}"
-                _download_workspace_file(ws_path, df)
-            else:
-                shutil.copy2(str(src / fname), str(df))
-
-            with open(df, encoding="utf-8-sig", errors="replace") as fh:
-                n = sum(1 for _ in fh) - 1
-            h = hashlib.sha256(df.read_bytes()).hexdigest()[:10]
-            rows.append([fname, f"{max(0, n)} lignes", f"sha={h}", "OK"])
-        except Exception as exc:
-            exc_str = str(exc).lower()
-            if "404" in exc_str or "not found" in exc_str:
-                err_cat = "source introuvable (404)"
-            elif "403" in exc_str or "forbidden" in exc_str:
-                err_cat = "permission insuffisante (403)"
-            elif "401" in exc_str or "unauthorized" in exc_str:
-                err_cat = "non authentifié (401)"
-            else:
-                err_cat = str(exc)[:150]
-            log.warning("masterdata sync failed for %s: %s", fname, exc)
-            rows.append([fname, "-", "-", f"ERROR: {err_cat}"])
-
-    metadata_src = Path(MASTER_DATA_SRC) / MASTERDATA_SYNC_METADATA_FILENAME
-    metadata_dst = Path(MASTERDATA_SYNC_METADATA_PATH)
-    try:
-        if metadata_src.exists():
-            metadata_dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(str(metadata_src), str(metadata_dst))
-    except Exception as exc:
-        log.warning("masterdata metadata copy failed (%s -> %s): %s", metadata_src, metadata_dst, exc)
-
-    # Invalidate in-memory masterdata cache so next PDF uses fresh data
-    try:
-        import app.masterdata as _md
-        _md.master_data_cache = None
-        _md.master_data_cache_fingerprint = None
-    except Exception:
-        pass
-
-    return rows
-
 
 
 # ── SFTP helper ────────────────────────────────────────────────────────────────
@@ -1490,17 +1401,10 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
     return result
 
 
-# ── Startup: auto-sync master data ───────────────────────────────────────────
+# ── Startup: load master data already on disk ────────────────────────────────
 @app.on_event("startup")
 async def _startup_sync_masterdata() -> None:
-    """Ensure master data CSVs are available at boot, then init persistence + File2EDI schema.
-
-    Masterdata strategy (in order):
-    1. If all files already present in the runtime dir (bundled with snapshot) → use them.
-    2. Otherwise, attempt API download from MASTER_DATA_SRC.
-    Persistence: PostgreSQL (PG_DATABASE_URL) with optional Delta / Workspace JSONL.
-    Non-blocking: failures are logged but never prevent the app from starting.
-    """
+    """Load runtime masterdata from disk. Updates come from n8n or admin import only."""
     # ── File2EDI PostgreSQL schema ────────────────────────────────────────
     try:
         from src.file2edi.store import get_store
@@ -1540,55 +1444,21 @@ async def _startup_sync_masterdata() -> None:
             total = sum((dst / f).stat().st_size for f in _MASTER_FILES)
             _apply_masterdata_sync_metadata_to_cache_state()
             _load_masterdata_cache()
-            log.info("startup masterdata: all %d files already present (%.1f MB bundled) - skipping API sync",
-                     len(_MASTER_FILES), total / 1_048_576)
-        else:
-            # Files missing - try API download
-            rows = _sync_masterdata()
-            _apply_masterdata_sync_metadata_to_cache_state()
-            _load_masterdata_cache()   # warm up cache after download
-            ok  = sum(1 for r in rows if r[-1] == "OK")
-            log.info("startup masterdata sync: %d/%d files OK", ok, len(rows))
-            for r in rows:
-                log.info("  %s → %s", r[0], r[-1])
-    except Exception as exc:
-        log.warning("startup masterdata sync failed (non-fatal): %s", exc)
-
-    # ── Masterdata automatic repo sync (optional) ─────────────────────────
-    try:
-        from src.masterdata_autosync import auto_sync_enabled, auto_sync_interval_hours
-
-        if auto_sync_enabled():
-            import asyncio
-
-            async def _masterdata_autosync_loop() -> None:
-                from src.masterdata_autosync import run_repo_sync
-
-                interval_h = auto_sync_interval_hours()
-                # Short initial delay so boot completes first.
-                await asyncio.sleep(20)
-                while True:
-                    try:
-                        await asyncio.to_thread(
-                            run_repo_sync,
-                            target_dir=MASTER_DATA_RUNTIME,
-                            notify_api_url="",  # already in-process: reload below
-                        )
-                        _apply_masterdata_sync_metadata_to_cache_state()
-                        _load_masterdata_cache()
-                    except Exception as sync_exc:
-                        log.warning("masterdata autosync loop error: %s", sync_exc)
-                    await asyncio.sleep(interval_h * 3600)
-
-            asyncio.create_task(_masterdata_autosync_loop())
             log.info(
-                "startup masterdata: AUTO_SYNC enabled (every %.1fh from repo)",
-                auto_sync_interval_hours(),
+                "startup masterdata: all %d files present (%.1f MB) - cache loaded",
+                len(_MASTER_FILES),
+                total / 1_048_576,
             )
         else:
-            log.info("startup masterdata: AUTO_SYNC disabled (set MASTERDATA_AUTO_SYNC=true to enable)")
+            missing = [f for f in _MASTER_FILES if not (dst / f).exists()]
+            log.warning(
+                "startup masterdata: missing files %s - import CSV/Parquet or run n8n Synchroniser",
+                missing,
+            )
+            _apply_masterdata_sync_metadata_to_cache_state()
+            _load_masterdata_cache()
     except Exception as exc:
-        log.warning("startup masterdata autosync wiring failed: %s", exc)
+        log.warning("startup masterdata load failed (non-fatal): %s", exc)
 
     # ── Persistence backend (always runs - no early return above) ─────────
     try:
@@ -1874,13 +1744,10 @@ def api_md_stats():
 
 
 @app.post("/api/masterdata/sync")
-def api_md_sync(req: Request, from_repo: bool = Query(False)):
-    """Sync masterdata into runtime cache.
+def api_md_sync(req: Request):
+    """Trigger the admin-configured n8n webhook (GitHub → import → reload-cache).
 
-    Preferred path: trigger the admin-configured n8n webhook (GitHub -> files -> reload-cache).
-    Fallbacks:
-      - from_repo=true: in-process Git pull (legacy)
-      - default: copy from MASTERDATA_SOURCE_DIR
+    The only other update path is POST /api/masterdata/import (admin file deposit).
     """
     import datetime as _dt
 
@@ -1892,243 +1759,80 @@ def api_md_sync(req: Request, from_repo: bool = Query(False)):
     except Exception:
         n8n_cfg = {}
 
-    if n8n_cfg.get("enabled") and str(n8n_cfg.get("webhookUrl") or "").strip() and not from_repo:
-        from src.masterdata_n8n import trigger_masterdata_sync_workflow
+    if not (n8n_cfg.get("enabled") and str(n8n_cfg.get("webhookUrl") or "").strip()):
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Sync n8n non configurée. Activez le webhook dans Paramètres, "
+                "ou importez un CSV/Parquet depuis Données maîtres."
+            ),
+        )
 
+    from src.masterdata_n8n import trigger_masterdata_sync_workflow
+
+    actor = "operator"
+    try:
+        actor = _resolve_actor(req) or "operator"
+    except Exception:
         actor = "operator"
-        try:
-            actor = _resolve_actor(req) or "operator"
-        except Exception:
-            actor = "operator"
 
+    save_audit_event(
+        "__masterdata__",
+        "masterdata_sync_attempted",
+        actor,
+        {"source": "n8n_webhook", "manual": True, "webhookUrl": n8n_cfg.get("webhookUrl")},
+    )
+    try:
+        n8n_payload = trigger_masterdata_sync_workflow(
+            n8n_cfg,
+            actor=actor,
+            reason="manual_ui",
+        )
+    except Exception as exc:
+        err = str(exc)[:400]
+        log.warning("masterdata sync (n8n) failed: %s", err)
         save_audit_event(
             "__masterdata__",
-            "masterdata_sync_attempted",
+            "masterdata_sync_failed",
             actor,
-            {"source": "n8n_webhook", "manual": True, "webhookUrl": n8n_cfg.get("webhookUrl")},
+            {"source": "n8n_webhook", "error": err},
         )
-        try:
-            n8n_payload = trigger_masterdata_sync_workflow(
-                n8n_cfg,
-                actor=actor,
-                reason="manual_ui",
-            )
-        except Exception as exc:
-            err = str(exc)[:400]
-            log.warning("masterdata sync (n8n) failed: %s", err)
-            save_audit_event(
-                "__masterdata__",
-                "masterdata_sync_failed",
-                actor,
-                {"source": "n8n_webhook", "error": err},
-            )
-            # Fallback Git / reload so "Dernière synchronisation" still advances.
-            repo_payload = None
-            repo_error = None
-            try:
-                from src.masterdata_autosync import run_repo_sync
+        raise HTTPException(status_code=502, detail=f"Échec déclenchement n8n: {err}") from exc
 
-                repo_payload = run_repo_sync(
-                    target_dir=MASTER_DATA_RUNTIME,
-                    notify_api_url="",
-                )
-            except Exception as repo_exc:
-                repo_error = str(repo_exc)[:300]
-                log.warning("masterdata sync git fallback after n8n failure: %s", repo_error)
-
-            now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            if repo_payload is not None:
-                _mdr.bump_sync_metadata(
-                    synced_at_utc=str(repo_payload.get("synced_at_utc") or now_iso),
-                    commit=str(repo_payload.get("commit") or "") or None,
-                    source="api_sync_n8n_fallback_git",
-                    files=repo_payload.get("files") if isinstance(repo_payload.get("files"), dict) else None,
-                    repo_url=str(repo_payload.get("repo_url") or "") or None,
-                    branch=str(repo_payload.get("branch") or "") or None,
-                )
-            else:
-                _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_n8n_fallback_reload")
-            for key in _MD_FILES:
-                _MD_LAST_SYNC[key] = now_iso
-            _apply_masterdata_sync_metadata_to_cache_state()
-            _load_masterdata_cache()
-            return {
-                "synced": len(repo_payload.get("files") or {}) if isinstance(repo_payload, dict) else 0,
-                "failed": 0 if repo_payload is not None else 1,
-                "files": [],
-                "cache_reloaded": True,
-                "source": "git" if repo_payload is not None else "n8n",
-                "fallback": True,
-                "sync": _masterdata_sync_freshness(),
-                "message": (
-                    f"Échec n8n - sync git OK (commit {str((repo_payload or {}).get('commit') or '')[:12]})"
-                    if repo_payload is not None
-                    else f"Échec déclenchement n8n - cache local rechargé ({err}"
-                    + (f" ; git: {repo_error}" if repo_error else "")
-                    + ")"
-                ),
-            }
-
-        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        is_async = bool(isinstance(n8n_payload, dict) and n8n_payload.get("async"))
-        for key in _MD_FILES:
-            _MD_LAST_SYNC[key] = now_iso
-        _mdr.bump_sync_metadata(
-            synced_at_utc=now_iso,
-            source="api_sync_n8n_trigger_async" if is_async else "api_sync_n8n_trigger",
-        )
-        _apply_masterdata_sync_metadata_to_cache_state()
-        # When async, n8n will POST import + reload-cache; avoid reloading stale files now.
-        if not is_async:
-            _load_masterdata_cache()
-        save_audit_event(
-            "__masterdata__",
-            "masterdata_sync_succeeded",
-            actor,
-            {"source": "n8n_webhook", "result": n8n_payload, "async": is_async},
-        )
-        message = ""
-        if isinstance(n8n_payload, dict):
-            message = str(n8n_payload.get("message") or n8n_payload.get("status") or "")
-        return {
-            "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
-            "failed": 0,
-            "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
-            "cache_reloaded": not is_async,
-            "source": "n8n",
-            "async": is_async,
-            "n8n": n8n_payload,
-            "sync": _masterdata_sync_freshness(),
-            "message": message
-            or (
-                "Workflow n8n déclenché - mise à jour en cours"
-                if is_async
-                else "Workflow n8n masterdata déclenché et terminé"
-            ),
-        }
-
-    if from_repo:
-        from src.masterdata_autosync import run_repo_sync
-
-        save_audit_event(
-            "__masterdata__",
-            "masterdata_sync_attempted",
-            "system",
-            {"source": "git_repo", "manual": True},
-        )
-        repo_payload: dict | None = None
-        repo_error: str | None = None
-        try:
-            repo_payload = run_repo_sync(
-                target_dir=MASTER_DATA_RUNTIME,
-                notify_api_url="",
-            )
-        except Exception as exc:
-            repo_error = str(exc)[:300]
-            log.warning("masterdata sync (repo) failed, fallback to cache reload: %s", repo_error)
-
-        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        for key in _MD_FILES:
-            _MD_LAST_SYNC[key] = now_iso
-        if repo_payload is not None:
-            _mdr.bump_sync_metadata(
-                synced_at_utc=str(repo_payload.get("synced_at_utc") or now_iso),
-                commit=str(repo_payload.get("commit") or "") or None,
-                source="api_sync_git",
-                files=repo_payload.get("files") if isinstance(repo_payload.get("files"), dict) else None,
-                repo_url=str(repo_payload.get("repo_url") or "") or None,
-                branch=str(repo_payload.get("branch") or "") or None,
-            )
-        else:
-            _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_git_reload_fallback")
-        _apply_masterdata_sync_metadata_to_cache_state()
+    now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    is_async = bool(isinstance(n8n_payload, dict) and n8n_payload.get("async"))
+    for key in _MD_FILES:
+        _MD_LAST_SYNC[key] = now_iso
+    _mdr.bump_sync_metadata(
+        synced_at_utc=now_iso,
+        source="api_sync_n8n_trigger_async" if is_async else "api_sync_n8n_trigger",
+    )
+    _apply_masterdata_sync_metadata_to_cache_state()
+    if not is_async:
         _load_masterdata_cache()
-        md_sync = _masterdata_sync_freshness()
-
-        if repo_payload is not None:
-            save_audit_event(
-                "__masterdata__",
-                "masterdata_sync_succeeded",
-                "system",
-                {"source": "git_repo", "commit": repo_payload.get("commit")},
-            )
-            commit = repo_payload.get("commit") or "?"
-            files = repo_payload.get("files") or {}
-            log.info("masterdata sync (repo) succeeded: commit=%s files=%s", commit, list(files.keys()))
-            return {
-                "synced": len(files) if isinstance(files, dict) else 0,
-                "failed": 0,
-                "files": [
-                    {
-                        "file": name,
-                        "status": "OK",
-                        "detail": f"{info.get('rows', '?')} lignes" if isinstance(info, dict) else "",
-                    }
-                    for name, info in (files.items() if isinstance(files, dict) else [])
-                ],
-                "cache_reloaded": True,
-                "from_repo": True,
-                "source": "git",
-                "commit": commit,
-                "repo": repo_payload,
-                "sync": md_sync,
-                "message": f"Synchronisation repo OK (commit {str(commit)[:12]})",
-            }
-
-        save_audit_event(
-            "__masterdata__",
-            "masterdata_sync_succeeded",
-            "system",
-            {"source": "runtime_reload_fallback", "error": repo_error},
-        )
-        return {
-            "synced": 0,
-            "failed": 0,
-            "files": [],
-            "cache_reloaded": True,
-            "from_repo": True,
-            "source": "git",
-            "fallback": True,
-            "sync": md_sync,
-            "message": (
-                "Cache masterdata rechargé depuis les fichiers locaux"
-                + (f" (sync git indisponible: {repo_error})" if repo_error else "")
-            ),
-        }
-
-    save_audit_event("__masterdata__", "masterdata_sync_attempted", "system",
-                     {"source": MASTER_DATA_SRC})
-    rows = _sync_masterdata()
-    ok_files  = [r[0] for r in rows if len(r) >= 4 and r[3] == "OK"]
-    err_files = [r[0] for r in rows if len(r) >= 4 and r[3] != "OK"]
-    if ok_files:
-        now_iso = _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        for key, fname in _MD_FILES.items():
-            if fname in ok_files:
-                _MD_LAST_SYNC[key] = now_iso
-        _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="api_sync_local_copy")
-        _apply_masterdata_sync_metadata_to_cache_state()
-        _load_masterdata_cache()
-        save_audit_event("__masterdata__", "masterdata_sync_succeeded", "system",
-                         {"ok": ok_files, "errors": err_files})
-        log.info("masterdata sync succeeded: %d/%d files", len(ok_files), len(rows))
-    else:
-        save_audit_event("__masterdata__", "masterdata_sync_failed", "system",
-                         {"errors": [r[3] for r in rows if len(r) >= 4]})
-        log.warning("masterdata sync: all files failed - cache unchanged")
+    save_audit_event(
+        "__masterdata__",
+        "masterdata_sync_succeeded",
+        actor,
+        {"source": "n8n_webhook", "result": n8n_payload, "async": is_async},
+    )
+    message = ""
+    if isinstance(n8n_payload, dict):
+        message = str(n8n_payload.get("message") or n8n_payload.get("status") or "")
     return {
-        "synced":         len(ok_files),
-        "failed":         len(err_files),
-        "files":          [{"file": r[0],
-                             "status": r[3] if len(r) > 3 else "?",
-                             "detail": r[1] if len(r) > 1 else ""}
-                            for r in rows],
-        "cache_reloaded": bool(ok_files),
-        "from_repo": False,
-        "source": "local",
-        "message": (
-            f"{len(ok_files)}/{len(rows)} fichiers synchronisés"
-            + (f" - {len(err_files)} erreur(s)" if err_files else "")
+        "synced": int(n8n_payload.get("synced") or 0) if isinstance(n8n_payload, dict) else 0,
+        "failed": 0,
+        "files": n8n_payload.get("files") if isinstance(n8n_payload, dict) else [],
+        "cache_reloaded": not is_async,
+        "source": "n8n",
+        "async": is_async,
+        "n8n": n8n_payload,
+        "sync": _masterdata_sync_freshness(),
+        "message": message
+        or (
+            "Workflow n8n déclenché - mise à jour en cours"
+            if is_async
+            else "Workflow n8n masterdata déclenché et terminé"
         ),
     }
 
@@ -2150,41 +1854,107 @@ class MasterdataRowPayload(BaseModel):
 
 @app.post("/api/masterdata/import")
 async def api_md_import(
-    kind: str = Form(...),
+    req: Request,
+    kind: str = Form(""),
     file: UploadFile = File(...),
 ):
-    """Replace a runtime masterdata CSV from an uploaded `;`-separated file."""
-    try:
-        key = _masterdata_kind_key(kind)
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from exc
-    if not file.filename or not str(file.filename).lower().endswith((".csv", ".parquet")):
+    """Replace a runtime masterdata table from an admin-uploaded CSV or Parquet file."""
+    admin_actor, _ = _ensure_masterdata_importer(req)
+    filename = str(file.filename or "").strip()
+    if not filename.lower().endswith((".csv", ".parquet")):
         raise HTTPException(400, "Un fichier .csv ou .parquet est requis")
+    key = _resolve_masterdata_import_key(kind, filename)
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "Fichier vide")
     try:
-        result = _masterdata_import_dataframe(key, raw, filename=str(file.filename))
+        result = _masterdata_import_dataframe(key, raw, filename=filename)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     except Exception as exc:
         raise HTTPException(500, f"Import échoué: {exc}") from exc
+    return _finalize_masterdata_import(key, result, actor=admin_actor, filename=filename)
+
+
+@app.post("/api/masterdata/import-batch")
+async def api_md_import_batch(
+    req: Request,
+    files: list[UploadFile] = File(...),
+):
+    """Import several masterdata files at once (admin only). Kind is inferred from filename."""
+    admin_actor, _ = _ensure_masterdata_importer(req)
+    if not files:
+        raise HTTPException(400, "Au moins un fichier .csv ou .parquet est requis")
+
+    imported: list[dict] = []
+    errors: list[dict] = []
+    salesorders_touched = False
+
+    for upload in files:
+        filename = str(upload.filename or "").strip()
+        if not filename.lower().endswith((".csv", ".parquet")):
+            errors.append({"file": filename or "(sans nom)", "error": "Extension .csv ou .parquet requise"})
+            continue
+        key = _masterdata_kind_from_filename(filename)
+        if not key:
+            errors.append({
+                "file": filename,
+                "error": "Nom non reconnu (10564_Customers, 10564_Partners, DB_Materials, DB_Salesorder)",
+            })
+            continue
+        raw = await upload.read()
+        if not raw:
+            errors.append({"file": filename, "error": "Fichier vide"})
+            continue
+        try:
+            result = _masterdata_import_dataframe(key, raw, filename=filename)
+            imported.append({"file": filename, "kind": key, "rows": result.get("rows"), "format": result.get("format")})
+            if key == "salesorders":
+                salesorders_touched = True
+        except ValueError as exc:
+            errors.append({"file": filename, "kind": key, "error": str(exc)})
+        except Exception as exc:
+            errors.append({"file": filename, "kind": key, "error": f"Import échoué: {exc}"})
+
+    if not imported:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Aucun fichier importé", "errors": errors},
+        )
+
+    _invalidate_legacy_masterdata_cache()
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="manual_import_batch")
+    _apply_masterdata_sync_metadata_to_cache_state()
     save_audit_event(
         "__masterdata__",
-        "masterdata_import_succeeded",
-        "system",
-        {"kind": key, "rows": result.get("rows"), "file": file.filename},
+        "masterdata_import_batch_succeeded",
+        admin_actor,
+        {"imported": imported, "errors": errors},
     )
-    return {
+
+    payload: dict = {
         "ok": True,
-        "message": f"Import OK - {result.get('rows')} lignes ({result.get('file')})",
-        **result,
+        "imported": imported,
+        "errors": errors,
+        "message": f"{len(imported)} fichier(s) importé(s)"
+        + (f", {len(errors)} en échec" if errors else ""),
     }
+    if salesorders_touched:
+        try:
+            from src.sap_feedback import reconcile_sent_orders_with_sap
+
+            payload["sapFeedback"] = reconcile_sent_orders_with_sap()
+        except Exception as exc:
+            log.warning("SAP feedback reconcile after batch import failed: %s", exc)
+            payload["sapFeedback"] = {"ok": False, "error": str(exc)}
+    return payload
 
 
 @app.post("/api/masterdata/rows")
-def api_md_add_row(payload: MasterdataRowPayload):
+def api_md_add_row(req: Request, payload: MasterdataRowPayload):
     """Append one row to a runtime masterdata CSV (clients / ship-to / articles)."""
+    admin_actor, _ = _ensure_admin(req, payload.model_dump())
     try:
         key = _masterdata_kind_key(payload.kind)
     except ValueError as exc:
@@ -2198,7 +1968,7 @@ def api_md_add_row(payload: MasterdataRowPayload):
     save_audit_event(
         "__masterdata__",
         "masterdata_row_added",
-        "system",
+        admin_actor,
         {"kind": key, "fields": list((payload.fields or {}).keys())},
     )
     return {
@@ -3516,6 +3286,65 @@ def _masterdata_payload_for_request(
 
 def _masterdata_kind_key(kind: str) -> str:
     return _mdr.kind_key(kind)
+
+
+def _masterdata_kind_from_filename(filename: str) -> str | None:
+    return _mdr.kind_key_from_filename(filename)
+
+
+def _invalidate_legacy_masterdata_cache() -> None:
+    try:
+        import app.masterdata as _md
+
+        _md.master_data_cache = None
+        _md.master_data_cache_fingerprint = None
+    except Exception:
+        pass
+
+
+def _finalize_masterdata_import(key: str, result: dict, *, actor: str, filename: str) -> dict:
+    """Persist import metadata, refresh caches, optional SAP reconcile."""
+    _invalidate_legacy_masterdata_cache()
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _mdr.bump_sync_metadata(synced_at_utc=now_iso, source="manual_import")
+    _apply_masterdata_sync_metadata_to_cache_state()
+    save_audit_event(
+        "__masterdata__",
+        "masterdata_import_succeeded",
+        actor,
+        {"kind": key, "rows": result.get("rows"), "file": filename},
+    )
+    payload: dict = {
+        "ok": True,
+        "message": f"Import OK - {result.get('rows')} lignes ({result.get('file')})",
+        **result,
+    }
+    if key == "salesorders":
+        try:
+            from src.sap_feedback import reconcile_sent_orders_with_sap
+
+            payload["sapFeedback"] = reconcile_sent_orders_with_sap()
+        except Exception as exc:
+            log.warning("SAP feedback reconcile after masterdata import failed: %s", exc)
+            payload["sapFeedback"] = {"ok": False, "error": str(exc)}
+    return payload
+
+
+def _resolve_masterdata_import_key(kind: str, filename: str) -> str:
+    kind_hint = (kind or "").strip()
+    if kind_hint:
+        return _masterdata_kind_key(kind_hint)
+    detected = _masterdata_kind_from_filename(filename)
+    if detected:
+        return detected
+    raise HTTPException(
+        status_code=400,
+        detail=(
+            "Type masterdata inconnu. Indiquez kind=clients|shipto|articles|salesorders "
+            "ou utilisez un nom Bosch reconnu (10564_Customers, 10564_Partners, "
+            "DB_Materials, DB_Salesorder)."
+        ),
+    )
 
 
 def _masterdata_write_csv(key: str, df) -> None:

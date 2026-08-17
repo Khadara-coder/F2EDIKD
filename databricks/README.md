@@ -52,23 +52,13 @@ Aucune dependance `mlflow` n'est requise.
 
 ---
 
-## 2. Sync masterdata (cron quotidien)
+## 2. Sync masterdata
 
-Le script `scripts/sync_masterdata_repo.py` clone le repo `RSR1DY/masterdata.git`
-et publie les CSV dans `data/masterdata/` de l'application.
+Deux methodes cote File2EDI : webhook n8n (bouton Synchroniser / cron n8n) ou import
+CSV/Parquet par un administrateur. Databricks reste la source amont du repo Git
+`RSR1DY/masterdata.git` consomme par n8n.
 
-### Crontab recommandé (sur la VM)
-
-```cron
-0 3 * * * /usr/bin/python3 /root/GenieCommande/scripts/sync_masterdata_repo.py \
-    --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
-    --branch main \
-    --target-dir /root/GenieCommande/data/masterdata/ \
-    --notify-api-url http://localhost:8080/api/masterdata/sync \
-    >> /root/GenieCommande/data/logs/masterdata_sync.log 2>&1
-```
-
-### Vérification après sync
+### Verification après sync
 
 ```bash
 curl http://localhost:8080/api/masterdata/stats

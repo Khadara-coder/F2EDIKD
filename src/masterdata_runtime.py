@@ -1235,6 +1235,27 @@ def kind_key(kind: str) -> str:
     return key
 
 
+_FILENAME_KIND_PREFIXES: tuple[tuple[str, str], ...] = (
+    ("10564_customers", "customers"),
+    ("10564_partners", "partners"),
+    ("db_materials", "materials"),
+    ("10564_materials", "materials"),
+    ("db_salesorder", "salesorders"),
+)
+
+
+def kind_key_from_filename(filename: str) -> str | None:
+    """Map Bosch masterdata filenames to internal cache keys."""
+    base = (filename or "").strip().replace("\\", "/").rsplit("/", 1)[-1].lower()
+    if not base.endswith((".csv", ".parquet")):
+        return None
+    stem = base.rsplit(".", 1)[0]
+    for prefix, key in _FILENAME_KIND_PREFIXES:
+        if stem == prefix:
+            return key
+    return None
+
+
 def write_csv(key: str, df) -> None:
     fname = MD_FILES[key]
     path = runtime_dir() / fname

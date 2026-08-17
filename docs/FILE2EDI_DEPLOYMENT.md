@@ -104,16 +104,7 @@ quand aucun token n'est fourni. En VM, preferer un secret `DATABRICKS_TOKEN`.
 
 ## Sync Masterdata
 
-Exemple de job quotidien sur la VM:
-
-```bash
-python scripts/sync_masterdata_repo.py \
-  --repo-url https://github.boschdevcloud.com/RSR1DY/masterdata.git \
-  --branch main \
-  --target-dir /root/GenieCommande/data/masterdata/ \
-  --notify-api-url http://127.0.0.1:8080/api/masterdata/sync \
-  --notify-api-key "$APP_API_KEY"
-```
+Deux méthodes : webhook n8n (Synchroniser / cron) ou import CSV/Parquet par un admin.
 
 Verifier ensuite:
 

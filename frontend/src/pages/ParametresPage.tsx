@@ -740,7 +740,7 @@ export function ParametresPage() {
                 <CardTitle className="text-base">Sync Masterdata via n8n</CardTitle>
                 <p className="text-xs text-muted-foreground">
                   Le bouton Synchroniser (Données maîtres) déclenche ce webhook n8n. Le workflow tire GitHub puis
-                  recharge le cache File2EDI. Si l&apos;URL change, mettez-la à jour ici.
+                  recharge le cache File2EDI. L&apos;autre méthode est l&apos;import CSV/Parquet par un admin.
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -748,7 +748,7 @@ export function ParametresPage() {
                   <div>
                     <Label className="text-sm font-medium">Activer le déclenchement n8n</Label>
                     <p className="text-xs text-muted-foreground">
-                      Prioritaire pour Synchroniser (sinon fallback Git/local)
+                      Uniquement le bouton Synchroniser. Sans webhook, importez un fichier.
                     </p>
                   </div>
                   <Switch

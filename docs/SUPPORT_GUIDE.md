@@ -64,36 +64,10 @@ docker compose exec api python scripts/backfill_new_fields.py
 
 ## Refresh des données maîtres
 
-Chaîne automatique recommandée :
+Deux méthodes seulement :
 
-```text
-Job Databricks → repo Git RSR1DY/masterdata → sync quotidien File2EDI → cache mémoire
-```
-
-### Windows (local / poste de travail)
-
-```powershell
-powershell -ExecutionPolicy Bypass -File scripts\install_masterdata_autosync_windows.ps1
-Start-ScheduledTask -TaskName "File2EDI-Masterdata-AutoSync"
-```
-
-### Linux / VM Azure
-
-```bash
-bash scripts/install_masterdata_autosync_cron.sh
-```
-
-### Dans le process uvicorn (optionnel)
-
-Dans `.env` :
-
-```bash
-MASTERDATA_AUTO_SYNC=true
-MASTERDATA_AUTO_SYNC_INTERVAL_HOURS=24
-MASTERDATA_REPO_URL=https://github.boschdevcloud.com/RSR1DY/masterdata.git
-```
-
-Prérequis : `git` authentifié vers Bosch DevCloud, et droits d'écriture sur `data/masterdata`.
+1. **n8n** — bouton Synchroniser (Données maîtres) ou cron n8n 02:15. Le workflow importe GitHub puis appelle `/api/masterdata/reload-cache`.
+2. **Import admin** — CSV/Parquet déposé depuis Données maîtres.
 
 Après sync, vérifier :
 1. `/api/masterdata/stats` → `sync_commit` et `sync_age_hours` récents

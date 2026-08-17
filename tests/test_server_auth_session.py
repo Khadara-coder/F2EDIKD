@@ -274,6 +274,49 @@ def test_master_data_still_scopes_adv_session(
     assert captured["allowed"] == {"15000000"}
 
 
+def test_masterdata_sync_requires_n8n_webhook(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+):
+    fake_store = FakeStore({
+        "admin-session": {"username": "admin", "displayName": "Admin", "role": "admin"},
+    })
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+
+    response = client.post("/api/masterdata/sync", cookies={"f2edi_session": "admin-session"})
+
+    assert response.status_code == 503
+    assert "n8n" in (response.json().get("detail") or "").lower()
+
+
+def test_masterdata_sync_n8n_failure_does_not_fall_back_to_git(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+):
+    fake_store = FakeStore({
+        "admin-session": {"username": "admin", "displayName": "Admin", "role": "admin"},
+    })
+    fake_store.load_app_settings = lambda: {
+        "masterdataN8nConfig": {
+            "enabled": True,
+            "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
+        }
+    }
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setattr(server, "save_audit_event", lambda *a, **k: None)
+
+    def boom(*_a, **_k):
+        raise RuntimeError("n8n down")
+
+    monkeypatch.setattr("src.masterdata_n8n.trigger_masterdata_sync_workflow", boom)
+
+    response = client.post("/api/masterdata/sync", cookies={"f2edi_session": "admin-session"})
+
+    assert response.status_code == 502
+    assert "n8n" in (response.json().get("detail") or "").lower()
+    assert "git" not in (response.json().get("detail") or "").lower()
+
+
 def test_resolve_role_treats_created_admin_like_env_admin(monkeypatch: pytest.MonkeyPatch):
     fake_store = FakeStore({})
     fake_store.created_users.append({
@@ -350,3 +393,139 @@ def test_sftp_send_routes_upload_generated_edifact(
         "remote_dir": "/edi/in",
     }
     assert fake_store.delivery_marks == [("ord-123", True, "/edi/in/ORDERS_ord-123.tst")]
+
+
+CUSTOMERS_CSV = (
+    b"SOLDTO;NAME;ORT01;PSTLZ;STRAS;LAND1;VAT_NR\n"
+    b"15000000;ACME;Paris;75001;1 rue A;FR;FR123\n"
+)
+
+
+def test_masterdata_import_rejects_adv_session(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    fake_store = FakeStore({
+        "adv-session": {"username": "adv", "displayName": "ADV", "role": "adv"},
+    })
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+
+    response = client.post(
+        "/api/masterdata/import",
+        data={"kind": "clients"},
+        files={"file": ("10564_Customers.csv", CUSTOMERS_CSV, "text/csv")},
+        cookies={"f2edi_session": "adv-session"},
+    )
+
+    assert response.status_code == 403
+    assert "administrateur" in (response.json().get("detail") or "").lower()
+
+
+def test_masterdata_import_admin_session(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    fake_store = FakeStore({
+        "admin-session": {"username": "admin", "displayName": "Admin", "role": "admin"},
+    })
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setattr(server, "save_audit_event", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_invalidate_legacy_masterdata_cache", lambda: None)
+    monkeypatch.setattr(server, "_apply_masterdata_sync_metadata_to_cache_state", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_masterdata_import_dataframe",
+        lambda key, raw, filename="": {"kind": key, "rows": 1, "format": "csv", "file": filename},
+    )
+
+    response = client.post(
+        "/api/masterdata/import",
+        data={"kind": "clients"},
+        files={"file": ("10564_Customers.csv", CUSTOMERS_CSV, "text/csv")},
+        cookies={"f2edi_session": "admin-session"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert body["rows"] == 1
+
+
+def test_masterdata_import_auto_detects_kind_from_filename(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+):
+    fake_store = FakeStore({
+        "admin-session": {"username": "admin", "displayName": "Admin", "role": "admin"},
+    })
+    captured: dict = {}
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setattr(server, "save_audit_event", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_invalidate_legacy_masterdata_cache", lambda: None)
+    monkeypatch.setattr(server, "_apply_masterdata_sync_metadata_to_cache_state", lambda: None)
+
+    def fake_import(key, raw, filename=""):
+        captured["key"] = key
+        return {"kind": key, "rows": 1, "format": "csv", "file": filename}
+
+    monkeypatch.setattr(server, "_masterdata_import_dataframe", fake_import)
+
+    response = client.post(
+        "/api/masterdata/import",
+        files={"file": ("10564_Customers.csv", CUSTOMERS_CSV, "text/csv")},
+        cookies={"f2edi_session": "admin-session"},
+    )
+
+    assert response.status_code == 200
+    assert captured["key"] == "customers"
+
+
+def test_masterdata_import_allows_api_key_without_admin_role(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+):
+    fake_store = FakeStore({})
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setenv("APP_API_KEYS", "n8n-test-key")
+    monkeypatch.setenv("APP_API_ROLE", "adv")
+    monkeypatch.setattr(server, "save_audit_event", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_invalidate_legacy_masterdata_cache", lambda: None)
+    monkeypatch.setattr(server, "_apply_masterdata_sync_metadata_to_cache_state", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_masterdata_import_dataframe",
+        lambda key, raw, filename="": {"kind": key, "rows": 1, "format": "csv", "file": filename},
+    )
+
+    response = client.post(
+        "/api/masterdata/import",
+        data={"kind": "clients"},
+        files={"file": ("10564_Customers.csv", CUSTOMERS_CSV, "text/csv")},
+        headers={"x-api-key": "n8n-test-key"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+def test_masterdata_import_batch_admin_only(monkeypatch: pytest.MonkeyPatch, client: TestClient):
+    fake_store = FakeStore({
+        "admin-session": {"username": "admin", "displayName": "Admin", "role": "admin"},
+    })
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setattr(server, "save_audit_event", lambda *a, **k: None)
+    monkeypatch.setattr(server, "_invalidate_legacy_masterdata_cache", lambda: None)
+    monkeypatch.setattr(server, "_apply_masterdata_sync_metadata_to_cache_state", lambda: None)
+    monkeypatch.setattr(
+        server,
+        "_masterdata_import_dataframe",
+        lambda key, raw, filename="": {"kind": key, "rows": 1, "format": "csv", "file": filename},
+    )
+
+    response = client.post(
+        "/api/masterdata/import-batch",
+        files=[
+            ("files", ("10564_Customers.csv", CUSTOMERS_CSV, "text/csv")),
+            ("files", ("DB_Materials.csv", b"MATNR;MAKTX\n1;Widget\n", "text/csv")),
+        ],
+        cookies={"f2edi_session": "admin-session"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ok"] is True
+    assert len(body["imported"]) == 2

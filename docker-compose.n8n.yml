@@ -3,7 +3,7 @@
 #
 # Communication UNIQUEMENT par HTTP :
 #   File2EDI  →  POST webhook n8n  (Synchroniser)
-#   n8n       →  POST File2EDI /api/masterdata/sync?from_repo=true
+#   n8n       →  POST File2EDI /api/masterdata/import + /api/masterdata/reload-cache
 #
 # Prérequis : API File2EDI déjà up sur le port 8000.
 #   docker compose -f docker-compose.dev.yml up -d

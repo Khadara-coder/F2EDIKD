@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import pytest
+
 from src.masterdata_runtime import (
     format_materials,
     kind_key,
+    kind_key_from_filename,
     match_keys,
     normalize_article_code,
     row_value,
@@ -24,6 +27,23 @@ def test_kind_key_mapping():
     assert kind_key("shipto") == "partners"
     assert kind_key("articles") == "materials"
     assert kind_key("salesorders") == "salesorders"
+
+
+@pytest.mark.parametrize(
+    "filename,expected",
+    [
+        ("10564_Customers.csv", "customers"),
+        ("10564_Customers.parquet", "customers"),
+        ("subdir/10564_Partners.csv", "partners"),
+        ("DB_Materials.parquet", "materials"),
+        ("10564_Materials.csv", "materials"),
+        ("DB_Salesorder.csv", "salesorders"),
+        ("unknown.csv", None),
+        ("10564_Customers.txt", None),
+    ],
+)
+def test_kind_key_from_filename(filename, expected):
+    assert kind_key_from_filename(filename) == expected
 
 
 def test_import_dataframe_parquet(tmp_path, monkeypatch):

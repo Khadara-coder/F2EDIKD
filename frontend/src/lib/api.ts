@@ -300,26 +300,22 @@ export const api = {
     return request<MasterDataResponse>(`/master-data?${params}`);
   },
 
-  /** Manual masterdata sync - triggers configured n8n webhook by default. */
-  syncMasterData: (opts?: { fromRepo?: boolean }) => {
-    const params = new URLSearchParams({
-      from_repo: opts?.fromRepo ? "true" : "false",
-    });
+  /** Manual masterdata sync - triggers configured n8n webhook. */
+  syncMasterData: () => {
     return request<{
       synced: number;
       failed: number;
       cache_reloaded: boolean;
-      from_repo?: boolean;
       source?: string;
       commit?: string;
       async?: boolean;
       message: string;
-    }>(`/masterdata/sync?${params}`, { method: "POST" });
+    }>(`/masterdata/sync`, { method: "POST" });
   },
 
   importMasterDataCsv: async (kind: string, file: File) => {
     const body = new FormData();
-    body.append("kind", kind);
+    if (kind.trim()) body.append("kind", kind);
     body.append("file", file);
     const res = await fetch(`${API_BASE}/masterdata/import`, {
       method: "POST",
@@ -342,6 +338,39 @@ export const api = {
       );
     }
     return res.json() as Promise<{ ok: boolean; message: string; rows?: number; kind?: string }>;
+  },
+
+  importMasterDataBatch: async (files: File[]) => {
+    const body = new FormData();
+    for (const file of files) {
+      body.append("files", file);
+    }
+    const res = await fetch(`${API_BASE}/masterdata/import-batch`, {
+      method: "POST",
+      credentials: "include",
+      body,
+    });
+    if (!res.ok) {
+      const text = await res.text();
+      let detail: unknown;
+      try {
+        const parsed = JSON.parse(text) as Record<string, unknown>;
+        detail = parsed.detail ?? parsed.message ?? text;
+      } catch {
+        detail = text;
+      }
+      throw new ApiError(
+        typeof detail === "string" ? detail : `HTTP ${res.status}`,
+        res.status,
+        detail,
+      );
+    }
+    return res.json() as Promise<{
+      ok: boolean;
+      message: string;
+      imported: { file: string; kind: string; rows?: number; format?: string }[];
+      errors: { file: string; error: string; kind?: string }[];
+    }>;
   },
 
   addMasterDataRow: (kind: string, fields: Record<string, string>) =>
