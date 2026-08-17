@@ -100,3 +100,26 @@ def test_merge_order_line_candidates_keeps_same_article_different_qty():
     assert len(merged) == 2
     assert merged[1]["quantite"] == 10.0
     assert merged[1]["customer_reference"] == "24-000025"
+
+
+def test_system_health_payload_includes_ocr_status():
+    from src.ai_status import build_system_health_payload
+
+    payload = build_system_health_payload(
+        {
+            "api": {"ok": True},
+            "database": {"ok": True},
+            "masterdata": {"ok": True},
+            "sftp_configured": False,
+            "ocr": {
+                "available": True,
+                "version": "5.3.4",
+                "lang": "fra+eng",
+                "error": "",
+            },
+        }
+    )
+    assert payload["ocr"] == "connected"
+    assert payload["ocrAvailable"] is True
+    assert payload["ocrVersion"] == "5.3.4"
+    assert payload["ocrLang"] == "fra+eng"

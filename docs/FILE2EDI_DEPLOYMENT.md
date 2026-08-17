@@ -53,7 +53,9 @@ Verification:
 ```bash
 docker compose -f docker-compose.file2edi.yml ps
 docker compose -f docker-compose.file2edi.yml logs file2edi --tail 50
-curl http://127.0.0.1:8080/api/health/system
+curl -s http://127.0.0.1:8080/api/health/system
+# OCR pret : "ocr":"connected" (Tesseract + fra/eng installes au docker build)
+docker compose -f docker-compose.file2edi.yml exec file2edi tesseract --version
 ```
 
 ## Production VM
@@ -73,6 +75,7 @@ Verification:
 ```bash
 curl http://127.0.0.1:8080/api/health/system
 curl http://127.0.0.1:8080/api/proxy/health
+# OCR pret : "ocr":"connected" dans /api/health/system
 ```
 
 ## Variables Requises

@@ -85,12 +85,19 @@ def build_system_health_payload(proxy_health: dict[str, Any]) -> dict[str, Any]:
     from src.runtime_status import get_db_backend, is_postgres_strict
 
     ai = get_ai_configuration_status()
+    ocr = proxy_health.get("ocr") if isinstance(proxy_health.get("ocr"), dict) else {}
+    ocr_ok = bool(ocr.get("available"))
     return {
         "api": "connected" if proxy_health.get("api", {}).get("ok") else "disconnected",
         "database": "connected" if proxy_health.get("database", {}).get("ok") else "disconnected",
         "csv": "connected" if proxy_health.get("masterdata", {}).get("ok") else "disconnected",
         "sftp": "connected" if proxy_health.get("sftp_configured") else "disconnected",
         "ai": "connected" if ai.get("configured") else "disconnected",
+        "ocr": "connected" if ocr_ok else "disconnected",
+        "ocrAvailable": ocr_ok,
+        "ocrVersion": ocr.get("version") or "",
+        "ocrLang": ocr.get("lang") or "",
+        "ocrError": ocr.get("error") or "",
         "aiProvider": ai.get("provider"),
         "aiDetail": ai.get("detail"),
         "databaseBackend": get_db_backend(),

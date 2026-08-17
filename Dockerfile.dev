@@ -5,15 +5,19 @@ WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MOCK_MODE=true \
-    APP_HOST=0.0.0.0
+    APP_HOST=0.0.0.0 \
+    TESSERACT_LANG=fra+eng
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev curl wget git \
     tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && tesseract --version \
+    && python -c "import subprocess; out=subprocess.check_output(['tesseract','--list-langs'], stderr=subprocess.STDOUT, text=True); langs={l.strip() for l in out.splitlines() if l.strip() and not l.startswith('List')}; missing={'fra','eng'}-langs; assert not missing, out"
 
 COPY requirements.txt requirements-postgres.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt \
+    && python -c "import pytesseract; v=pytesseract.get_tesseract_version(); langs=set(pytesseract.get_languages(config='') or []); missing={'fra','eng'}-langs; assert not missing, (str(v), sorted(missing)); print('tesseract', v, 'langs', sorted(langs))"
 
 EXPOSE 8000
 

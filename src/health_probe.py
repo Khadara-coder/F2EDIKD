@@ -42,6 +42,14 @@ def build_proxy_health(
     sender = sender_gln or os.environ.get("UNB_SENDER_GLN", "4399901876613")
     receiver = receiver_gln or os.environ.get("UNB_RECEIVER_GLN", "3015981600108")
 
+    ocr_status: dict[str, Any] = {"available": False, "error": "ocr_status_unavailable"}
+    try:
+        from app.ocr import ocr_runtime_status
+
+        ocr_status = ocr_runtime_status()
+    except Exception as exc:
+        ocr_status = {"available": False, "error": str(exc)[:200]}
+
     return {
         "ok": True,
         "status": "ok",
@@ -73,6 +81,7 @@ def build_proxy_health(
         },
         "db_ok": db_ok,
         "sftp_configured": is_configured_from_env(),
+        "ocr": ocr_status,
         "f2edi_base": "local",
         "mc_status": {
             k: {"rows": v.get("rows", 0), "loaded_at": v.get("loaded_at")}

@@ -13,16 +13,21 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     MOCK_MODE=false \
     APP_HOST=0.0.0.0 \
-    DATABRICKS_APP_PORT=8000
+    DATABRICKS_APP_PORT=8000 \
+    TESSERACT_LANG=fra+eng
 
-# System deps for pdfplumber / PyMuPDF / OCR (same binaries as Dockerfile.dev)
+# System deps for pdfplumber / PyMuPDF / OCR. Fail the rebuild if Tesseract
+# or fra/eng traineddata did not actually install (cached/broken apt layer).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev curl wget git \
     tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && tesseract --version \
+    && python -c "import subprocess; out=subprocess.check_output(['tesseract','--list-langs'], stderr=subprocess.STDOUT, text=True); langs={l.strip() for l in out.splitlines() if l.strip() and not l.startswith('List')}; missing={'fra','eng'}-langs; assert not missing, out"
 
 COPY requirements.txt requirements-postgres.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-postgres.txt \
+    && python -c "import pytesseract; v=pytesseract.get_tesseract_version(); langs=set(pytesseract.get_languages(config='') or []); missing={'fra','eng'}-langs; assert not missing, (str(v), sorted(missing)); print('tesseract', v, 'langs', sorted(langs))"
 
 COPY . .
 

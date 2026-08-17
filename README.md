@@ -37,6 +37,7 @@ Copier les CSV masterdata dans `data/masterdata/` (voir [data/masterdata/README.
 docker compose -f docker-compose.file2edi.yml up --build -d
 # UI  : http://localhost:8080
 # API : http://localhost:8080/api/health/system
+# OCR : installe au build (tesseract-ocr + fra/eng + pytesseract)
 ```
 
 ### Pousser en staging (VM Azure)

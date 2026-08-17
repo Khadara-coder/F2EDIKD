@@ -29,6 +29,37 @@ def ocr_provider_available() -> bool:
         return False
 
 
+def ocr_runtime_status() -> dict:
+    """Runtime OCR diagnostics for Docker health and /api/health/system."""
+    required = [part.strip() for part in TESSERACT_LANG.replace(",", "+").split("+") if part.strip()]
+    version = ""
+    languages: list[str] = []
+    error = ""
+    available = False
+
+    if not _PYTESSERACT_AVAILABLE or pytesseract is None:
+        error = "pytesseract_not_installed"
+    else:
+        try:
+            version = str(pytesseract.get_tesseract_version())
+            languages = [str(lang) for lang in (pytesseract.get_languages(config="") or [])]
+            available = True
+        except Exception as exc:
+            error = str(exc)[:200] or "tesseract_binary_missing"
+
+    missing = [lang for lang in required if lang not in languages]
+    if available and missing:
+        error = "missing_languages:" + ",".join(missing)
+    return {
+        "available": available and not missing,
+        "version": version,
+        "lang": TESSERACT_LANG,
+        "languages": languages,
+        "missingLanguages": missing,
+        "error": error,
+    }
+
+
 def ocr_layout_callback() -> Callable[[Image.Image], dict] | None:
     """OCR callback for PDF page 1, or None when Tesseract is not usable."""
     if not ocr_provider_available():

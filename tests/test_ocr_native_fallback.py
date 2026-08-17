@@ -63,6 +63,18 @@ def test_ocr_provider_available_when_tesseract_binary_is_installed():
         pytest.skip("tesseract binary is not installed")
     assert ocr_mod.ocr_provider_available() is True
     assert ocr_mod.ocr_layout_callback() is not None
+    status = ocr_mod.ocr_runtime_status()
+    assert status["available"] is True
+    assert "fra" in status["languages"]
+    assert "eng" in status["languages"]
+
+
+def test_ocr_runtime_status_reports_missing_pytesseract(monkeypatch):
+    monkeypatch.setattr(ocr_mod, "pytesseract", None)
+    monkeypatch.setattr(ocr_mod, "_PYTESSERACT_AVAILABLE", False)
+    status = ocr_mod.ocr_runtime_status()
+    assert status["available"] is False
+    assert status["error"] == "pytesseract_not_installed"
 
 
 def test_extract_page_falls_back_to_native_on_tesseract_attribute_error():
