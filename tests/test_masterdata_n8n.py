@@ -56,6 +56,7 @@ def test_trigger_posts_configured_url(monkeypatch):
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json
+        captured["timeout"] = timeout
         return FakeResp()
 
     monkeypatch.setenv("MASTERDATA_N8N_WEBHOOK_KEY", "secret")
@@ -72,6 +73,7 @@ def test_trigger_posts_configured_url(monkeypatch):
     assert captured["headers"]["x-api-key"] == "secret"
     assert out.get("async") is False  # full sync payload returned
     assert captured["json"]["file2ediApiBase"]
+    assert captured["timeout"] == (10, 120)
 
 
 def test_trigger_treats_remote_disconnect_as_async_start(monkeypatch):

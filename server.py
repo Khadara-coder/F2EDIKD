@@ -241,8 +241,30 @@ def _display_name_from_actor(actor: str) -> str:
 
 
 def _db_role_override(actor: str) -> str | None:
-    """DB role override now handled by PostgreSQL auth_user_adv_scope table."""
-    # SQLite fallback removed; RBAC via PostgreSQL only
+    """Role from file2edi_users (Paramètres), then optional settings overrides.
+
+    APP_ADMIN_USERS remains a bootstrap fallback for identities with no DB account
+    (DEV_ACTOR, SSO). Created admins and env admins are the same role.
+    """
+    a = _normalize_actor_identity(actor)
+    if not a:
+        return None
+    try:
+        from src.file2edi.store import get_store as _gs
+
+        store = _gs()
+        user = store.get_active_user(a) if hasattr(store, "get_active_user") else None
+        if user:
+            role = str(user.get("role") or "").strip().lower()
+            if role in {"admin", "adv"}:
+                return role
+        settings = store.load_app_settings() or {}
+        overrides = settings.get("rbac_role_overrides") or {}
+        role = str(overrides.get(a) or "").strip().lower()
+        if role in {"admin", "adv"}:
+            return role
+    except Exception:
+        return None
     return None
 
 

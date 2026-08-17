@@ -2318,6 +2318,29 @@ def _users_mixin(cls):
                 "displayName": row["display_name"],
                 "role": _row_value(row, "role", "adv") or "adv"}
 
+    def get_active_user(self, actor: str) -> dict | None:
+        """Lookup an active user by username or email (role source of truth)."""
+        a = (actor or "").strip().lower()
+        if not a:
+            return None
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT user_id,username,display_name,email,sap_id,role FROM file2edi_users "
+            "WHERE is_active=1 AND (username=? OR lower(COALESCE(email, ''))=?) LIMIT 1",
+            [a, a],
+        ).fetchone()
+        conn.close()
+        if not row:
+            return None
+        return {
+            "userId": row["user_id"],
+            "username": row["username"],
+            "displayName": row["display_name"],
+            "email": _row_value(row, "email", "") or "",
+            "sapId": _row_value(row, "sap_id", "") or "",
+            "role": _row_value(row, "role", "adv") or "adv",
+        }
+
     def invalidate_session(self, session_id: str) -> None:
         conn = self._conn()
         conn.execute("DELETE FROM file2edi_sessions WHERE session_id=?", [session_id])
@@ -2457,6 +2480,7 @@ def _users_mixin(cls):
     cls.verify_credentials = verify_credentials
     cls.create_session = create_session
     cls.get_session_user = get_session_user
+    cls.get_active_user = get_active_user
     cls.invalidate_session = invalidate_session
     cls.list_users = list_users
     cls.delete_user = delete_user

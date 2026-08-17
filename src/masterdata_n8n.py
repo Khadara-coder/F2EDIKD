@@ -212,9 +212,9 @@ def trigger_masterdata_sync_workflow(
         "branch": os.environ.get("MASTERDATA_REPO_BRANCH", "main"),
         "file2ediApiBase": _file2edi_public_base(),
     }
-    # ACK should be fast with onReceived; keep a moderate read timeout for legacy lastNode.
+    # ACK is fast with onReceived. Use the configured timeout (legacy lastNode may still wait).
     connect_timeout = 10
-    read_timeout = min(90, int(cfg["timeoutSeconds"]))
+    read_timeout = int(cfg["timeoutSeconds"])
     log.info(
         "Triggering n8n masterdata sync webhook: %s (timeout=%s/%ss)",
         cfg["webhookUrl"],

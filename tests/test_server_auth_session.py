@@ -23,6 +23,20 @@ class FakeStore:
     def get_session_user(self, session_id: str):
         return self.users.get(session_id)
 
+    def get_active_user(self, actor: str):
+        a = (actor or "").strip().lower()
+        if not a:
+            return None
+        candidates = list(self.users.values()) + self.created_users + self.list_users()
+        for user in candidates:
+            if not user:
+                continue
+            if str(user.get("username") or "").strip().lower() == a:
+                return user
+            if str(user.get("email") or "").strip().lower() == a:
+                return user
+        return None
+
     def verify_credentials(self, username: str, password: str):
         return None
 
@@ -182,6 +196,107 @@ def test_configured_admin_profile_login_resets_existing_postgres_user_password(
     assert body["actor"] == "existing-admin"
     assert body["role"] == "admin"
     assert fake_store.password_changes == [("usr-existing", "admin123")]
+
+
+def test_master_data_uses_postgres_session_admin_role(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+):
+    """Admins created in Paramètres must see full master data even if absent from APP_ADMIN_USERS."""
+    import src.file2edi.router as router_mod
+
+    fake_store = FakeStore({
+        "sriram-session": {
+            "username": "sriram",
+            "displayName": "Sriram Rajan",
+            "role": "admin",
+        }
+    })
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setenv("APP_ADMIN_USERS", "khadara")
+
+    captured: dict = {}
+
+    def fake_allowed(actor: str, role: str):
+        captured["actor"] = actor
+        captured["role"] = role
+        return None if role != "adv" else set()
+
+    def fake_payload(allowed, type_name="clients", search="", limit=100):
+        captured["allowed"] = allowed
+        return {"summary": {}, "type": type_name, "clients": [{"id": "all"}], "rows": []}
+
+    monkeypatch.setattr(router_mod, "allowed_soldtos_for_actor", fake_allowed)
+    monkeypatch.setattr(router_mod, "payload_for_scope", fake_payload)
+
+    response = client.get("/api/master-data", cookies={"f2edi_session": "sriram-session"})
+
+    assert response.status_code == 200
+    assert captured["actor"] == "sriram"
+    assert captured["role"] == "admin"
+    assert captured["allowed"] is None
+    assert response.json()["clients"] == [{"id": "all"}]
+
+
+def test_master_data_still_scopes_adv_session(
+    monkeypatch: pytest.MonkeyPatch,
+    client: TestClient,
+):
+    import src.file2edi.router as router_mod
+
+    fake_store = FakeStore({
+        "adv-session": {
+            "username": "adv",
+            "displayName": "ADV",
+            "role": "adv",
+        }
+    })
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setenv("APP_ADMIN_USERS", "khadara")
+
+    captured: dict = {}
+
+    def fake_allowed(actor: str, role: str):
+        captured["role"] = role
+        return {"15000000"} if role == "adv" else None
+
+    def fake_payload(allowed, type_name="clients", search="", limit=100):
+        captured["allowed"] = allowed
+        return {"summary": {}, "type": type_name, "clients": [], "rows": []}
+
+    monkeypatch.setattr(router_mod, "allowed_soldtos_for_actor", fake_allowed)
+    monkeypatch.setattr(router_mod, "payload_for_scope", fake_payload)
+
+    response = client.get("/api/master-data", cookies={"f2edi_session": "adv-session"})
+
+    assert response.status_code == 200
+    assert captured["role"] == "adv"
+    assert captured["allowed"] == {"15000000"}
+
+
+def test_resolve_role_treats_created_admin_like_env_admin(monkeypatch: pytest.MonkeyPatch):
+    fake_store = FakeStore({})
+    fake_store.created_users.append({
+        "username": "sriram",
+        "email": "rsr1dy@bosch.com",
+        "role": "admin",
+    })
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setenv("APP_ADMIN_USERS", "khadara")
+
+    assert server._resolve_role("sriram") == "admin"
+    assert server._resolve_role("rsr1dy@bosch.com") == "admin"
+    assert server._resolve_role("khadara") == "admin"
+    assert server._resolve_role("unknown-user") == "adv"
+
+
+def test_resolve_role_uses_db_account_over_env_list(monkeypatch: pytest.MonkeyPatch):
+    fake_store = FakeStore({})
+    fake_store.created_users.append({"username": "khadara", "email": "", "role": "adv"})
+    monkeypatch.setattr(store_mod, "get_store", lambda: fake_store)
+    monkeypatch.setenv("APP_ADMIN_USERS", "khadara")
+
+    assert server._resolve_role("khadara") == "adv"
 
 
 @pytest.mark.parametrize("path", [

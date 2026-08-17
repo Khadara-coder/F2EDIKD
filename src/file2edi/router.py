@@ -358,7 +358,12 @@ def create_router() -> APIRouter:
             entity_id=user["userId"],
             details={"role": user.get("role", "adv")},
         )
-        resp = JSONResponse({"ok": True, "actor": user["username"], "displayName": user["displayName"], "role": "admin"})
+        resp = JSONResponse({
+            "ok": True,
+            "actor": user["username"],
+            "displayName": user["displayName"],
+            "role": user.get("role", "adv"),
+        })
         resp.set_cookie(SESSION_COOKIE, session_id, httponly=True, samesite="lax", max_age=43200)
         return resp
 
@@ -564,7 +569,7 @@ def create_router() -> APIRouter:
     @router.get("/dashboard/metrics")
     def dashboard_metrics(req: Request):
         actor = resolve_actor(req)
-        role = resolve_role(actor)
+        role = resolve_role_for_request(actor, req)
         orders = _list_combined_orders(actor=actor, role=role, include_done=True)
         return dashboard_metrics_from_db(orders)
 
@@ -572,13 +577,13 @@ def create_router() -> APIRouter:
     def list_orders(req: Request):
         """All converted orders for the Revue list page."""
         actor = resolve_actor(req)
-        role = resolve_role(actor)
+        role = resolve_role_for_request(actor, req)
         return [_order_list_item(o) for o in _list_combined_orders(actor=actor, role=role, include_done=True)]
 
     @router.get("/dashboard/review-queue")
     def review_queue(req: Request):
         actor = resolve_actor(req)
-        role = resolve_role(actor)
+        role = resolve_role_for_request(actor, req)
         items: list[dict] = []
         try:
             review_statuses = ("Revue requise", "À revoir", "À vérifier", "Bloqué")
@@ -613,7 +618,7 @@ def create_router() -> APIRouter:
     @router.get("/dashboard/recent-conversions")
     def recent_conversions(req: Request):
         actor = resolve_actor(req)
-        role = resolve_role(actor)
+        role = resolve_role_for_request(actor, req)
         out = []
         for o in _list_combined_orders(actor=actor, role=role, include_done=True)[:10]:
             out.append({
@@ -1384,7 +1389,7 @@ def create_router() -> APIRouter:
     ):
         import server as srv
         actor = srv._resolve_actor(req)
-        role = srv._resolve_role(actor)
+        role = srv._resolve_role_for_request(actor, req)
         rows_raw = _list_combined_orders(actor=actor, role=role, include_done=True)
         rows = []
         for o in rows_raw:
@@ -1435,7 +1440,7 @@ def create_router() -> APIRouter:
     ):
         try:
             actor = resolve_actor(req)
-            role = resolve_role(actor)
+            role = resolve_role_for_request(actor, req)
             allowed = allowed_soldtos_for_actor(actor, role)
             return payload_for_scope(allowed, type, search, limit)
         except Exception as exc:

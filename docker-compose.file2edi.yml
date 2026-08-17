@@ -34,6 +34,8 @@ services:
         required: false
       - path: .env.vm
         required: false
+    # Secrets (DATABRICKS_TOKEN, SFTP_PASSWORD, …) stay in env_file only.
+    # Do not set them here as ${VAR:-} — empty host interpolation would wipe .env.vm.
     environment:
       MOCK_MODE: "${MOCK_MODE:-false}"
       ENABLE_PROFILE_LOGIN: "${ENABLE_PROFILE_LOGIN:-true}"
@@ -59,7 +61,6 @@ services:
       # Databricks (production - set in .env)
       DATABRICKS_SERVER_HOSTNAME: ${DATABRICKS_SERVER_HOSTNAME:-}
       DATABRICKS_HTTP_PATH: ${DATABRICKS_HTTP_PATH:-}
-      DATABRICKS_TOKEN: ${DATABRICKS_TOKEN:-}
       DATABRICKS_CATALOG: ${DATABRICKS_CATALOG:-hive_metastore}
       EDIFACT_CATALOG: ${DATABRICKS_CATALOG:-hive_metastore}
       DATABRICKS_SCHEMA: ${DATABRICKS_SCHEMA:-file2edi}
@@ -70,9 +71,7 @@ services:
       SFTP_HOST: ${SFTP_HOST:-}
       SFTP_PORT: "${SFTP_PORT:-22}"
       SFTP_USERNAME: ${SFTP_USERNAME:-}
-      SFTP_PASSWORD: ${SFTP_PASSWORD:-}
       SFTP_PRIVATE_KEY_PATH: ${SFTP_PRIVATE_KEY_PATH:-}
-      SFTP_PRIVATE_KEY_PASSPHRASE: ${SFTP_PRIVATE_KEY_PASSPHRASE:-}
       SFTP_REMOTE_DIR: "${SFTP_REMOTE_DIR:-/}"
       SFTP_MAX_RETRIES: "${SFTP_MAX_RETRIES:-3}"
       SAP_RESEND_COOLDOWN_SECONDS: "${SAP_RESEND_COOLDOWN_SECONDS:-300}"
