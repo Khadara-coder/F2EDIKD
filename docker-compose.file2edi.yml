@@ -78,7 +78,7 @@ services:
       SAP_RESEND_COOLDOWN_SECONDS: "${SAP_RESEND_COOLDOWN_SECONDS:-300}"
     volumes:
       - file2edi_data:/app/data
-      - ./data/masterdata:/app/data/masterdata
+      - ./data/masterdata-staging:/app/data/masterdata
       - ./lookups:/app/lookups:ro
       - ./config.ini:/app/config.ini:ro
     depends_on:
