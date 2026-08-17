@@ -571,6 +571,10 @@ class File2EdiStore:
         ]
         for oid in order_ids:
             conn.execute("DELETE FROM file2edi_conversion_history WHERE order_id=?", [oid])
+            try:
+                conn.execute("DELETE FROM file2edi_order_comments WHERE order_id=?", [oid])
+            except Exception:
+                pass
             conn.execute("DELETE FROM file2edi_order_anomalies WHERE order_id=?", [oid])
             conn.execute("DELETE FROM file2edi_order_lines WHERE order_id=?", [oid])
             conn.execute("DELETE FROM file2edi_order_partners WHERE order_id=?", [oid])
@@ -912,10 +916,27 @@ class File2EdiStore:
         anomalies = [dict(r) for r in conn.execute(
             "SELECT * FROM file2edi_order_anomalies WHERE order_id=?", [order_id]
         ).fetchall()]
+        comments: list[dict] = []
+        try:
+            comments = [dict(r) for r in conn.execute(
+                """SELECT * FROM file2edi_order_comments
+                   WHERE order_id=?
+                   ORDER BY created_at ASC""",
+                [order_id],
+            ).fetchall()]
+        except Exception:
+            comments = []
         conn.close()
-        return self._row_to_review(dict(row), partners, lines, anomalies)
+        return self._row_to_review(dict(row), partners, lines, anomalies, comments)
 
-    def _row_to_review(self, row: dict, partners: list, lines: list, anomalies: list) -> dict:
+    def _row_to_review(
+        self,
+        row: dict,
+        partners: list,
+        lines: list,
+        anomalies: list,
+        comments: list | None = None,
+    ) -> dict:
         def camel(d: dict, mapping: dict) -> dict:
             return {mapping.get(k, k): v for k, v in d.items()}
 
@@ -938,6 +959,10 @@ class File2EdiStore:
             "anomaly_id": "anomalyId", "order_id": "orderId", "line_id": "lineId",
             "severity": "severity", "field_name": "fieldName", "message": "message",
             "status": "status", "created_at": "createdAt",
+        }
+        c_map = {
+            "comment_id": "commentId", "order_id": "orderId", "anomaly_id": "anomalyId",
+            "actor": "actor", "body": "body", "created_at": "createdAt",
         }
         order = {
             "orderId": row["order_id"],
@@ -996,6 +1021,7 @@ class File2EdiStore:
             "partners": [self._partner_to_api(dict(p)) for p in partners],
             "lines": [camel(dict(l), l_map) for l in lines],
             "anomalies": [self._anomaly_to_api(dict(a), a_map, order=order) for a in anomalies],
+            "comments": [camel(dict(c), c_map) for c in (comments or [])],
             "traceability": trace,
             "edifactReady": bool(row.get("edifact_content") or row.get("edifact_filename")),
             "pdfUrl": f"/api/orders/{order['orderId']}/pdf",
@@ -1516,6 +1542,41 @@ class File2EdiStore:
         self._sync_order_graph(review)
         return review
 
+    def add_order_comment(
+        self,
+        order_id: str,
+        body: str,
+        actor: str = "operator",
+        anomaly_id: str | None = None,
+    ) -> dict | None:
+        """Append an ADV review comment. Returns the refreshed review or None if missing."""
+        text = (body or "").strip()
+        if not text:
+            return None
+        if not self.load_order_review(order_id):
+            return None
+        linked = (anomaly_id or "").strip() or None
+        if linked:
+            conn = self._conn()
+            row = conn.execute(
+                "SELECT anomaly_id FROM file2edi_order_anomalies WHERE anomaly_id=? AND order_id=?",
+                [linked, order_id],
+            ).fetchone()
+            conn.close()
+            if not row:
+                linked = None
+        comment_id = f"cmt-{uuid.uuid4().hex[:12]}"
+        conn = self._conn()
+        conn.execute(
+            """INSERT INTO file2edi_order_comments
+               (comment_id, order_id, anomaly_id, actor, body, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            [comment_id, order_id, linked, actor or "operator", text, _now()],
+        )
+        conn.commit()
+        conn.close()
+        return self.load_order_review(order_id)
+
     def resolve_anomaly(self, anomaly_id: str, action: str) -> dict | None:
         status_map = {"corrected": "Corrigée", "ignored": "Ignorée", "blocking": "Bloquante"}
         conn = self._conn()
@@ -1982,6 +2043,16 @@ class PostgresFile2EdiStore(File2EdiStore):
           status     TEXT DEFAULT 'Ouverte',
           created_at TEXT NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS file2edi_order_comments (
+          comment_id TEXT PRIMARY KEY,
+          order_id   TEXT NOT NULL REFERENCES file2edi_orders(order_id) ON DELETE CASCADE,
+          anomaly_id TEXT,
+          actor      TEXT NOT NULL,
+          body       TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_f2e_comments_order ON file2edi_order_comments(order_id);
 
         CREATE TABLE IF NOT EXISTS file2edi_conversion_history (
           conversion_id TEXT PRIMARY KEY,

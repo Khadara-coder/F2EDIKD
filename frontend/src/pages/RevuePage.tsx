@@ -13,6 +13,8 @@ import { OrderGeneralInfoPanel } from "@/components/file2edi/OrderGeneralInfoPan
 import { OrderLinesEditPanel } from "@/components/file2edi/OrderLinesEditPanel";
 import { OrderLinesSummaryTable } from "@/components/file2edi/OrderLinesSummaryTable";
 import { ProgressStepper } from "@/components/file2edi/ProgressStepper";
+import { AnomaliesTable } from "@/components/file2edi/AnomaliesTable";
+import { OrderCommentsPanel } from "@/components/file2edi/OrderCommentsPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,7 +28,7 @@ import {
   TRANSFER_MOTIF_TEMPLATES,
 } from "@/lib/motifTemplates";
 import { formatCurrency, formatDate, formatDateTime, downloadTextFile } from "@/lib/utils";
-import { collectReviewBlockers, countPendingAnomalies, isAnomalyPending } from "@/lib/reviewValidation";
+import { collectReviewBlockers, countPendingAnomalies } from "@/lib/reviewValidation";
 import type { GestionnaireUser } from "@/types";
 
 function formatCooldownMmSs(seconds: number): string {
@@ -77,6 +79,7 @@ export function RevuePage() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState("");
   const [transferNote, setTransferNote] = useState("");
+  const [selectedAnomalyId, setSelectedAnomalyId] = useState<string | null>(null);
 
   const invalidate = () =>
     queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
@@ -220,7 +223,7 @@ export function RevuePage() {
     );
   }
 
-  const { order, partners, lines, anomalies, traceability } = data;
+  const { order, partners, lines, anomalies, comments = [], traceability } = data;
   const soldto = partners.find((p) => p.partnerFunction === "soldto");
   const shipto = partners.find((p) => p.partnerFunction === "shipto");
   const invalidDate = !order.orderDate;
@@ -605,6 +608,9 @@ export function RevuePage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Anomalies et commentaires</CardTitle>
+            <p className="text-xs text-muted-foreground">
+              Ces boutons clôturent l&apos;alerte. Corrigez d&apos;abord les données dans le formulaire si besoin.
+            </p>
             {pendingAnomalyCount > 0 && (
               <p className="text-sm text-amber-700">
                 {pendingAnomalyCount} anomalie{pendingAnomalyCount > 1 ? "s" : ""} à traiter - choisissez
@@ -613,51 +619,27 @@ export function RevuePage() {
             )}
           </CardHeader>
           <CardContent className="space-y-3">
-            {anomalies.length === 0 ? (
-              <p className="text-sm text-muted-foreground">Aucune anomalie signalée.</p>
-            ) : (
-              anomalies.map((a) => {
-                const pending = isAnomalyPending(a);
-                const isValidated = a.status === "Corrigée";
-                const isIgnored = a.status === "Ignorée";
-                const acceptLabel = a.buttonAccept?.trim() || "Corrigé";
-                const rejectLabel = a.buttonReject?.trim() || "Refusé";
-                const statusLabel =
-                  a.status === "Corrigée" ? acceptLabel
-                  : a.status === "Ignorée" ? rejectLabel
-                  : a.status;
-                return (
-              <div key={a.anomalyId} className="flex items-start justify-between gap-4 rounded-lg border p-3">
-                <div className="min-w-0">
-                  <p className="text-sm">{a.message}</p>
-                  <Badge variant={pending ? "warning" : "success"} className="mt-1">
-                    {statusLabel}
-                  </Badge>
-                </div>
-                <div className="flex shrink-0 flex-col gap-1 sm:max-w-[280px]">
-                  <Button
-                    variant={isValidated ? "secondary" : "ghost"}
-                    size="sm"
-                    className="h-auto whitespace-normal px-2 py-1.5 text-left text-xs leading-snug"
-                    onClick={() => api.resolveAnomaly(a.anomalyId, "corrected").then(invalidate)}
-                    disabled={workflowLocked}
-                  >
-                    {acceptLabel}
-                  </Button>
-                  <Button
-                    variant={isIgnored ? "secondary" : "ghost"}
-                    size="sm"
-                    className="h-auto whitespace-normal px-2 py-1.5 text-left text-xs leading-snug"
-                    onClick={() => api.resolveAnomaly(a.anomalyId, "ignored").then(invalidate)}
-                    disabled={workflowLocked}
-                  >
-                    {rejectLabel}
-                  </Button>
-                </div>
-              </div>
-                );
-              })
-            )}
+            <AnomaliesTable
+              anomalies={anomalies}
+              comments={comments}
+              selectedAnomalyId={selectedAnomalyId}
+              onSelectAnomaly={setSelectedAnomalyId}
+              onResolve={(anomalyId, action) => {
+                void api.resolveAnomaly(anomalyId, action).then(invalidate);
+              }}
+              disabled={workflowLocked}
+            />
+            <OrderCommentsPanel
+              comments={comments}
+              anomalies={anomalies}
+              selectedAnomalyId={selectedAnomalyId}
+              onClearSelection={() => setSelectedAnomalyId(null)}
+              disabled={workflowLocked}
+              onSubmit={async (body, anomalyId) => {
+                await api.addOrderComment(orderId, body, anomalyId);
+                await invalidate();
+              }}
+            />
           </CardContent>
         </Card>
 

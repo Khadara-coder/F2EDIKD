@@ -541,9 +541,11 @@ def build_orders_message(
 
 
 def generate_tst_filename(order_number: str, soldto: str, ts: Optional[datetime] = None) -> str:
-    """Generate the output .tst filename.
+    """Canonical remote filename for SFTP delivery (Bosch / Esker).
 
     Format: ORDERS_<SOLDTO>_<ORDERNUMBER>_<YYYYMMDDHHMMSS>.tst
+
+    Settings ``sftpConfig.fileNamePattern`` is not applied — Esker expects this layout.
     """
     t = ts or datetime.now()
     clean_order = re.sub(r"[^A-Z0-9]", "", order_number.upper())

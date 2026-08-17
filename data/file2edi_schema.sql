@@ -131,3 +131,15 @@ CREATE TABLE IF NOT EXISTS file2edi_business_events (
 CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_created ON file2edi_business_events(created_at);
 CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_actor ON file2edi_business_events(actor);
 CREATE INDEX IF NOT EXISTS idx_f2e_biz_events_action ON file2edi_business_events(action);
+
+CREATE TABLE IF NOT EXISTS file2edi_order_comments (
+  comment_id   TEXT PRIMARY KEY,
+  order_id     TEXT NOT NULL,
+  anomaly_id   TEXT,
+  actor        TEXT NOT NULL,
+  body         TEXT NOT NULL,
+  created_at   TEXT NOT NULL,
+  FOREIGN KEY(order_id) REFERENCES file2edi_orders(order_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_f2e_comments_order ON file2edi_order_comments(order_id);

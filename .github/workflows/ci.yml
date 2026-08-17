@@ -52,3 +52,16 @@ jobs:
       - name: Build frontend
         run: npm run build
         working-directory: frontend
+
+      - name: Verify committed frontend/dist is up to date
+        run: |
+          if ! git diff --exit-code --ignore-cr-at-eol -- frontend/dist/index.html; then
+            echo "frontend/dist/index.html is stale. Run: cd frontend && npm run build && commit dist."
+            exit 1
+          fi
+          untracked=$(git ls-files --others --exclude-standard -- frontend/dist)
+          if [ -n "$untracked" ]; then
+            echo "Untracked assets in frontend/dist after build (committed dist is out of date):"
+            echo "$untracked"
+            exit 1
+          fi

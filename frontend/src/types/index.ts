@@ -198,6 +198,15 @@ export interface OrderAnomaly {
   actionMode?: string;
 }
 
+export interface OrderComment {
+  commentId: string;
+  orderId: string;
+  anomalyId?: string | null;
+  actor: string;
+  body: string;
+  createdAt: string;
+}
+
 export interface TraceabilityStep {
   id: string;
   label: string;
@@ -247,6 +256,7 @@ export interface OrderReview {
   partners: OrderPartner[];
   lines: OrderLine[];
   anomalies: OrderAnomaly[];
+  comments?: OrderComment[];
   traceability: TraceabilityStep[];
   pdfUrl?: string;
   edifactReady: boolean;

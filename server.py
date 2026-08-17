@@ -4089,8 +4089,22 @@ def _send_generated_edifact_sftp(cid: str, req: Request):
 
 @app.post("/api/conversions/{cid}/send-sftp")
 def api_send_sftp(cid: str, req: Request):
-    """Legacy SFTP endpoint - use /api/orders/{id}/send-sftp instead."""
-    return _send_generated_edifact_sftp(cid, req)
+    """Deprecated alias of POST /api/orders/{id}/send-sftp (n8n / anciens clients)."""
+    log.warning(
+        "Deprecated SFTP route /api/conversions/%s/send-sftp — use /api/orders/%s/send-sftp",
+        cid,
+        cid,
+    )
+    result = _send_generated_edifact_sftp(cid, req)
+    headers = {
+        "Deprecation": "true",
+        "Link": f'</api/orders/{cid}/send-sftp>; rel="successor-version"',
+    }
+    if isinstance(result, JSONResponse):
+        for key, value in headers.items():
+            result.headers[key] = value
+        return result
+    return JSONResponse(content=result, headers=headers)
 
 
 def _upsert_sftp_status(cid: str, sftp_status: str, detail: str = "") -> None:

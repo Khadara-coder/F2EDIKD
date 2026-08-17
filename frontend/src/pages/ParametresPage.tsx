@@ -650,11 +650,15 @@ export function ParametresPage() {
                     </p>
                   </div>
 
-                  <EditableField
-                    label="Pattern nom de fichier"
-                    value={form.watch("sftpConfig.fileNamePattern")}
-                    onChange={(v) => form.setValue("sftpConfig.fileNamePattern", v)}
-                  />
+                  <div className="rounded-lg border bg-muted/20 p-4">
+                    <p className="text-sm font-medium">Nom du fichier envoyé</p>
+                    <p className="mt-1 font-mono text-sm text-foreground">
+                      ORDERS_&lt;SOLDTO&gt;_&lt;N°COMMANDE&gt;_&lt;YYYYMMDDHHMMSS&gt;.tst
+                    </p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Format Bosch / Esker, généré à l&apos;envoi. Non configurable.
+                    </p>
+                  </div>
 
                   <div className="space-y-2 rounded-lg border p-4">
                     <div className="flex items-center justify-between gap-3">

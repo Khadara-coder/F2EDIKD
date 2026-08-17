@@ -252,6 +252,12 @@ export const api = {
       body: JSON.stringify({ action }),
     }),
 
+  addOrderComment: (orderId: string, body: string, anomalyId?: string | null) =>
+    request<OrderReview>(`/orders/${orderId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ body, anomalyId: anomalyId || undefined }),
+    }),
+
   generateEdifact: (orderId: string) =>
     request<GenerateEdifactResult>(`/orders/${orderId}/generate-edifact`, {
       method: "POST",

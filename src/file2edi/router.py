@@ -313,6 +313,7 @@ def overlay_sftp_config_from_env(sftp: dict | None = None) -> dict:
         "port": port,
         "username": username,
         "remotePath": remote,
+        # Stored for API compatibility only — upload uses generate_tst_filename().
         "fileNamePattern": str(base.get("fileNamePattern") or "ORDERS_{orderId}.edi"),
         "hasPassword": bool(os.environ.get("SFTP_PASSWORD", "")),
     }
@@ -1023,6 +1024,33 @@ def create_router() -> APIRouter:
             entity_id=anomaly_id,
             order_id=order_id,
             details={"action": action},
+        )
+        return review
+
+    @router.post("/orders/{order_id}/comments")
+    async def add_order_comment(order_id: str, payload: dict, req: Request):
+        body = str((payload or {}).get("body") or "").strip()
+        if not body:
+            raise HTTPException(400, "Commentaire vide")
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
+        anomaly_id = str((payload or {}).get("anomalyId") or "").strip() or None
+        review = get_store().add_order_comment(
+            order_id,
+            body,
+            actor=actor,
+            anomaly_id=anomaly_id,
+        )
+        if not review:
+            raise HTTPException(404, "Commande introuvable")
+        _biz_log(
+            actor=actor,
+            action="order.comment",
+            entity_type="comment",
+            order_id=order_id,
+            details={"anomalyId": anomaly_id, "length": len(body)},
         )
         return review
 
