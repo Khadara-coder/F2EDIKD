@@ -1399,7 +1399,11 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
 
     # Sync vers file2edi_orders pour que le PDF soit visible dans la Revue React
     try:
-        from src.file2edi.router import engine_to_order_review, _conversion_from_engine
+        from src.file2edi.router import (
+            _resolve_adv_username_from_soldto,
+            engine_to_order_review,
+            _conversion_from_engine,
+        )
         from src.file2edi.store import get_store as _get_f2e_store
         order_id = result.get("pdf_hash") or ""
         upload_id = f"proxy-{order_id[:12]}"
@@ -1440,7 +1444,40 @@ async def api_proxy_convert(req: Request, file: UploadFile = File(...), callback
         except Exception as _resub_exc:
             log.warning("resubmission check FAILED: %s", _resub_exc, exc_info=True)
 
-        _get_f2e_store().save_order_review(review)
+        store = _get_f2e_store()
+        soldto = next(
+            (
+                partner.get("partnerCode")
+                for partner in review.get("partners", [])
+                if partner.get("partnerFunction") == "soldto"
+            ),
+            None,
+        )
+        assigned_to = (
+            _resolve_adv_username_from_soldto(str(soldto), store)
+            if soldto
+            else None
+        )
+        if assigned_to:
+            review["order"]["assignedTo"] = assigned_to
+
+        store.save_order_review(review)
+        store.log_business_event(
+            actor=actor or "n8n",
+            action="upload.extract_direct",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            details={
+                "uploadId": upload_id,
+                "fileName": file.filename or "commande.pdf",
+                "source": review["order"]["source"],
+                "soldto": soldto,
+                "assignedTo": assigned_to,
+                "lines": len(review.get("lines") or []),
+                "anomalies": len(review.get("anomalies") or []),
+            },
+        )
     except Exception as _f2e_exc:
         log.warning("proxy/convert: file2edi_orders sync failed (non-fatal): %s", _f2e_exc)
 
