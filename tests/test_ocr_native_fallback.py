@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import shutil
+
+import pytest
 from PIL import Image
 
 import app.ocr as ocr_mod
@@ -53,6 +56,13 @@ def test_ocr_image_with_layout_without_pytesseract(monkeypatch):
 def test_ocr_layout_callback_none_when_provider_missing(monkeypatch):
     monkeypatch.setattr(ocr_mod, "ocr_provider_available", lambda: False)
     assert ocr_mod.ocr_layout_callback() is None
+
+
+def test_ocr_provider_available_when_tesseract_binary_is_installed():
+    if shutil.which("tesseract") is None:
+        pytest.skip("tesseract binary is not installed")
+    assert ocr_mod.ocr_provider_available() is True
+    assert ocr_mod.ocr_layout_callback() is not None
 
 
 def test_extract_page_falls_back_to_native_on_tesseract_attribute_error():

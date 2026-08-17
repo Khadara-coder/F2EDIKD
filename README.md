@@ -41,12 +41,14 @@ docker compose -f docker-compose.file2edi.yml up --build -d
 
 ### Pousser en staging (VM Azure)
 
+Le dépôt canonique est Bosch (`bosch`). Ne plus pousser vers GitHub.com (`origin` local).
+
 ```bash
 # Depuis ta branche locale dev
-git push origin dev
-# Ouvrir une PR dev → staging sur GitHub, merger
+git push bosch dev
+# Ouvrir une PR dev → staging sur Bosch GitHub, merger
 
-# Sur la VM Azure
+# Sur la VM Azure (remote clone = origin → Bosch)
 git -C /root/GenieCommande pull origin staging
 git -C /root/GenieCommande checkout staging
 docker compose -f docker-compose.file2edi.yml up --build -d
@@ -55,7 +57,7 @@ docker compose -f docker-compose.file2edi.yml up --build -d
 ### Passer en production (VM Azure)
 
 ```bash
-# PR staging → main sur GitHub, merger
+# PR staging → main sur Bosch GitHub, merger
 # Sur la VM prod : git pull origin main, puis relancer docker compose
 ```
 

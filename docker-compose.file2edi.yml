@@ -40,6 +40,7 @@ services:
       MOCK_MODE: "${MOCK_MODE:-false}"
       ENABLE_PROFILE_LOGIN: "${ENABLE_PROFILE_LOGIN:-true}"
       APP_REQUIRE_AUTH: "${APP_REQUIRE_AUTH:-true}"
+      TESSERACT_LANG: "${TESSERACT_LANG:-fra+eng}"
       APP_ADMIN_USERS: "${APP_ADMIN_USERS:-dik1dy@bosch.com,dik1dy,khadara}"
       EDIFACT_PROFILE: "ELM_STANDARD"
       UNB_SENDER_GLN: "4399901876613"

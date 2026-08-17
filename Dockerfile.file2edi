@@ -15,9 +15,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_HOST=0.0.0.0 \
     DATABRICKS_APP_PORT=8000
 
-# System deps for pdfplumber / PyMuPDF
+# System deps for pdfplumber / PyMuPDF / OCR (same binaries as Dockerfile.dev)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libffi-dev curl wget git \
+    tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt requirements-postgres.txt ./

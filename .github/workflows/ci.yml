@@ -5,6 +5,14 @@ on:
     branches: ["dev", "staging", "main"]
   pull_request:
     branches: ["dev", "staging", "main"]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   backend-tests:
@@ -14,14 +22,23 @@ jobs:
       MOCK_MODE: "true"
       APP_PROFILE_LOGIN_PASSWORD: "ci-password"
       FILE2EDI_POSTGRES_STRICT: "false"
+      TESSERACT_LANG: "fra+eng"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install Tesseract OCR
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            tesseract-ocr tesseract-ocr-fra tesseract-ocr-eng
+          tesseract --version
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: "pip"
 
       - name: Install Python dependencies
         run: |
@@ -55,13 +72,19 @@ jobs:
 
       - name: Verify committed frontend/dist is up to date
         run: |
-          if ! git diff --exit-code --ignore-cr-at-eol -- frontend/dist/index.html; then
-            echo "frontend/dist/index.html is stale. Run: cd frontend && npm run build && commit dist."
+          if ! git diff --exit-code --ignore-cr-at-eol -- frontend/dist; then
+            echo "frontend/dist is stale. Run: cd frontend && npm run build && commit dist."
             exit 1
           fi
           untracked=$(git ls-files --others --exclude-standard -- frontend/dist)
           if [ -n "$untracked" ]; then
             echo "Untracked assets in frontend/dist after build (committed dist is out of date):"
             echo "$untracked"
+            exit 1
+          fi
+          deleted=$(git ls-files --deleted -- frontend/dist)
+          if [ -n "$deleted" ]; then
+            echo "Committed frontend/dist files missing after build:"
+            echo "$deleted"
             exit 1
           fi
