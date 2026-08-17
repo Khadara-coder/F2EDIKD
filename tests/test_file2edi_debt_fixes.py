@@ -74,6 +74,24 @@ def test_list_orders_summary_hides_done_statuses(tmp_path: Path):
     assert "ord-ok" not in ids
 
 
+def test_clear_order_workflow_state_resets_sap_and_assignment(tmp_path: Path):
+    store = File2EdiStore(str(tmp_path / "f2e.db"), str(tmp_path / "intake"))
+    store.save_order_review(_minimal_review("ord-reprocess", "upl-reprocess"))
+    store.mark_sftp_delivery("ord-reprocess", True, "/remote/ORDERS.tst", sent_by="khadara")
+    store.clear_order_workflow_state("ord-reprocess", assigned_to="lex1tc")
+
+    conn = store._conn()
+    row = conn.execute(
+        "SELECT assigned_to, sap_sent_at, sap_sent_by, rejection_message FROM file2edi_orders WHERE order_id=?",
+        ["ord-reprocess"],
+    ).fetchone()
+    conn.close()
+    assert row["assigned_to"] == "lex1tc"
+    assert not row["sap_sent_at"]
+    assert not row["sap_sent_by"]
+    assert not row["rejection_message"]
+
+
 def test_delete_upload_cascades_orders_and_file(tmp_path: Path):
     intake = tmp_path / "intake"
     intake.mkdir()

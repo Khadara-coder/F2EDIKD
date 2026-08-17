@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { Download, Send, PauseCircle, UserCheck, XCircle, Save } from "lucide-react";
+import { Download, Send, PauseCircle, UserCheck, XCircle, Save, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOrderReview } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -79,10 +79,14 @@ export function RevuePage() {
   const [transferOpen, setTransferOpen] = useState(false);
   const [transferTo, setTransferTo] = useState("");
   const [transferNote, setTransferNote] = useState("");
+  const [reprocessOpen, setReprocessOpen] = useState(false);
   const [selectedAnomalyId, setSelectedAnomalyId] = useState<string | null>(null);
 
-  const invalidate = () =>
-    queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
+  const invalidate = () => {
+    void queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
+    void queryClient.invalidateQueries({ queryKey: ["orders"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  };
 
   const updateHeader = useMutation({
     mutationFn: (payload: Parameters<typeof api.updateOrderHeader>[1]) =>
@@ -205,6 +209,22 @@ export function RevuePage() {
     },
     onSuccess: () => { setTransferOpen(false); setTransferTo(""); setTransferNote(""); invalidate(); },
     onError: (e) => setInfoDialog({ title: "Erreur", message: e instanceof Error ? e.message : "Erreur" }),
+  });
+
+  const reprocessMutation = useMutation({
+    mutationFn: () => api.reprocessOrder(orderId),
+    onSuccess: () => {
+      setReprocessOpen(false);
+      invalidate();
+      setInfoDialog({
+        title: "Retraitement lancé",
+        message: "La commande a été extraite à nouveau comme un nouveau dossier. Vérifiez partenaires, lignes et anomalies.",
+      });
+    },
+    onError: (e) => setInfoDialog({
+      title: "Échec du retraitement",
+      message: e instanceof Error ? e.message : "Erreur",
+    }),
   });
 
   if (isLoading) {
@@ -382,8 +402,10 @@ export function RevuePage() {
     || Boolean(order.sapSentAt);
   const isConfirmedSap = order.status === "Confirmé SAP" || Boolean(order.sapVbeln);
   const cooldownActive = isSentToSap && cooldownRemaining > 0;
-  const workflowLocked = isRejected || isSentToSap;
-  const canSendToSap = !isRejected && !edifactBusy && (
+  // Rejeté (moteur ou manuel) reste traitable : corriger, enregistrer, envoyer SAP.
+  // Seul un envoi SAP déjà effectué verrouille le dossier (renvoi admin excepté).
+  const workflowLocked = isSentToSap;
+  const canSendToSap = !edifactBusy && (
     (!isSentToSap && canValidate) || (isSentToSap && isAdmin)
   );
   const sendSapLabel = !isSentToSap
@@ -442,7 +464,7 @@ export function RevuePage() {
               size="sm"
               className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
               onClick={() => setRejectOpen(true)}
-              disabled={workflowLocked}
+              disabled={workflowLocked || isRejected}
             >
               <XCircle className="h-4 w-4" /> Rejeter
             </Button>
@@ -456,6 +478,18 @@ export function RevuePage() {
             >
               <UserCheck className="h-4 w-4" /> Transférer
             </Button>
+            {isAdmin && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-2 border-violet-300 text-violet-700 hover:bg-violet-50"
+                onClick={() => setReprocessOpen(true)}
+                disabled={reprocessMutation.isPending}
+              >
+                <RefreshCw className={`h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />
+                Retraiter
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -511,6 +545,13 @@ export function RevuePage() {
           </Badge>
         )}
       </div>
+
+      {isRejected && !isSentToSap && (
+        <div className="mb-6 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Cette commande a été rejetée. Vous pouvez la corriger manuellement (partenaires, lignes, anomalies),
+          l&apos;enregistrer, puis l&apos;envoyer vers SAP.
+        </div>
+      )}
 
       <div className="mb-6 grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-7">
         <StatCard compact label="Client" value={order.clientName} />
@@ -670,7 +711,7 @@ export function RevuePage() {
             variant="outline"
             className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
             onClick={() => setRejectOpen(true)}
-            disabled={workflowLocked}
+            disabled={workflowLocked || isRejected}
           >
             <XCircle className="h-4 w-4" /> Rejeter
           </Button>
@@ -682,6 +723,17 @@ export function RevuePage() {
           >
             <UserCheck className="h-4 w-4" /> Transférer
           </Button>
+          {isAdmin && (
+            <Button
+              variant="outline"
+              className="gap-2 border-violet-300 text-violet-700 hover:bg-violet-50"
+              onClick={() => setReprocessOpen(true)}
+              disabled={reprocessMutation.isPending}
+            >
+              <RefreshCw className={`h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />
+              Retraiter
+            </Button>
+          )}
         </div>
         {/* Actions principales (droite) */}
         <div className="flex flex-wrap gap-2">
@@ -918,6 +970,30 @@ export function RevuePage() {
             >
               <UserCheck className="h-4 w-4" />
               {transferMutation.isPending ? "En cours…" : "Transférer"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={reprocessOpen} onOpenChange={setReprocessOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Retraiter comme une nouvelle commande</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            Le PDF sera extrait à nouveau. Les partenaires, lignes et anomalies actuels seront
+            remplacés. Les commentaires sont conservés. Possible quel que soit le statut
+            (rejeté, envoyé SAP, etc.).
+          </p>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setReprocessOpen(false)}>Annuler</Button>
+            <Button
+              className="gap-2 bg-violet-600 hover:bg-violet-700"
+              onClick={() => reprocessMutation.mutate()}
+              disabled={reprocessMutation.isPending}
+            >
+              <RefreshCw className={`h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />
+              {reprocessMutation.isPending ? "Retraitement…" : "Retraiter"}
             </Button>
           </DialogFooter>
         </DialogContent>

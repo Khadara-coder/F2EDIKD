@@ -551,6 +551,85 @@ def create_router() -> APIRouter:
         )
         return {"ok": True, "status": "Transféré", "to": to_username}
 
+    @router.post("/orders/{order_id}/reprocess")
+    def reprocess_order(order_id: str, req: Request):
+        """Admin-only: re-run extraction from the stored PDF, any current status."""
+        admin_actor, _ = ensure_admin(req)
+        store = get_store()
+        existing = store.load_order_review(order_id)
+        if not existing:
+            raise HTTPException(404, "Commande introuvable")
+
+        pdf_path = store.get_pdf_path_for_order(order_id)
+        if not pdf_path:
+            store.ensure_order_pdf(order_id)
+            pdf_path = store.get_pdf_path_for_order(order_id)
+        if not pdf_path or not pdf_path.exists():
+            raise HTTPException(409, "PDF introuvable — impossible de retraiter cette commande")
+
+        previous = existing.get("order") or {}
+        filename = str(previous.get("fileName") or pdf_path.name)
+        upload_id = str(previous.get("uploadId") or "")
+        payload = pdf_path.read_bytes()
+        started = _time.perf_counter()
+        result = engine_bridge.process_pdf(
+            payload, filename, actor=admin_actor, bypass_cache=True,
+        )
+        assigned_actor = engine_bridge.resolve_processing_actor(admin_actor, result)
+        review = engine_to_order_review(order_id, upload_id, result)
+        review["_engine_result"] = result
+        review["order"]["orderId"] = order_id
+        review["order"]["uploadId"] = upload_id or review["order"].get("uploadId")
+        review["order"]["fileName"] = filename
+        review["order"]["pdfPath"] = str(pdf_path)
+        review["order"]["processedBy"] = assigned_actor
+        review["order"]["source"] = previous.get("source") or "ui"
+        if previous.get("createdAt"):
+            review["order"]["createdAt"] = previous["createdAt"]
+
+        soldto = next(
+            (
+                p.get("partnerCode")
+                for p in review.get("partners", [])
+                if p.get("partnerFunction") == "soldto"
+            ),
+            None,
+        )
+        assigned_to = None
+        if soldto:
+            assigned_to = _resolve_adv_username_from_soldto(soldto, store)
+            if assigned_to:
+                review["order"]["assignedTo"] = assigned_to
+
+        store.save_order_review(review)
+        store.clear_order_workflow_state(order_id, assigned_to=assigned_to)
+
+        try:
+            engine_bridge.init_db()
+            engine_bridge.upsert_conversion(
+                _conversion_from_engine(order_id, upload_id, result, operator=assigned_actor)
+            )
+        except Exception:
+            pass
+
+        _biz_log(
+            actor=admin_actor,
+            action="order.reprocess",
+            entity_type="order",
+            entity_id=order_id,
+            order_id=order_id,
+            duration_ms=int((_time.perf_counter() - started) * 1000),
+            details={
+                "fileName": filename,
+                "previousStatus": previous.get("status"),
+                "newStatus": (review.get("order") or {}).get("status"),
+                "lines": len(review.get("lines") or []),
+                "anomalies": len(review.get("anomalies") or []),
+            },
+        )
+        refreshed = store.load_order_review(order_id) or review
+        return _with_sap_resend_cooldown(refreshed)
+
     # ── Health (React Header badges) ─────────────────────────────────────────
     @router.get("/health/system")
     def health_system():
@@ -1087,6 +1166,7 @@ def create_router() -> APIRouter:
 
     @router.post("/orders/{order_id}/generate-edifact")
     async def generate_edifact(order_id: str, req: Request):
+        """Generate EDIFACT from the current review, including system-rejected orders."""
         store = get_store()
         started = _time.perf_counter()
         try:
@@ -1185,6 +1265,7 @@ def create_router() -> APIRouter:
         req: Request,
         payload: dict = Body(default_factory=dict),
     ):
+        """Send generated EDIFACT to SAP. Allowed for Rejeté after manual correction."""
         import tempfile
         from src.sftp_delivery import upload_tst
 

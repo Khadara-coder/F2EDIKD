@@ -269,6 +269,9 @@ export const api = {
       { method: "POST" },
     ),
 
+  reprocessOrder: (orderId: string) =>
+    request<OrderReview>(`/orders/${orderId}/reprocess`, { method: "POST" }),
+
   sendToSap: (orderId: string, payload?: { force?: boolean; ignoreCooldown?: boolean }) =>
     request<{
       success: boolean;

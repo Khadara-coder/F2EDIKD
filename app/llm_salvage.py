@@ -26,7 +26,7 @@ def recover_pdf_text(payload: bytes, partial_text: str = "") -> tuple[str, str]:
 
     try:
         from app.pdf_reader import pdf_pages_to_text
-        from app.ocr import ocr_image_with_layout
+        from app.ocr import ocr_layout_callback
         import fitz
 
         doc = fitz.open(stream=payload, filetype="pdf")
@@ -36,7 +36,7 @@ def recover_pdf_text(payload: bytes, partial_text: str = "") -> tuple[str, str]:
             return "", "none"
 
         selection = ",".join(str(i) for i in range(1, min(page_count + 1, 21)))
-        pages = pdf_pages_to_text(payload, selection, ocr_with_layout=ocr_image_with_layout)
+        pages = pdf_pages_to_text(payload, selection, ocr_with_layout=ocr_layout_callback())
         text = "\n".join(p["text"] for p in pages if p.get("text")).strip()
         if len(text) >= MIN_SALVAGE_TEXT_LEN:
             return text, "ocr_retry"

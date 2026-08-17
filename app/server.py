@@ -23,7 +23,7 @@ from app.engine import get_engine
 from app.extraction import build_text_extraction_result
 from app.image_extract import extract_image_with_selective_ocr
 from app.masterdata import MASTER_DATA_DIR, get_master_data
-from app.ocr import ocr_image, ocr_image_with_layout
+from app.ocr import ocr_image, ocr_image_with_layout, ocr_layout_callback
 from app.pdf_reader import parse_page_selection, pdf_page_layout, pdf_pages_to_text as read_pdf_pages, render_pdf_page
 from app.runtime import configure_runtime
 from app.text_utils import compact_text
@@ -321,7 +321,7 @@ def decode_text_payload(payload: bytes) -> str:
 
 def pdf_pages_to_text(payload: bytes, selection: str) -> list[dict]:
     try:
-        return read_pdf_pages(payload, selection, ocr_with_layout=ocr_image_with_layout)
+        return read_pdf_pages(payload, selection, ocr_with_layout=ocr_layout_callback())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:

@@ -1673,6 +1673,25 @@ class File2EdiStore:
         conn.close()
         self._sync_order_graph(self.load_order_review(order_id))
 
+    def clear_order_workflow_state(self, order_id: str, assigned_to: str | None = None) -> None:
+        """Reset hold/reject/transfer/SAP flags after a full reprocess."""
+        conn = self._conn()
+        conn.execute(
+            """UPDATE file2edi_orders SET
+                 assigned_to=?,
+                 hold_reason=NULL, hold_by=NULL, hold_at=NULL,
+                 rejection_message=NULL, rejected_by=NULL, rejected_at=NULL,
+                 transferred_from=NULL, transferred_to=NULL, transfer_note=NULL,
+                 sap_sent_at=NULL, sap_sent_by=NULL,
+                 sap_vbeln=NULL, sap_confirmed_at=NULL,
+                 edifact_content=NULL, edifact_filename=NULL,
+                 updated_at=?
+               WHERE order_id=?""",
+            [assigned_to, _now(), order_id],
+        )
+        conn.commit()
+        conn.close()
+
     def load_app_settings(self) -> dict[str, Any]:
         conn = self._conn()
         row = conn.execute(

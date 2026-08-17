@@ -9,10 +9,16 @@ from __future__ import annotations
 from typing import Any
 
 
-def process_pdf(payload: bytes, filename: str, actor: str | None = None) -> dict:
+def process_pdf(
+    payload: bytes,
+    filename: str,
+    actor: str | None = None,
+    *,
+    bypass_cache: bool = False,
+) -> dict:
     import server as srv
 
-    return srv._local_process_and_respond(payload, filename, actor=actor)
+    return srv._local_process_and_respond(payload, filename, actor=actor, bypass_cache=bypass_cache)
 
 
 def resolve_processing_actor(uploaded_by: str, result: dict | None = None) -> str:

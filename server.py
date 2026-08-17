@@ -1042,7 +1042,68 @@ def _f2edi_build_response(structured: dict, filename: str,
     }
 
 
-def _local_process_and_respond(payload: bytes, filename: str, actor: str | None = None) -> dict:
+def _is_ocr_runtime_error(exc: BaseException) -> bool:
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "tesseract" in text or "pytesseract" in text
+
+
+def _read_pdf_pages_for_process(payload: bytes, ocr_with_layout):
+    """Page 1 may use OCR when available; later pages stay native text."""
+    from app.pdf_reader import pdf_pages_to_text
+    import fitz as _fitz
+
+    _doc = _fitz.open(stream=payload, filetype="pdf")
+    _n_pages = _doc.page_count
+    _doc.close()
+
+    pages_p1 = pdf_pages_to_text(payload, "1", ocr_with_layout=ocr_with_layout)
+    if not pages_p1:
+        raise ValueError("Impossible d'extraire le texte du PDF")
+
+    if _n_pages > 1:
+        _rest_sel = ",".join(str(i) for i in range(2, min(_n_pages + 1, 21)))
+        try:
+            pages_rest = pdf_pages_to_text(payload, _rest_sel, ocr_with_layout=None)
+        except Exception:
+            pages_rest = []
+        all_pages = pages_p1 + pages_rest
+    else:
+        all_pages = pages_p1
+
+    text = "\n".join(p["text"] for p in all_pages if p.get("text"))
+    layout = pages_p1[0].get("layout")
+    return text, layout
+
+
+def _pdf_unreadable_response(filename: str, pdf_hash: str, elapsed: float, exc: BaseException) -> dict:
+    return {
+        "status": "ERROR", "filename": filename, "pdf_hash": pdf_hash,
+        "cached": False, "processing_time_s": elapsed,
+        "order":   {"po_number": None, "order_date": None, "delivery_date": None},
+        "customer": {
+            "soldto": None, "shipto": None, "name": None, "confidence": 0,
+            "delivery_address": {"street": "", "postal_code": "", "city": "", "country": ""},
+            "detected_address": {"name": "", "street": "", "postal_code": "", "city": "", "raw": ""},
+        },
+        "lines":     {"count": 0, "items": []},
+        "rejection": {
+            "decision": "REJECTED", "reason": "PDF_PARSE_FAILURE",
+            "blocking_count": 1, "warning_count": 0,
+            "details": [{"code": "PDF_PARSE_FAILURE", "message": str(exc),
+                          "severity": "blocking", "details": {}}],
+        },
+        "edifact":   {"generated": False, "message": None, "warnings": [], "errors": None},
+        "error": str(exc),
+    }
+
+
+def _local_process_and_respond(
+    payload: bytes,
+    filename: str,
+    actor: str | None = None,
+    *,
+    bypass_cache: bool = False,
+) -> dict:
     """Run the full F2EDIV2 pipeline locally. Idempotent via SHA-256 cache."""
     global _f2edi_requests_processed
     import time as _t
@@ -1050,96 +1111,81 @@ def _local_process_and_respond(payload: bytes, filename: str, actor: str | None 
     stored_pdf_path = _persist_uploaded_pdf(payload, filename, pdf_hash, actor=actor)
 
     # Idempotency cache
-    hit = _f2edi_cache.get_or_none(pdf_hash)
-    if hit is not None:
-        r = hit.copy()
-        r["cached"] = True
-        r["processing_time_s"] = 0.0
-        if stored_pdf_path:
-            r["pdf_storage_path"] = stored_pdf_path
-        return r
+    if bypass_cache:
+        _f2edi_cache.pop(pdf_hash, None)
+    else:
+        hit = _f2edi_cache.get_or_none(pdf_hash)
+        if hit is not None:
+            r = hit.copy()
+            r["cached"] = True
+            r["processing_time_s"] = 0.0
+            if stored_pdf_path:
+                r["pdf_storage_path"] = stored_pdf_path
+            return r
 
     t0 = _t.time()
     partial_text = ""
+    from app.extraction import extract_candidate_fields
+    from app.ocr import ocr_layout_callback
+
+    ocr_fn = ocr_layout_callback()
     try:
-        from app.pdf_reader import pdf_pages_to_text
-        from app.ocr import ocr_image_with_layout
-        from app.extraction import extract_candidate_fields
-        import fitz as _fitz
-        # Détecter le nombre de pages du PDF
-        _doc = _fitz.open(stream=payload, filetype="pdf")
-        _n_pages = _doc.page_count
-        _doc.close()
-
-        # Page 1 avec OCR si nécessaire (scannés), pages suivantes en texte natif
-        pages_p1 = pdf_pages_to_text(payload, "1", ocr_with_layout=ocr_image_with_layout)
-        if not pages_p1:
-            raise ValueError("Impossible d'extraire le texte du PDF")
-
-        if _n_pages > 1:
-            # Pages 2+ : texte natif uniquement (pas d'OCR)
-            _rest_sel = ",".join(str(i) for i in range(2, min(_n_pages + 1, 21)))
-            try:
-                pages_rest = pdf_pages_to_text(payload, _rest_sel, ocr_with_layout=None)
-            except Exception:
-                pages_rest = []
-            all_pages = pages_p1 + pages_rest
-        else:
-            all_pages = pages_p1
-
-        # Concaténer tout le texte pour l'extraction des lignes
-        text   = "\n".join(p["text"] for p in all_pages if p.get("text"))
+        text, layout = _read_pdf_pages_for_process(payload, ocr_fn)
         partial_text = text
-        layout = pages_p1[0].get("layout")  # layout de la page 1 pour l'entête
         fields = extract_candidate_fields(text, "", filename, layout, {})
         structured = fields.get("structured", {})
         response = _f2edi_build_response(structured, filename, pdf_hash, _t.time() - t0)
     except Exception as exc:
         log.exception("_local_process_and_respond failed for %s", filename)
-        elapsed = round(_t.time() - t0, 1)
-        salvaged = None
-        try:
-            from app.llm_salvage import salvage_with_llm
+        response = None
+        if ocr_fn is not None:
+            try:
+                text, layout = _read_pdf_pages_for_process(payload, None)
+                if (text or "").strip():
+                    log.warning(
+                        "OCR/parse error for %s; continuing with native PDF text: %s",
+                        filename,
+                        exc,
+                    )
+                    partial_text = text
+                    fields = extract_candidate_fields(text, "", filename, layout, {})
+                    structured = fields.get("structured", {})
+                    response = _f2edi_build_response(structured, filename, pdf_hash, _t.time() - t0)
+            except Exception as native_exc:
+                log.debug("native PDF fallback failed for %s: %s", filename, native_exc)
 
-            salvaged = salvage_with_llm(
-                payload,
-                filename,
-                partial_text=partial_text,
-                original_error=str(exc),
-                elapsed_s=elapsed,
-                pdf_hash=pdf_hash,
-            )
-        except Exception as salvage_exc:
-            log.debug("LLM salvage unavailable for %s: %s", filename, salvage_exc)
+        if response is None:
+            elapsed = round(_t.time() - t0, 1)
+            salvaged = None
+            try:
+                from app.llm_salvage import salvage_with_llm
 
-        if salvaged:
-            log.info(
-                "LLM salvage succeeded for %s (recovery=%s, lines=%s)",
-                filename,
-                salvaged.get("salvage_recovery_method"),
-                (salvaged.get("lines") or {}).get("count", 0),
-            )
-            response = salvaged
-        else:
-            response = {
-                "status": "ERROR", "filename": filename, "pdf_hash": pdf_hash,
-                "cached": False, "processing_time_s": elapsed,
-                "order":   {"po_number": None, "order_date": None, "delivery_date": None},
-                "customer": {
-                    "soldto": None, "shipto": None, "name": None, "confidence": 0,
-                    "delivery_address": {"street": "", "postal_code": "", "city": "", "country": ""},
-                    "detected_address": {"name": "", "street": "", "postal_code": "", "city": "", "raw": ""},
-                },
-                "lines":     {"count": 0, "items": []},
-                "rejection": {
-                    "decision": "REJECTED", "reason": "PDF_PARSE_FAILURE",
-                    "blocking_count": 1, "warning_count": 0,
-                    "details": [{"code": "PDF_PARSE_FAILURE", "message": str(exc),
-                                  "severity": "blocking", "details": {}}],
-                },
-                "edifact":   {"generated": False, "message": None, "warnings": [], "errors": None},
-                "error": str(exc),
-            }
+                salvaged = salvage_with_llm(
+                    payload,
+                    filename,
+                    partial_text=partial_text,
+                    original_error=str(exc),
+                    elapsed_s=elapsed,
+                    pdf_hash=pdf_hash,
+                )
+            except Exception as salvage_exc:
+                log.debug("LLM salvage unavailable for %s: %s", filename, salvage_exc)
+
+            if salvaged:
+                log.info(
+                    "LLM salvage succeeded for %s (recovery=%s, lines=%s)",
+                    filename,
+                    salvaged.get("salvage_recovery_method"),
+                    (salvaged.get("lines") or {}).get("count", 0),
+                )
+                response = salvaged
+            elif _is_ocr_runtime_error(exc) and (partial_text or "").strip():
+                log.warning("Skipping PDF_PARSE_FAILURE after OCR error; native text is available")
+                fields = extract_candidate_fields(partial_text, "", filename, None, {})
+                structured = fields.get("structured", {})
+                response = _f2edi_build_response(structured, filename, pdf_hash, _t.time() - t0)
+            else:
+                response = _pdf_unreadable_response(filename, pdf_hash, elapsed, exc)
 
     if response["status"] == "OK":
         _f2edi_cache.put(pdf_hash, response.copy())
