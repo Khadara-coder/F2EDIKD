@@ -505,7 +505,128 @@ def extract_line_items_from_layout(layout: dict | None) -> list[dict]:
     return extract_line_items_from_lines(lines)
 
 
+def _extract_elm_supplier_order_rows(text: str) -> list[dict]:
+    """Parse ELM/Bosch supplier duplicates whose complete rows are native PDF text.
+
+    Example:
+      87020002940 MANETTE PIECE 1,000 8,65 4,41 4,41
+
+    The four numeric columns are quantity, public price, net unit price and
+    line amount. References on metadata lines (ELM/BOSCH, REMPLACE, ARISTON)
+    are deliberately ignored because only complete rows match.
+    """
+    folded = fold_text(text or "")
+    if "bon de commande fournisseur" not in folded:
+        return []
+
+    row_re = re.compile(
+        r"^\s*(?P<article>\d[A-Z0-9]{7,11})\s+"
+        r"(?P<designation>.+?)\s*PIECE\s+"
+        r"(?P<quantity>\d{1,5}[,.]\d{3})\s+"
+        r"(?P<public_price>\d{1,7}[,.]\d{2})\s+"
+        r"(?P<unit_price>\d{1,7}[,.]\d{2})\s+"
+        r"(?P<amount>\d{1,9}[,.]\d{2})\s*$",
+        flags=re.IGNORECASE,
+    )
+    rows: list[dict] = []
+    seen: set[str] = set()
+
+    def append_row(
+        article: str,
+        designation: str,
+        quantity: str,
+        unit_price: str,
+        amount: str,
+    ) -> None:
+        article = article.upper()
+        if article in seen:
+            return
+        seen.add(article)
+        rows.append(
+            {
+                "designation": compact_text(designation),
+                "article": article,
+                "delivery_date": "",
+                "quantity": _to_natural_qty_str(quantity),
+                "unit": "PCE",
+                "unit_price": compact_text(unit_price),
+                "amount": compact_text(amount),
+                "customer_reference": "",
+                "payment_terms": "",
+                "parser": "elm_supplier_order",
+            }
+        )
+
+    lines = [compact_text(line) for line in (text or "").splitlines()]
+    for raw_line in lines:
+        match = row_re.match(raw_line)
+        if not match:
+            continue
+        append_row(
+            match.group("article"),
+            match.group("designation"),
+            match.group("quantity"),
+            match.group("unit_price"),
+            match.group("amount"),
+        )
+
+    # PyMuPDF exposes the same visual row as four native text lines:
+    # article / designation / "PIECE qty public-price" / "net-price amount".
+    article_only_re = re.compile(r"^(?P<article>\d[A-Z0-9]{7,11})$", re.IGNORECASE)
+    piece_re = re.compile(
+        r"^(?:(?P<designation>.+?)\s*)?PIECE\s+"
+        r"(?P<quantity>\d{1,5}[,.]\d{3})\s+"
+        r"(?P<public_price>\d{1,7}[,.]\d{2})$",
+        re.IGNORECASE,
+    )
+    net_amount_re = re.compile(
+        r"^(?P<unit_price>\d{1,7}[,.]\d{2})\s+"
+        r"(?P<amount>\d{1,9}[,.]\d{2})$"
+    )
+    for index, line in enumerate(lines):
+        article_match = article_only_re.match(line)
+        if not article_match:
+            continue
+        article = article_match.group("article").upper()
+        designation_parts: list[str] = []
+        piece_match = None
+        piece_index = None
+        for candidate_index in range(index + 1, min(len(lines), index + 6)):
+            candidate = lines[candidate_index]
+            if article_only_re.match(candidate):
+                break
+            current_piece = piece_re.match(candidate)
+            if current_piece:
+                piece_match = current_piece
+                piece_index = candidate_index
+                embedded_designation = compact_text(current_piece.group("designation") or "")
+                if embedded_designation:
+                    designation_parts.append(embedded_designation)
+                break
+            if candidate and not candidate.startswith(("Page ", "ELM ", "Remises", "REMPLACE")):
+                designation_parts.append(candidate)
+        if not piece_match or piece_index is None or piece_index + 1 >= len(lines):
+            continue
+        amounts_match = net_amount_re.match(lines[piece_index + 1])
+        if not amounts_match:
+            continue
+        append_row(
+            article,
+            " ".join(designation_parts),
+            piece_match.group("quantity"),
+            amounts_match.group("unit_price"),
+            amounts_match.group("amount"),
+        )
+    return rows
+
+
 def extract_line_items(text: str, layout: dict | None, materials_by_id: dict[str, str]) -> list[dict]:
+    # Native ELM supplier duplicates span several pages. Parse their complete
+    # rows before page-1 layout extraction, which would otherwise stop early.
+    elm_supplier_rows = _extract_elm_supplier_order_rows(text)
+    if elm_supplier_rows:
+        return enrich_line_items_with_materials(elm_supplier_rows, materials_by_id)
+
     # Priority 0: CCL columnar format (text-based, takes precedence over layout
     # when pdfplumber produces column-split text without valid quantities in the layout).
     ccl_rows = _extract_ccl_columnar_format(text.splitlines() if text else [])

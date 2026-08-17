@@ -651,7 +651,13 @@ def extract_structured_fields(
     except Exception:
         pass
 
-    order_lines = _merge_order_line_candidates(order_lines, deterministic_lines)
+    # Supplier duplicates expose exact native-text rows across all pages. Their
+    # deterministic parser is more reliable than the truncated LLM response
+    # (which can confuse public price, discount and line amount columns).
+    if "bon de commande fournisseur" in fold_text(text) and deterministic_lines:
+        order_lines = deterministic_lines
+    else:
+        order_lines = _merge_order_line_candidates(order_lines, deterministic_lines)
 
     order_lines = _sanitize_order_lines(order_lines)
 
