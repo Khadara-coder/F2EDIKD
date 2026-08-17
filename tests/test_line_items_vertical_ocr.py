@@ -112,3 +112,53 @@ CIRCULAT.SAN.GRUNDFOS UPO 15-30/130 CIL2PIECE        1,000    230,00
     assert rows[1]["amount"] == "184,11"
     assert rows[2]["designation"].endswith("CIL2")
     assert rows[2]["amount"] == "117,30"
+
+
+def test_elm_supplier_order_keeps_duplicate_article_with_different_qty():
+    text = """
+ELM LEBLANC / BOSCH
+BON DE COMMANDE FOURNISSEUR
+D U P L I C A T A
+000021
+02/02/2024
+166435
+7736504816
+LC 9-4 PVHYB
+PIECE       20,000    275,00
+    275,00      5500,00
+Client 135156 Bon n°567639 Réf : 24-002731
+7736504816
+LC 9-4 PVHYB
+PIECE       10,000    275,00
+    275,00      2750,00
+Client 135156 Bon n°567642 Réf : 24-000025
+Montant HT : EUR      8250,00
+"""
+    rows = extract_line_items(text, None, {})
+
+    assert [(row["article"], row["quantity"], row["amount"]) for row in rows] == [
+        ("7736504816", "20", "5500,00"),
+        ("7736504816", "10", "2750,00"),
+    ]
+    assert rows[0]["unit_price"] == "275,00"
+    assert rows[1]["unit_price"] == "275,00"
+    assert rows[0]["customer_reference"] == "24-002731"
+    assert rows[1]["customer_reference"] == "24-000025"
+
+
+def test_elm_supplier_order_keeps_compact_duplicate_article_rows():
+    text = """
+BON DE COMMANDE FOURNISSEUR D U P L I C A T A
+87020002940 MANETTE PIECE 1,000 8,65 4,41 4,41
+Client 135156 Bon n°111 Réf : A-1
+87020002940 MANETTE PIECE 2,000 8,65 4,41 8,82
+Client 135156 Bon n°222 Réf : A-2
+"""
+    rows = extract_line_items(text, None, {})
+
+    assert [(row["article"], row["quantity"], row["amount"]) for row in rows] == [
+        ("87020002940", "1", "4,41"),
+        ("87020002940", "2", "8,82"),
+    ]
+    assert rows[0]["customer_reference"] == "A-1"
+    assert rows[1]["customer_reference"] == "A-2"

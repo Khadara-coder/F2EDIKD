@@ -1,4 +1,9 @@
-from app.extraction import _choose_final_date, _finalize_document_totals, _sanitize_order_lines
+from app.extraction import (
+    _choose_final_date,
+    _finalize_document_totals,
+    _merge_order_line_candidates,
+    _sanitize_order_lines,
+)
 
 
 def test_choose_final_date_prefers_strong_anchor_over_implausible_llm():
@@ -66,3 +71,32 @@ def test_sanitize_order_lines_infers_quantity_from_price_total():
 
     assert len(cleaned) == 1
     assert cleaned[0]["quantite"] == 6.0
+
+
+def test_merge_order_line_candidates_keeps_same_article_different_qty():
+    llm_lines = [
+        {
+            "code_article": "7736504816",
+            "quantite": 20.0,
+            "montant_ligne_ht": 5500.0,
+            "customer_reference": "24-002731",
+        }
+    ]
+    deterministic_lines = [
+        {
+            "code_article": "7736504816",
+            "quantite": 20.0,
+            "montant_ligne_ht": 5500.0,
+            "customer_reference": "24-002731",
+        },
+        {
+            "code_article": "7736504816",
+            "quantite": 10.0,
+            "montant_ligne_ht": 2750.0,
+            "customer_reference": "24-000025",
+        },
+    ]
+    merged = _merge_order_line_candidates(llm_lines, deterministic_lines)
+    assert len(merged) == 2
+    assert merged[1]["quantite"] == 10.0
+    assert merged[1]["customer_reference"] == "24-000025"

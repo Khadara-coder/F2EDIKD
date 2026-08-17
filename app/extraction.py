@@ -207,20 +207,27 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
     return cleaned
 
 
+def _order_line_identity(line: dict) -> tuple[str, float | None, float | None, str]:
+    article = compact_text(line.get("code_article") or line.get("article") or "")
+    qty = _to_float(line.get("quantite") if "quantite" in line else line.get("quantity"))
+    amount = _to_float(line.get("montant_ligne_ht") if "montant_ligne_ht" in line else line.get("amount"))
+    ref = compact_text(line.get("customer_reference") or "")
+    return (article, qty, amount, ref)
+
+
 def _merge_order_line_candidates(primary: list[dict], secondary: list[dict]) -> list[dict]:
-    """Keep LLM lines, then add deterministic lines whose Bosch article is missing."""
+    """Keep LLM lines, then add deterministic rows that are not the same commercial line.
+
+    The same Bosch article can appear more than once (different qty / customer bon).
+    """
     merged = list(primary or [])
-    seen = {
-        compact_text(line.get("code_article") or line.get("article") or "")
-        for line in merged
-        if compact_text(line.get("code_article") or line.get("article") or "")
-    }
+    seen = {_order_line_identity(line) for line in merged if _order_line_identity(line)[0]}
     for line in secondary or []:
-        article = compact_text(line.get("code_article") or line.get("article") or "")
-        if not article or article in seen:
+        key = _order_line_identity(line)
+        if not key[0] or key in seen:
             continue
         merged.append(line)
-        seen.add(article)
+        seen.add(key)
     return merged
 
 
@@ -647,6 +654,7 @@ def extract_structured_fields(
                 "prix_unitaire_ht": _to_float(ln.get("unit_price")),
                 "montant_ligne_ht": _to_float(ln.get("amount")),
                 "date_livraison": ln.get("delivery_date"),
+                "customer_reference": (ln.get("customer_reference") or "").strip(),
             })
     except Exception:
         pass

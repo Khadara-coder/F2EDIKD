@@ -505,6 +505,25 @@ def extract_line_items_from_layout(layout: dict | None) -> list[dict]:
     return extract_line_items_from_lines(lines)
 
 
+_ELM_CLIENT_BON_RE = re.compile(
+    r"Client\s+\d+\s+Bon\s*n[°oº]?\s*(?P<bon>[\w./-]+)"
+    r"(?:\s+R[ée]f\s*:\s*(?P<ref>[\w./-]+))?",
+    re.IGNORECASE,
+)
+
+
+def _elm_customer_reference_near(lines: list[str], start: int) -> str:
+    """Read the Pieces Xpress client/bon/ref line that follows a supplier row."""
+    for candidate in lines[start : start + 3]:
+        match = _ELM_CLIENT_BON_RE.search(candidate)
+        if match:
+            return compact_text(match.group("ref") or match.group("bon") or "")
+        extracted = _extract_customer_reference(candidate)
+        if extracted:
+            return extracted
+    return ""
+
+
 def _extract_elm_supplier_order_rows(text: str) -> list[dict]:
     """Parse ELM/Bosch supplier duplicates whose complete rows are native PDF text.
 
@@ -512,8 +531,10 @@ def _extract_elm_supplier_order_rows(text: str) -> list[dict]:
       87020002940 MANETTE PIECE 1,000 8,65 4,41 4,41
 
     The four numeric columns are quantity, public price, net unit price and
-    line amount. References on metadata lines (ELM/BOSCH, REMPLACE, ARISTON)
-    are deliberately ignored because only complete rows match.
+    line amount. The same Bosch article may appear on several commercial rows
+    (different qty / customer bon); only identical source rows are collapsed.
+    References on metadata lines (ELM/BOSCH, REMPLACE, ARISTON) are ignored
+    because only complete rows match.
     """
     folded = fold_text(text or "")
     if "bon de commande fournisseur" not in folded:
@@ -529,7 +550,7 @@ def _extract_elm_supplier_order_rows(text: str) -> list[dict]:
         flags=re.IGNORECASE,
     )
     rows: list[dict] = []
-    seen: set[str] = set()
+    seen: set[tuple[str, str, str, str, int]] = set()
 
     def append_row(
         article: str,
@@ -537,28 +558,34 @@ def _extract_elm_supplier_order_rows(text: str) -> list[dict]:
         quantity: str,
         unit_price: str,
         amount: str,
+        source_index: int,
+        customer_reference: str = "",
     ) -> None:
         article = article.upper()
-        if article in seen:
+        qty_norm = _to_natural_qty_str(quantity)
+        price_norm = compact_text(unit_price)
+        amount_norm = compact_text(amount)
+        key = (article, qty_norm, price_norm, amount_norm, source_index)
+        if key in seen:
             return
-        seen.add(article)
+        seen.add(key)
         rows.append(
             {
                 "designation": compact_text(designation),
                 "article": article,
                 "delivery_date": "",
-                "quantity": _to_natural_qty_str(quantity),
+                "quantity": qty_norm,
                 "unit": "PCE",
-                "unit_price": compact_text(unit_price),
-                "amount": compact_text(amount),
-                "customer_reference": "",
+                "unit_price": price_norm,
+                "amount": amount_norm,
+                "customer_reference": compact_text(customer_reference),
                 "payment_terms": "",
                 "parser": "elm_supplier_order",
             }
         )
 
     lines = [compact_text(line) for line in (text or "").splitlines()]
-    for raw_line in lines:
+    for line_index, raw_line in enumerate(lines):
         match = row_re.match(raw_line)
         if not match:
             continue
@@ -568,6 +595,8 @@ def _extract_elm_supplier_order_rows(text: str) -> list[dict]:
             match.group("quantity"),
             match.group("unit_price"),
             match.group("amount"),
+            line_index,
+            _elm_customer_reference_near(lines, line_index + 1),
         )
 
     # PyMuPDF exposes the same visual row as four native text lines:
@@ -616,6 +645,8 @@ def _extract_elm_supplier_order_rows(text: str) -> list[dict]:
             piece_match.group("quantity"),
             amounts_match.group("unit_price"),
             amounts_match.group("amount"),
+            index,
+            _elm_customer_reference_near(lines, piece_index + 2),
         )
     return rows
 
