@@ -1,4 +1,13 @@
-import { useCallback, useRef, useState } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import type { ExtractionPreview } from "@/types";
 
@@ -15,7 +24,19 @@ export interface UploadJob {
   error?: string;
 }
 
-export function useUploadQueue(onJobComplete?: () => void) {
+interface UploadQueueContextValue {
+  jobs: UploadJob[];
+  activeCount: number;
+  enqueueFiles: (files: File[]) => void;
+  selectedJob: UploadJob | null;
+  selectedJobId: string | null;
+  setSelectedJobId: (id: string) => void;
+}
+
+const UploadQueueContext = createContext<UploadQueueContextValue | null>(null);
+
+export function UploadQueueProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
   const [jobs, setJobs] = useState<UploadJob[]>([]);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const jobsRef = useRef<UploadJob[]>([]);
@@ -35,6 +56,11 @@ export function useUploadQueue(onJobComplete?: () => void) {
     },
     [syncJobs],
   );
+
+  const onJobComplete = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["orders"] });
+    void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
+  }, [queryClient]);
 
   const runWorker = useCallback(async () => {
     if (workerRunning.current) return;
@@ -56,7 +82,7 @@ export function useUploadQueue(onJobComplete?: () => void) {
             orderId: preview.orderId,
           });
           setSelectedJobId(next.id);
-          onJobComplete?.();
+          onJobComplete();
         } catch (err) {
           updateJob(next.id, {
             status: "error",
@@ -98,12 +124,25 @@ export function useUploadQueue(onJobComplete?: () => void) {
     ["queued", "uploading", "extracting"].includes(job.status),
   ).length;
 
-  return {
-    jobs,
-    activeCount,
-    enqueueFiles,
-    selectedJob,
-    selectedJobId: selectedJob?.id ?? selectedJobId,
-    setSelectedJobId,
-  };
+  const value = useMemo<UploadQueueContextValue>(
+    () => ({
+      jobs,
+      activeCount,
+      enqueueFiles,
+      selectedJob,
+      selectedJobId: selectedJob?.id ?? selectedJobId,
+      setSelectedJobId,
+    }),
+    [activeCount, enqueueFiles, jobs, selectedJob, selectedJobId],
+  );
+
+  return <UploadQueueContext.Provider value={value}>{children}</UploadQueueContext.Provider>;
+}
+
+export function useUploadQueue() {
+  const ctx = useContext(UploadQueueContext);
+  if (!ctx) {
+    throw new Error("useUploadQueue must be used within UploadQueueProvider");
+  }
+  return ctx;
 }

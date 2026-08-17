@@ -1,6 +1,4 @@
-import { useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { Eye, ArrowRight, Loader2 } from "lucide-react";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { useUploadQueue } from "@/hooks/useUploadQueue";
@@ -14,17 +12,11 @@ import { Button } from "@/components/ui/button";
 
 export function ConvertirPage() {
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const meQuery = useCurrentUser();
   const isAdv = meQuery.data?.role === "adv";
 
-  const invalidateDashboard = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: ["orders"] });
-    void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
-  }, [queryClient]);
-
   const { jobs, activeCount, enqueueFiles, selectedJob, selectedJobId, setSelectedJobId } =
-    useUploadQueue(invalidateDashboard);
+    useUploadQueue();
 
   const preview = selectedJob?.preview ?? null;
 

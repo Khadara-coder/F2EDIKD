@@ -56,6 +56,9 @@ type ReviewSortKey =
   | "status";
 type SortDirection = "asc" | "desc";
 
+const UNIDENTIFIED_MANAGER = "__unidentified__";
+const UNIDENTIFIED_LABEL = "Non identifié";
+
 const STATUS_FILTERS: Array<{ value: ReviewStatusFilter; label: string; className: string }> = [
   { value: "all",            label: "Tous",          className: "border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100" },
   { value: "toProcess",      label: "À traiter",     className: "border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100" },
@@ -108,6 +111,21 @@ export function RevueListPage() {
     return displayNameMap[lc] || username;
   };
 
+  const rowManagerKey = (row: { assignedTo?: string | null; transferredTo?: string | null; status?: string }) => {
+    const raw =
+      row.status === "Transféré"
+        ? row.transferredTo || row.assignedTo
+        : row.assignedTo;
+    const key = (raw || "").trim();
+    return key || null;
+  };
+
+  const getManagerLabel = (row: { assignedTo?: string | null; transferredTo?: string | null; status?: string }) => {
+    const key = rowManagerKey(row);
+    if (!key) return UNIDENTIFIED_LABEL;
+    return getDisplayName(key) || UNIDENTIFIED_LABEL;
+  };
+
   const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
 
@@ -131,7 +149,7 @@ export function RevueListPage() {
       case "sapVbeln":
         return row.sapVbeln || "";
       case "processedBy":
-        return (row.processedBy || "").toLowerCase();
+        return getManagerLabel(row).toLowerCase();
       case "status":
         return businessStatusLabel(statusToBusinessGroup(row.status as OrderStatus));
       case "issue":
@@ -149,7 +167,7 @@ export function RevueListPage() {
     const filtered = items.filter((row) => {
       const matchesSearch =
         !query ||
-        [row.fileName, row.clientName, row.issue, row.status, row.processedBy, row.date, row.createdAt, row.processedAt, row.sapSentAt, row.sapVbeln, row.sapSentBy]
+        [row.fileName, row.clientName, row.issue, row.status, getManagerLabel(row), row.date, row.createdAt, row.processedAt, row.sapSentAt, row.sapVbeln, row.sapSentBy]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToBusinessGroup(row.status as OrderStatus) === statusFilter;
@@ -159,10 +177,12 @@ export function RevueListPage() {
       const userLc = (currentUsername || "").toLowerCase();
       const matchesMyOrders = !myOrdersOnly || !currentUsername ||
         rowAssignee === userLc || rowProcessor === userLc;
-      // Filtre par gestionnaire spécifique
-      const matchesManager = managerFilter === "all" ||
-        row.assignedTo?.toLowerCase() === managerFilter.toLowerCase() ||
-        (row.processedBy || "").toLowerCase() === managerFilter.toLowerCase();
+      const managerKey = rowManagerKey(row);
+      const matchesManager =
+        managerFilter === "all" ||
+        (managerFilter === UNIDENTIFIED_MANAGER && !managerKey) ||
+        (managerFilter !== UNIDENTIFIED_MANAGER &&
+          managerKey?.toLowerCase() === managerFilter.toLowerCase());
       // Filtre par date d'import
       const rowDate = row.createdAt || row.date || "";
       const matchesDateFrom = !dateFrom || rowDate >= dateFrom;
@@ -256,6 +276,7 @@ export function RevueListPage() {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Tous les gestionnaires</SelectItem>
+                <SelectItem value={UNIDENTIFIED_MANAGER}>{UNIDENTIFIED_LABEL}</SelectItem>
                 {gestionnaires.map((u) => (
                   <SelectItem key={u.userId} value={u.username}>
                     {u.displayName}
@@ -455,11 +476,12 @@ export function RevueListPage() {
                     <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
                       {getDisplayName(row.sapSentBy) || <span className="text-muted-foreground">-</span>}
                     </TableCell>
-                    <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
-                      {getDisplayName(
-                        row.status === "Transféré" ? (row.transferredTo || row.assignedTo) : row.assignedTo
-                        || row.processedBy
-                      ) || <span className="text-muted-foreground">-</span>}
+                    <TableCell className="max-w-[160px] truncate text-sm text-muted-foreground">
+                      {rowManagerKey(row) ? (
+                        getManagerLabel(row)
+                      ) : (
+                        <span className="italic text-muted-foreground">{UNIDENTIFIED_LABEL}</span>
+                      )}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-sm">{formatDateTime(row.createdAt || row.date, displayTimeZone)}</TableCell>
                     <TableCell>

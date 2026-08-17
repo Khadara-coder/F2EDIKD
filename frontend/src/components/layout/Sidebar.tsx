@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useUploadQueue } from "@/hooks/useUploadQueue";
 import { useSidebar } from "./SidebarContext";
 
 const navItems = [
@@ -39,6 +40,7 @@ export function Sidebar() {
     refetchInterval: 60_000,
   });
   const reviewCount = queue?.length ?? 0;
+  const { activeCount } = useUploadQueue();
   const role = me?.role ?? "adv";
   const displayName = me?.displayName || me?.username || me?.actor || "Utilisateur";
   const visibleNavItems = navItems.filter((item) => hasAtLeastRole(role, item.minRole));
@@ -125,6 +127,11 @@ export function Sidebar() {
             >
               <Icon className="h-5 w-5 shrink-0" />
               <span className="flex-1 leading-snug">{label}</span>
+              {to === "/convertir" && activeCount > 0 && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-amber-500 px-1.5 text-xs font-bold text-white">
+                  {activeCount}
+                </span>
+              )}
               {badgeFromApi && reviewCount > 0 && (
                 <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1.5 text-xs font-bold text-white">
                   {reviewCount}
