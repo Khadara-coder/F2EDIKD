@@ -75,6 +75,9 @@ services:
       - ${MASTERDATA_HOST_DIR:-./data/masterdata}:/app/data/masterdata
       - ./lookups:/app/lookups:ro
       - ./config.ini:/app/config.ini:ro
+    dns:
+      - 168.63.129.16
+      - 8.8.8.8
     depends_on:
       postgres:
         condition: service_healthy

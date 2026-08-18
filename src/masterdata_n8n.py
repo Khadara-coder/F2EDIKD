@@ -68,9 +68,9 @@ def format_webhook_error(exc: BaseException, webhook_url: str = "") -> str:
     url = (webhook_url or "").strip()
     if re.search(r"NameResolutionError|Failed to resolve|Name or service not known", text, re.I):
         hint = (
-            "DNS/réseau: l'API n'atteint pas n8n. "
-            "Local: http://localhost:5678/... (relay Docker si besoin). "
-            "Prod: https://…n8n.bosch.com/webhook/masterdata-sync-prod."
+            "DNS/réseau: le conteneur Docker ne résout pas le domaine n8n. "
+            "Vérifier dns: [168.63.129.16] dans docker-compose ou /etc/resolv.conf de l'hôte. "
+            "Local: http://localhost:5678/... Prod: https://…n8n.bosch.com/webhook/masterdata-sync-prod."
         )
         return f"Webhook n8n injoignable (DNS): {url or 'URL manquante'}. {hint}"
     if re.search(r"RemoteDisconnected|Connection aborted|ConnectionReset", text, re.I):
