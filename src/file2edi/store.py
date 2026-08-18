@@ -1099,13 +1099,13 @@ class File2EdiStore:
                       o.rejection_message, o.rejected_by,
                       o.transferred_from, o.transferred_to, o.transfer_note,
                       o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
+                      o.sap_vbeln, o.sap_confirmed_at,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
                LEFT JOIN file2edi_conversion_history h ON h.order_id = o.order_id
-               WHERE o.status NOT IN ('Envoyé SAP', 'Confirmé SAP')
                ORDER BY o.created_at DESC
-               LIMIT 200"""
+               LIMIT 500"""
         ).fetchall()
         conn.close()
         return [dict(r) for r in rows]

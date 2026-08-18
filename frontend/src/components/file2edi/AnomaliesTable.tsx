@@ -53,6 +53,7 @@ export function AnomaliesTable({
   }
 
   return (
+    <div className="w-full overflow-x-auto">
     <Table>
       <TableHeader>
         <TableRow>
@@ -124,5 +125,6 @@ export function AnomaliesTable({
         })}
       </TableBody>
     </Table>
+    </div>
   );
 }

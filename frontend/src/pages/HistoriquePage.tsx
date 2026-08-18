@@ -111,7 +111,7 @@ export function HistoriquePage() {
 
       <Card className="mb-4">
         <CardContent className="flex flex-wrap items-center gap-3 p-4">
-          <div className="relative flex-1 min-w-[200px]">
+          <div className="relative min-w-0 flex-1 basis-full sm:basis-auto sm:min-w-[200px]">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             <Input
               placeholder="Rechercher un fichier, client, commande…"
@@ -120,8 +120,8 @@ export function HistoriquePage() {
               onChange={(e) => setFilters((f) => ({ ...f, search: e.target.value, page: 1 }))}
             />
           </div>
-          <Input type="date" className="w-40" />
-          <Input type="date" className="w-40" />
+          <Input type="date" className="w-full sm:w-40" />
+          <Input type="date" className="w-full sm:w-40" />
           <Select
             value={filters.statusGroup || "all"}
             onValueChange={(v) =>
@@ -133,7 +133,7 @@ export function HistoriquePage() {
               }))
             }
           >
-            <SelectTrigger className="w-44">
+            <SelectTrigger className="w-full sm:w-44">
               <SelectValue placeholder="Tous les statuts" />
             </SelectTrigger>
             <SelectContent>
@@ -144,7 +144,7 @@ export function HistoriquePage() {
               ))}
             </SelectContent>
           </Select>
-          <Button variant="outline" className="gap-2">
+          <Button variant="outline" className="w-full gap-2 sm:w-auto">
             <Download className="h-4 w-4" />
             Exporter CSV
           </Button>
@@ -156,6 +156,7 @@ export function HistoriquePage() {
           {isLoading ? (
             <p className="p-6 text-muted-foreground">Chargement…</p>
           ) : (
+            <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -202,8 +203,9 @@ export function HistoriquePage() {
                 ))}
               </TableBody>
             </Table>
+            </div>
           )}
-          <div className="flex items-center justify-between border-t px-4 py-3">
+          <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">
               Affichage {(filters.page! - 1) * filters.pageSize! + 1} à{" "}
               {Math.min(filters.page! * filters.pageSize!, data?.total ?? 0)} sur{" "}

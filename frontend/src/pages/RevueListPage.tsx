@@ -218,7 +218,7 @@ export function RevueListPage() {
       />
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4 border-b bg-muted/20">
+        <CardHeader className="flex flex-col gap-4 border-b bg-muted/20 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <CardTitle className="text-base">
               Commandes converties
@@ -232,7 +232,7 @@ export function RevueListPage() {
               Filtrez la liste par statut, gestionnaire ou mot-clé.
             </p>
           </div>
-          <Button variant="outline" className="gap-2" onClick={() => navigate("/convertir")}>
+          <Button variant="outline" className="w-full gap-2 sm:w-auto" onClick={() => navigate("/convertir")}>
             <Upload className="h-4 w-4" />
             Déposer une commande
           </Button>
