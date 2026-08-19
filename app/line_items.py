@@ -390,6 +390,32 @@ def extract_line_items_from_lines(lines: list[str]) -> list[dict]:
                     "parser": "table_line_regex",
                 }
             )
+            continue
+        qty_amount_match = re.search(
+            rf"(?P<article>\d{{7,13}})\s+"
+            r"(?P<designation>.+?)\s+"
+            r"(?P<quantity>\d{1,5}(?:[,.]\d{1,3})?)\s+"
+            rf"(?P<amount>{amount})\s*$",
+            compact_text(line),
+            flags=re.IGNORECASE,
+        )
+        if qty_amount_match:
+            designation = compact_text(qty_amount_match.group("designation"))
+            if fold_text(designation) in {"remplace", "offre n"}:
+                continue
+            rows.append(
+                {
+                    "designation": designation,
+                    "article": qty_amount_match.group("article"),
+                    "delivery_date": "",
+                    "quantity": _to_natural_qty_str(qty_amount_match.group("quantity")),
+                    "unit_price": "",
+                    "amount": compact_text(qty_amount_match.group("amount")),
+                    "customer_reference": "",
+                    "payment_terms": "",
+                    "parser": "qty_amount_line",
+                }
+            )
     if rows:
         return rows
 

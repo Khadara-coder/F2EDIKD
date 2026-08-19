@@ -18,7 +18,6 @@ Endpoint: databricks-claude-sonnet-4
 
 import json
 import logging
-import math
 import re
 from typing import Optional
 from app.engines.llm_gateway import chat_completion
@@ -281,24 +280,15 @@ def _cohere_line(line: dict) -> dict | None:
 
 def _finalize_llm_lines(lines: list[dict]) -> list[dict]:
     coherent = []
-    rejected = 0
     line_num = 10
     for line in lines:
         if not isinstance(line, dict) or _should_ignore_line(line):
             continue
         fixed = _cohere_line(line)
         if fixed is None:
-            rejected += 1
             continue
         coherent.append({"numero_ligne": line_num, **fixed})
         line_num += 10
-
-    if not coherent:
-        return []
-    if len(coherent) == 1 and rejected >= 2:
-        return []
-    if len(coherent) < math.ceil((len(coherent) + rejected) * 0.5):
-        return []
     return coherent
 
 
@@ -308,53 +298,108 @@ def _finalize_llm_lines(lines: list[dict]) -> list[dict]:
 
 ORDERLINES_PROMPT = """Tu es un extracteur de lignes de commande B2B pour Bosch/ELM LEBLANC (chauffage, climatisation).
 
-TEXTE DU PDF:
+TEXTE DU PDF (document complet ou extrait de pages):
 ---
 {text}
 ---
 
-Extrais TOUTES les lignes de commande (articles commandes) du document.
+Extrais TOUTES les lignes de commande commerciales du document. Parcours toutes les pages fournies. N'omets aucune ligne article.
 
 Regles:
 - "Code article" = reference produit Bosch/ELM (souvent 7-10 chiffres, parfois prefixe EL/ELM)
 - Ignore les lignes PORT, PORTSFAB, ECOTAXE, ECOTAX, FRAIS DE PORT, PARTICIPATION TRANSPORT
-- "Quantite" = nombre d'unites commandees
+- Le meme code article peut apparaitre plusieurs fois (quantites ou bons client differents) : conserve CHAQUE ligne distincte
+- Une mention "REMPLACE 77..." n'est PAS une ligne : c'est une note sur l'article precedent
+- "Quantite" = nombre d'unites (souvent petit entier). Ne pas inverser quantite et prix
 - "Prix unitaire" = prix net HT par unite (pas le montant total de la ligne)
-- Si le document ne contient PAS de lignes de commande (ex: c'est juste un bon de livraison sans detail), retourne un tableau vide []
-- Separe bien prix unitaire (par piece) et montant total ligne
+- "montant_ligne_ht" = quantite x prix unitaire
+- Si le document ne contient PAS de lignes de commande, retourne un tableau vide []
 
 Reponds UNIQUEMENT en JSON (pas de markdown, pas de ```):
-[{{"code_article": "...", "description": "...", "quantite": ..., "prix_unitaire_ht": ..., "montant_ligne_ht": ..., "date_livraison": "..."}}]
+[{{"code_article": "...", "description": "...", "quantite": ..., "prix_unitaire_ht": ..., "montant_ligne_ht": ..., "customer_reference": "", "date_livraison": "..."}}]
 
 Si aucune ligne article n'est trouvee, reponds: []"""
 
 
-def llm_extract_orderlines(text: str) -> list[dict]:
-    """Extract order lines from PDF text using Sonnet 4.
+LLM_TEXT_CHUNK_CHARS = 14000
+LLM_ORDERLINES_MAX_TOKENS = 4000
 
-    Returns list of dicts with keys:
-        - numero_ligne: generated (10, 20, 30...)
-        - code_article: cleaned Bosch article number
-        - code_article_raw: original from document
-        - description: article description
-        - quantite: quantity (float)
-        - prix_unitaire_ht: net unit price (float)
-        - montant_ligne_ht: line total (float)
-        - date_livraison: delivery date if present
+
+def _split_text_for_llm(text: str, max_chars: int = LLM_TEXT_CHUNK_CHARS) -> list[str]:
+    """Keep the full document: one chunk if short, otherwise page/line slices."""
+    raw = (text or "").strip()
+    if not raw:
+        return []
+    if len(raw) <= max_chars:
+        return [raw]
+
+    pages = re.split(r"(?=^===== PAGE \d+ =====)", raw, flags=re.MULTILINE)
+    pages = [part.strip() for part in pages if part.strip()]
+    if len(pages) <= 1:
+        pages = raw.splitlines()
+        chunks: list[str] = []
+        current: list[str] = []
+        size = 0
+        for line in pages:
+            extra = len(line) + 1
+            if current and size + extra > max_chars:
+                chunks.append("\n".join(current))
+                current = [line]
+                size = extra
+            else:
+                current.append(line)
+                size += extra
+        if current:
+            chunks.append("\n".join(current))
+        return chunks or [raw]
+
+    chunks = []
+    current = ""
+    for page in pages:
+        if current and len(current) + 2 + len(page) > max_chars:
+            chunks.append(current)
+            current = page
+        else:
+            current = f"{current}\n\n{page}" if current else page
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _line_key(line: dict) -> tuple:
+    return (
+        str(line.get("code_article") or "").strip(),
+        line.get("quantite"),
+        line.get("montant_ligne_ht"),
+        str(line.get("customer_reference") or "").strip(),
+    )
+
+
+def llm_extract_orderlines(text: str) -> list[dict]:
+    """Extract order lines from the full PDF text using the LLM.
+
+    Long documents are processed in successive chunks so later pages are not dropped.
     """
     if not text or len(text) < 50:
         return []
 
-    truncated = text[:4000] if len(text) > 4000 else text
-    prompt = ORDERLINES_PROMPT.format(text=truncated)
+    merged: list[dict] = []
+    seen: set[tuple] = set()
+    for chunk in _split_text_for_llm(text):
+        prompt = ORDERLINES_PROMPT.format(text=chunk)
+        raw = _call_llm(prompt, max_tokens=LLM_ORDERLINES_MAX_TOKENS)
+        parsed = _parse_json(raw)
+        if not parsed or not isinstance(parsed, list):
+            continue
+        for line in _finalize_llm_lines(parsed):
+            key = _line_key(line)
+            if not key[0] or key in seen:
+                continue
+            seen.add(key)
+            merged.append(line)
 
-    raw = _call_llm(prompt, max_tokens=1500)
-    lines = _parse_json(raw)
+    for index, line in enumerate(merged, start=1):
+        line["numero_ligne"] = index * 10
 
-    if not lines or not isinstance(lines, list):
-        return []
-
-    result = _finalize_llm_lines(lines)
-
-    logger.info(f"LLM orderlines: {len(result)} lines extracted")
-    return result
+    logger.info("LLM orderlines: %s lines extracted from full document", len(merged))
+    return merged

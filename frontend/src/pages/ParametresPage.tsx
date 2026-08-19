@@ -3,7 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Brain, CheckCircle2, Database, Key, Lock, RefreshCw, Save, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
+import { Brain, CheckCircle2, Database, Key, Lock, RefreshCw, Save, Search, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
 import { api } from "@/lib/api";
 import { useSettings } from "@/hooks/useFile2Edi";
 import { appSettingsSchema, type AppSettingsForm } from "@/schemas";
@@ -111,6 +111,8 @@ export function ParametresPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newUserError, setNewUserError] = useState("");
   const [newUserSuccess, setNewUserSuccess] = useState("");
+  const [showNewUserForm, setShowNewUserForm] = useState(false);
+  const [userFilter, setUserFilter] = useState("");
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [resetMsg, setResetMsg] = useState("");
@@ -162,7 +164,7 @@ export function ParametresPage() {
       setNewUsername(""); setNewDisplayName(""); setNewEmail(""); setNewSapId("");
       setNewUserRole("adv"); setNewPassword("");
       setNewUserError(""); setNewUserSuccess("Utilisateur créé avec succès");
-      setTimeout(() => setNewUserSuccess(""), 3000);
+      setTimeout(() => { setNewUserSuccess(""); setShowNewUserForm(false); }, 2000);
     },
     onError: (e) => setNewUserError(e instanceof Error ? e.message : "Erreur"),
   });
@@ -1218,133 +1220,136 @@ export function ParametresPage() {
 
           {activeSection === "utilisateurs" && (
             <>
-              {/* ── Créer un utilisateur ─────────────────────────────────── */}
               <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <UserPlus className="h-5 w-5" />
-                    Utilisateurs
-                  </CardTitle>
-                  <p className="text-xs text-muted-foreground">
-                    Comptes gestionnaires ADV et administrateurs.
-                  </p>
+                <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Shield className="h-5 w-5" />
+                      Utilisateurs ({usersQuery.data?.length ?? 0})
+                    </CardTitle>
+                    <p className="text-xs text-muted-foreground">
+                      Comptes gestionnaires ADV et administrateurs.
+                    </p>
+                  </div>
+                  <Button className="gap-2" onClick={() => setShowNewUserForm((v) => !v)}>
+                    <UserPlus className="h-4 w-4" />
+                    {showNewUserForm ? "Fermer" : "+ Ajouter"}
+                  </Button>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  <p className="text-sm font-medium">Créer un utilisateur</p>
-                  <div className="grid gap-3 rounded-lg border p-4 sm:grid-cols-2">
-                    {/* Ligne 1 : identifiant + nom complet */}
-                    <div className="space-y-1.5">
-                      <Label>Identifiant *</Label>
-                      <Input
-                        placeholder="prenom.nom"
-                        value={newUsername}
-                        onChange={(e) => { setNewUsername(e.target.value); setNewUserError(""); }}
-                      />
+                  {/* ── Formulaire d'ajout (collapsible) ── */}
+                  {showNewUserForm && (
+                    <div className="rounded-lg border bg-muted/20 p-4 space-y-4">
+                      <p className="text-sm font-medium">Nouvel utilisateur</p>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <div className="space-y-1.5">
+                          <Label>Identifiant *</Label>
+                          <Input
+                            placeholder="prenom.nom"
+                            value={newUsername}
+                            onChange={(e) => { setNewUsername(e.target.value); setNewUserError(""); }}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Nom complet</Label>
+                          <Input
+                            placeholder="Prénom Nom"
+                            value={newDisplayName}
+                            onChange={(e) => setNewDisplayName(e.target.value)}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Adresse e-mail *</Label>
+                          <Input
+                            type="email"
+                            placeholder="prenom.nom@bosch.com"
+                            value={newEmail}
+                            onChange={(e) => { setNewEmail(e.target.value); setNewUserError(""); }}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>
+                            Identifiant SAP
+                            {newUserRole === "adv" && <span className="text-destructive ml-0.5">*</span>}
+                          </Label>
+                          <Input
+                            placeholder="8 chiffres - ex: 15016007"
+                            value={newSapId}
+                            maxLength={8}
+                            onChange={(e) => setNewSapId(e.target.value.replace(/\D/g, "").slice(0, 8))}
+                          />
+                          {newUserRole === "adv" && (
+                            <p className="text-xs text-muted-foreground">Requis pour les Gestionnaires (ADV)</p>
+                          )}
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Type d'utilisateur *</Label>
+                          <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as "adv" | "admin")}>
+                            <SelectTrigger>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="adv">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                                  Gestionnaire (ADV)
+                                </div>
+                              </SelectItem>
+                              <SelectItem value="admin">
+                                <div className="flex items-center gap-2">
+                                  <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
+                                  Administrateur
+                                </div>
+                              </SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Mot de passe initial *</Label>
+                          <Input
+                            type="password"
+                            placeholder="6 caractères minimum"
+                            value={newPassword}
+                            onChange={(e) => { setNewPassword(e.target.value); setNewUserError(""); }}
+                          />
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <div>
+                          {newUserError && <p className="text-sm text-destructive">{newUserError}</p>}
+                          {newUserSuccess && <p className="text-sm text-emerald-600">{newUserSuccess}</p>}
+                        </div>
+                        <Button
+                          className="gap-2"
+                          onClick={() => {
+                            if (!newUsername.trim()) { setNewUserError("Identifiant requis"); return; }
+                            if (!newEmail.trim()) { setNewUserError("Adresse e-mail requise"); return; }
+                            if (newUserRole === "adv") {
+                              if (!newSapId.trim()) { setNewUserError("L'identifiant SAP est requis pour un Gestionnaire (ADV)"); return; }
+                              if (!/^\d{8}$/.test(newSapId.trim())) { setNewUserError("L'identifiant SAP doit être composé de 8 chiffres (ex: 15016007)"); return; }
+                            }
+                            if (!newPassword || newPassword.length < 6) { setNewUserError("Mot de passe: 6 caractères minimum"); return; }
+                            createUserMutation.mutate();
+                          }}
+                          disabled={createUserMutation.isPending}
+                        >
+                          <UserPlus className="h-4 w-4" />
+                          {createUserMutation.isPending ? "En cours…" : "Créer l'utilisateur"}
+                        </Button>
+                      </div>
                     </div>
-                    <div className="space-y-1.5">
-                      <Label>Nom complet</Label>
-                      <Input
-                        placeholder="Prénom Nom"
-                        value={newDisplayName}
-                        onChange={(e) => setNewDisplayName(e.target.value)}
-                      />
-                    </div>
-                    {/* Ligne 2 : email + SAP ID */}
-                    <div className="space-y-1.5">
-                      <Label>Adresse e-mail *</Label>
-                      <Input
-                        type="email"
-                        placeholder="prenom.nom@bosch.com"
-                        value={newEmail}
-                        onChange={(e) => { setNewEmail(e.target.value); setNewUserError(""); }}
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>
-                        Identifiant SAP
-                        {newUserRole === "adv" && <span className="text-destructive ml-0.5">*</span>}
-                      </Label>
-                      <Input
-                        placeholder="8 chiffres - ex: 15016007"
-                        value={newSapId}
-                        maxLength={8}
-                        onChange={(e) => setNewSapId(e.target.value.replace(/\D/g, "").slice(0, 8))}
-                      />
-                      {newUserRole === "adv" && (
-                        <p className="text-xs text-muted-foreground">Requis pour les Gestionnaires (ADV)</p>
-                      )}
-                    </div>
-                    {/* Ligne 3 : type + mot de passe */}
-                    <div className="space-y-1.5">
-                      <Label>Type d'utilisateur *</Label>
-                      <Select value={newUserRole} onValueChange={(v) => setNewUserRole(v as "adv" | "admin")}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="adv">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
-                              Gestionnaire (ADV)
-                            </div>
-                          </SelectItem>
-                          <SelectItem value="admin">
-                            <div className="flex items-center gap-2">
-                              <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
-                              Administrateur
-                            </div>
-                          </SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label>Mot de passe initial *</Label>
-                      <Input
-                        type="password"
-                        placeholder="6 caractères minimum"
-                        value={newPassword}
-                        onChange={(e) => { setNewPassword(e.target.value); setNewUserError(""); }}
-                      />
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      {newUserError && <p className="text-sm text-destructive">{newUserError}</p>}
-                      {newUserSuccess && <p className="text-sm text-emerald-600">{newUserSuccess}</p>}
-                    </div>
-                    <Button
-                      className="gap-2"
-                      onClick={() => {
-                        if (!newUsername.trim()) { setNewUserError("Identifiant requis"); return; }
-                        if (!newEmail.trim()) { setNewUserError("Adresse e-mail requise"); return; }
-                        if (newUserRole === "adv") {
-                          if (!newSapId.trim()) { setNewUserError("L'identifiant SAP est requis pour un Gestionnaire (ADV)"); return; }
-                          if (!/^\d{8}$/.test(newSapId.trim())) { setNewUserError("L'identifiant SAP doit être composé de 8 chiffres (ex: 15016007)"); return; }
-                        }
-                        if (!newPassword || newPassword.length < 6) { setNewUserError("Mot de passe: 6 caractères minimum"); return; }
-                        createUserMutation.mutate();
-                      }}
-                      disabled={createUserMutation.isPending}
-                    >
-                      <UserPlus className="h-4 w-4" />
-                      {createUserMutation.isPending ? "En cours…" : "Créer l'utilisateur"}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Les Gestionnaires (ADV) traitent les commandes. Les Administrateurs ont accès aux paramètres.
-                  </p>
-                </CardContent>
-              </Card>
+                  )}
 
-              {/* ── Liste des gestionnaires ───────────────────────────────── */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Shield className="h-5 w-5" />
-                    Gestionnaires ({usersQuery.data?.length ?? 0})
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
+                  {/* ── Filtre ── */}
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      placeholder="Filtrer par nom, identifiant, e-mail…"
+                      className="pl-9"
+                      value={userFilter}
+                      onChange={(e) => setUserFilter(e.target.value)}
+                    />
+                  </div>
                   {resetMsg && (
                     <p className={`text-sm ${resetMsg.includes("Erreur") || resetMsg.includes("impossible") ? "text-destructive" : "text-emerald-600"}`}>
                       {resetMsg}
@@ -1371,7 +1376,12 @@ export function ParametresPage() {
                         {!usersQuery.isLoading && (usersQuery.data?.length ?? 0) === 0 && (
                           <tr><td className="px-4 py-4 text-center text-muted-foreground" colSpan={8}>Aucun utilisateur créé.</td></tr>
                         )}
-                        {(usersQuery.data ?? []).map((user) => (
+                        {(usersQuery.data ?? []).filter((user) => {
+                          if (!userFilter.trim()) return true;
+                          const q = userFilter.toLowerCase();
+                          return [user.username, user.displayName, (user as GestionnaireUser).email, (user as GestionnaireUser).sapId, (user as GestionnaireUser).role]
+                            .filter(Boolean).some((v) => String(v).toLowerCase().includes(q));
+                        }).map((user) => (
                           <tr key={user.userId} className="border-t hover:bg-muted/30">
                             <td className="px-4 py-3 font-mono text-xs font-semibold">{user.username}</td>
                             <td className="px-4 py-3">{user.displayName}</td>

@@ -182,6 +182,18 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
 
         if qty is None or qty <= 0:
             continue
+        if any(
+            existing.get("montant_ligne_ht") is not None
+            and total is not None
+            and abs(float(existing["montant_ligne_ht"]) - total) <= 0.05
+            and existing.get("quantite") is not None
+            and price is not None
+            and abs(float(existing["quantite"]) - price) <= 0.05
+            and existing.get("prix_unitaire_ht") is not None
+            and abs(float(existing["prix_unitaire_ht"]) - qty) <= 0.05
+            for existing in cleaned
+        ):
+            continue
         if price is None and total is None:
             continue
         if polluted and (price is None or total is None):
@@ -631,41 +643,12 @@ def extract_structured_fields(
     # Use LLM order number as primary, regex as fallback
     final_order_number = llm_order_number or order_number
 
-    # --- ORDER LINES: LLM first, deterministic engine as complement/fallback ---
+    # --- ORDER LINES: LLM exclusively, full document ---
     order_lines = []
     try:
         order_lines = llm_extract_orderlines(text)
     except Exception:
         pass  # Non-blocking
-
-    deterministic_lines = []
-    try:
-        engine_lines = OrderLinesEngine().extract(text, layout=layout).get("lines", [])
-        for idx, ln in enumerate(engine_lines, start=1):
-            article = (ln.get("article") or "").strip()
-            if not article:
-                continue
-            deterministic_lines.append({
-                "numero_ligne": idx * 10,
-                "code_article": article,
-                "code_article_raw": article,
-                "description": (ln.get("designation") or "").strip(),
-                "quantite": _to_float(ln.get("quantity")),
-                "prix_unitaire_ht": _to_float(ln.get("unit_price")),
-                "montant_ligne_ht": _to_float(ln.get("amount")),
-                "date_livraison": ln.get("delivery_date"),
-                "customer_reference": (ln.get("customer_reference") or "").strip(),
-            })
-    except Exception:
-        pass
-
-    # Supplier duplicates expose exact native-text rows across all pages. Their
-    # deterministic parser is more reliable than the truncated LLM response
-    # (which can confuse public price, discount and line amount columns).
-    if "bon de commande fournisseur" in fold_text(text) and deterministic_lines:
-        order_lines = deterministic_lines
-    else:
-        order_lines = _merge_order_line_candidates(order_lines, deterministic_lines)
 
     order_lines = _sanitize_order_lines(order_lines)
 
@@ -709,7 +692,11 @@ def extract_structured_fields(
                     use_llm_fallback=True,
                 )
 
-                if scoring_result.best_candidate and scoring_result.shipto_confidence > 0:
+                if (
+                    scoring_result.best_candidate
+                    and scoring_result.decision in {"ACCEPTED", "REVIEW"}
+                    and scoring_result.shipto_confidence >= 50
+                ):
                     best = scoring_result.best_candidate
                     master_delivery_address["SHIPTO"] = best.shipto_id
                     master_delivery_address["Nom"] = best.name
@@ -745,10 +732,18 @@ def extract_structured_fields(
                     master_delivery_address["scoring_decision"] = "REJECTED"
 
                 else:
+                    master_delivery_address["SHIPTO"] = ""
                     master_delivery_address["Confiance"] = 0
                     master_delivery_address["Statut"] = "Aucun SHIPTO ne correspond aux preuves du document"
                     master_delivery_address["reason_codes"] = scoring_result.reason_codes
+                    master_delivery_address["matched_by"] = []
                     master_delivery_address["scoring_decision"] = scoring_result.decision or "REJECTED"
+                    if scoring_result.best_candidate:
+                        master_delivery_address["Disambiguation"] = (
+                            f"SCORING:{scoring_result.best_candidate.score}pts REJECTED"
+                            f" {scoring_result.best_candidate.shipto_id}"
+                        )
+                        master_delivery_address["Disambiguation_explanation"] = scoring_result.explanation
             elif resolved_shipto:
                 # Single/no scoring path: still force AG from known SHIPTO
                 final_soldto, _, final_buyer = resolve_commercial_party(

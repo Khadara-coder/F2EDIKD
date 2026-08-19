@@ -1100,6 +1100,7 @@ class File2EdiStore:
                       o.transferred_from, o.transferred_to, o.transfer_note,
                       o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
                       o.sap_vbeln, o.sap_confirmed_at,
+                      o.customer_order_number, o.soldto,
                       h.processed_at, h.processed_by
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
@@ -1123,6 +1124,7 @@ class File2EdiStore:
                           o.transferred_from, o.transferred_to, o.transfer_note,
                           o.created_at, o.updated_at, o.sap_sent_at, o.sap_sent_by,
                           o.sap_vbeln, o.sap_confirmed_at,
+                          o.customer_order_number, o.soldto,
                           h.processed_at, h.processed_by
                    FROM file2edi_orders o
                    LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id

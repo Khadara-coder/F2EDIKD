@@ -1056,21 +1056,25 @@ def _read_pdf_pages_for_process(payload: bytes, ocr_with_layout):
     _n_pages = _doc.page_count
     _doc.close()
 
-    pages_p1 = pdf_pages_to_text(payload, "1", ocr_with_layout=ocr_with_layout)
+    pages_p1 = pdf_pages_to_text(payload, "1", ocr_with_layout=ocr_with_layout, limit=_n_pages)
     if not pages_p1:
         raise ValueError("Impossible d'extraire le texte du PDF")
 
     if _n_pages > 1:
-        _rest_sel = ",".join(str(i) for i in range(2, min(_n_pages + 1, 21)))
+        _rest_sel = f"2-{_n_pages}"
         try:
-            pages_rest = pdf_pages_to_text(payload, _rest_sel, ocr_with_layout=None)
+            pages_rest = pdf_pages_to_text(payload, _rest_sel, ocr_with_layout=None, limit=_n_pages)
         except Exception:
             pages_rest = []
         all_pages = pages_p1 + pages_rest
     else:
         all_pages = pages_p1
 
-    text = "\n".join(p["text"] for p in all_pages if p.get("text"))
+    text = "\n".join(
+        f"===== PAGE {p.get('page')} =====\n{p.get('text') or ''}"
+        for p in all_pages
+        if p.get("text")
+    )
     layout = pages_p1[0].get("layout")
     return text, layout
 

@@ -162,3 +162,21 @@ Client 135156 Bon n°222 Réf : A-2
     ]
     assert rows[0]["customer_reference"] == "A-1"
     assert rows[1]["customer_reference"] == "A-2"
+
+
+def test_qty_amount_lines_ignore_replace_article_and_keep_three_rows():
+    text = """
+Référence Désignation Qté Montant HT
+7709003079 ROBINET GAZ 1,00 31,61
+7736507598 CHAUFFE EAU BOSCH THERM4300 / REMPLACE 12,00 3 432,00
+7736504932
+7736505037 CHAUFFE EAU BOSCH VENTOUSE THERM 5600S 1,00 393,00
+TOTAL HT
+3 856,61
+"""
+    rows = extract_line_items_from_text(text, {})
+    assert [(row["article"], row["quantity"], row["amount"]) for row in rows] == [
+        ("7709003079", "1", "31,61"),
+        ("7736507598", "12", "3 432,00"),
+        ("7736505037", "1", "393,00"),
+    ]

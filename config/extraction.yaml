@@ -250,4 +250,4 @@ ocr:
   selective_crop_margin_px: 12
 
 pdf:
-  max_pages_per_request: 8
+  max_pages_per_request: 50

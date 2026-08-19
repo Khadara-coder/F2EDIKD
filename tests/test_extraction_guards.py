@@ -73,7 +73,28 @@ def test_sanitize_order_lines_infers_quantity_from_price_total():
     assert cleaned[0]["quantite"] == 6.0
 
 
-def test_merge_order_line_candidates_keeps_same_article_different_qty():
+def test_sanitize_order_lines_drops_swapped_qty_price_duplicate():
+    cleaned = _sanitize_order_lines(
+        [
+            {
+                "code_article": "7736507598",
+                "description": "CHAUFFE EAU BOSCH THERM4300",
+                "quantite": 12.0,
+                "prix_unitaire_ht": 286.0,
+                "montant_ligne_ht": 3432.0,
+            },
+            {
+                "code_article": "7736505037",
+                "description": "CHAUFFE EAU BOSCH THERM4300 / REMPLACE",
+                "quantite": 286.0,
+                "prix_unitaire_ht": 12.0,
+                "montant_ligne_ht": 3432.0,
+            },
+        ]
+    )
+    assert len(cleaned) == 1
+    assert cleaned[0]["code_article"] == "7736507598"
+    assert cleaned[0]["quantite"] == 12.0
     llm_lines = [
         {
             "code_article": "7736504816",

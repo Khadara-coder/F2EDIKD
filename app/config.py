@@ -51,7 +51,7 @@ DEFAULTS: dict[str, Any] = {
         "selective_crop_top_ratio": 0.55,
         "selective_crop_margin_px": 12,
     },
-    "pdf": {"max_pages_per_request": 8},
+    "pdf": {"max_pages_per_request": 50},
 }
 
 

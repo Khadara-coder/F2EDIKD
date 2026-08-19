@@ -398,9 +398,8 @@ export function RevuePage() {
   const isOnHold = order.status === "En attente";
   const isSentToSap =
     order.status === "Envoyé SAP"
-    || order.status === "Confirmé SAP"
     || Boolean(order.sapSentAt);
-  const isConfirmedSap = order.status === "Confirmé SAP" || Boolean(order.sapVbeln);
+  const isConfirmedSap = Boolean(order.sapVbeln);
   const cooldownActive = isSentToSap && cooldownRemaining > 0;
   // Rejeté (moteur ou manuel) reste traitable : corriger, enregistrer, envoyer SAP.
   // Seul un envoi SAP déjà effectué verrouille le dossier (renvoi admin excepté).
@@ -526,7 +525,7 @@ export function RevuePage() {
         )}
         {isSentToSap && (
           <Badge variant="success" className="max-w-xl truncate">
-            {isConfirmedSap ? "Confirmé SAP" : "Envoyé vers SAP"}
+            {"Envoyé vers SAP"}
             {order.sapSentAt ? ` le ${formatDateTime(order.sapSentAt)}` : ""}
             {order.sapSentBy ? ` par ${order.sapSentBy}` : ""}
           </Badge>

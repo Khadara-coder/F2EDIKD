@@ -32,7 +32,7 @@ def test_cohere_line_rejects_polluted_description_with_weak_signals():
     assert fixed is None
 
 
-def test_finalize_llm_lines_rejects_polluted_batch():
+def test_finalize_llm_lines_keeps_valid_lines_from_mixed_batch():
     result = _finalize_llm_lines(
         [
             {
@@ -59,4 +59,44 @@ def test_finalize_llm_lines_rejects_polluted_batch():
         ]
     )
 
-    assert result == []
+    assert len(result) == 1
+    assert result[0]["code_article"] == "7738111040"
+
+
+def test_split_text_for_llm_keeps_short_document_whole():
+    from app.engines.llm_orderlines import _split_text_for_llm
+
+    text = "Ligne " * 20
+    assert _split_text_for_llm(text) == [text.strip()]
+
+
+def test_split_text_for_llm_covers_all_pages():
+    from app.engines.llm_orderlines import _split_text_for_llm
+
+    pages = [f"===== PAGE {i} =====\nARTICLE{i:04d} DESC {i} 1,00 10,00" for i in range(1, 6)]
+    text = "\n".join(pages)
+    chunks = _split_text_for_llm(text, max_chars=80)
+    joined = "\n".join(chunks)
+    for i in range(1, 6):
+        assert f"ARTICLE{i:04d}" in joined
+    assert chunks
+
+
+def test_llm_extract_orderlines_sends_full_document_not_truncated_head(monkeypatch):
+    from app.engines import llm_orderlines as mod
+
+    captured = []
+
+    def fake_call(prompt, max_tokens=1500, endpoint=None):
+        captured.append(prompt)
+        if "7736505037" in prompt:
+            return '[{"code_article":"7736505037","description":"VENTOUSE","quantite":1,"prix_unitaire_ht":393,"montant_ligne_ht":393}]'
+        return '[{"code_article":"7709003079","description":"ROBINET","quantite":1,"prix_unitaire_ht":31.61,"montant_ligne_ht":31.61}]'
+
+    monkeypatch.setattr(mod, "_call_llm", fake_call)
+    head = "A" * 4500
+    tail = "===== PAGE 2 =====\n7736505037 CHAUFFE EAU VENTOUSE 1,00 393,00"
+    lines = mod.llm_extract_orderlines(head + "\n" + tail)
+    assert captured
+    assert any("7736505037" in prompt for prompt in captured)
+    assert any(line["code_article"] == "7736505037" for line in lines)

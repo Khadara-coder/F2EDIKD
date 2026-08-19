@@ -127,7 +127,7 @@ def probe_n8n_connectivity(config: dict[str, Any] | None = None) -> dict[str, An
 
     health_url = f"{origin}/healthz"
     try:
-        health = requests.get(health_url, timeout=5)
+        health = requests.get(health_url, timeout=5, verify=False)
     except Exception as exc:
         return {
             "status": "disconnected",
@@ -227,6 +227,7 @@ def trigger_masterdata_sync_workflow(
             headers=headers,
             json=body,
             timeout=(connect_timeout, read_timeout),
+            verify=False,
         )
     except requests.Timeout as exc:
         # Workflow likely still running under lastNode - n8n will call reload-cache.

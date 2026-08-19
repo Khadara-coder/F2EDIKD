@@ -22,6 +22,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 
 
@@ -32,6 +33,15 @@ _ABBREVIATIONS = {
     "PL": "PLACE", "RTE": "ROUTE", "IMP": "IMPASSE", "ALL": "ALLEE",
     "CHE": "CHEMIN", "CHEM": "CHEMIN", "SQ": "SQUARE",
 }
+
+_STREET_TYPE_RE = re.compile(
+    r"\b(RUE|AVENUE|BOULEVARD|IMPASSE|ALLEE|CHEMIN|PLACE|ROUTE|QUAI|PASSAGE|COURS|SQUARE)\b"
+)
+_STREET_WITH_NUMBER_RE = re.compile(
+    r"\b(?P<number>\d{1,4}[A-Z]?)\s+"
+    r"(?P<stype>RUE|AVENUE|BOULEVARD|IMPASSE|ALLEE|CHEMIN|PLACE|ROUTE|QUAI|PASSAGE|COURS|SQUARE)\s+"
+    r"(?P<name>[A-Z0-9 ]{2,80})"
+)
 
 
 def _strip_accents(s: str) -> str:
@@ -56,6 +66,58 @@ def normalize_text(s: str) -> str:
     tokens = s.split()
     expanded = [_ABBREVIATIONS.get(t, t) for t in tokens]
     return " ".join(expanded)
+
+
+def _parse_street(value: str) -> dict[str, str]:
+    norm = normalize_text(value)
+    match = _STREET_WITH_NUMBER_RE.search(norm)
+    if not match:
+        stype = ""
+        type_match = _STREET_TYPE_RE.search(norm)
+        if type_match:
+            stype = type_match.group(1)
+        return {"number": "", "stype": stype, "name": norm, "raw": norm}
+    name = re.sub(r"\b\d{5}\b.*$", "", match.group("name")).strip()
+    name = re.sub(r"\b(FRANCE|CEDEX|TELEPHONE|TEL|FAX)\b.*$", "", name).strip()
+    return {
+        "number": match.group("number"),
+        "stype": match.group("stype"),
+        "name": name,
+        "raw": f"{match.group('number')} {match.group('stype')} {name}".strip(),
+    }
+
+
+def extract_detected_streets(evidence: ScoringEvidence) -> list[dict[str, str]]:
+    """Numbered streets found in the delivery block first, then the whole PDF."""
+    found: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for blob in (evidence.delivery_section, evidence.text_normalized):
+        if not blob:
+            continue
+        for match in _STREET_WITH_NUMBER_RE.finditer(blob):
+            parsed = _parse_street(match.group(0))
+            key = f"{parsed['number']}|{parsed['stype']}|{parsed['name']}"
+            if not parsed["number"] or key in seen:
+                continue
+            seen.add(key)
+            found.append(parsed)
+        if found:
+            break
+    return found
+
+
+def streets_contradict(candidate_street: str, detected: dict[str, str]) -> bool:
+    """True when PDF street and masterdata street are clearly different locations."""
+    cand = _parse_street(candidate_street)
+    if not cand.get("number") or not detected.get("number"):
+        return False
+    if cand["number"] == detected["number"] and cand["stype"] == detected["stype"]:
+        return False
+    name_ratio = SequenceMatcher(None, cand.get("name") or "", detected.get("name") or "").ratio()
+    same_axis = name_ratio >= 0.55 or not cand.get("name") or not detected.get("name")
+    different_number = cand["number"] != detected["number"]
+    different_type = bool(cand.get("stype") and detected.get("stype") and cand["stype"] != detected["stype"])
+    return same_axis and (different_number or different_type)
 
 
 def normalize_postal(s: str) -> str:
@@ -237,6 +299,8 @@ def score_candidate(
         pass
 
     # ── SCORE: Rue normalisee dans le PDF (+30) ──
+    street_contradicted = False
+    detected_streets = extract_detected_streets(evidence)
     if cand_street_norm and len(cand_street_norm) > 5:
         if cand_street_norm in evidence.text_normalized:
             cs.score += 30
@@ -246,6 +310,15 @@ def score_candidate(
             if evidence.delivery_section and cand_street_norm in evidence.delivery_section:
                 cs.score += 5
                 cs.reason_codes.append("STREET_IN_DELIVERY_SECTION")
+        else:
+            for detected in detected_streets:
+                if streets_contradict(cs.street, detected):
+                    cs.score -= 50
+                    cs.reason_codes.append(
+                        f"STREET_CONTRADICTION:{detected.get('raw') or detected.get('number')}"
+                    )
+                    street_contradicted = True
+                    break
 
     # ── SCORE: Code agence detecte et lie au SHIPTO (+35) ──
     if evidence.agency_codes:
@@ -301,7 +374,7 @@ def score_candidate(
                     break
 
     # ── MALUS: Absence totale de preuve adresse (-30) ──
-    if not has_any_address_proof:
+    if not has_any_address_proof and not street_contradicted:
         cs.score -= 30
         cs.reason_codes.append("NO_ADDRESS_EVIDENCE")
 

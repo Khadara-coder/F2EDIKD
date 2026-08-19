@@ -657,7 +657,9 @@ def create_router() -> APIRouter:
         """All converted orders for the Revue list page."""
         actor = resolve_actor(req)
         role = resolve_role_for_request(actor, req)
-        return [_order_list_item(o) for o in _list_combined_orders(actor=actor, role=role, include_done=True)]
+        orders = _list_combined_orders(actor=actor, role=role, include_done=True)
+        _enrich_vbeln_from_salesorders(orders)
+        return [_order_list_item(o) for o in orders]
 
     @router.get("/dashboard/review-queue")
     def review_queue(req: Request):
@@ -2337,6 +2339,33 @@ def _require_mutable_order(order_id: str) -> dict:
     return review
 
 
+def _enrich_vbeln_from_salesorders(orders: list[dict]) -> None:
+    """Fill sap_vbeln from masterdata salesorders for orders that don't have one yet."""
+    try:
+        from src.sap_feedback import build_salesorder_index, find_sap_confirmation
+        from src.masterdata_runtime import table_records
+        rows = table_records("salesorders")
+        if not rows:
+            return
+        index = build_salesorder_index(rows)
+        for o in orders:
+            if o.get("sap_vbeln"):
+                continue
+            po = o.get("customer_order_number")
+            if not po:
+                continue
+            hit = find_sap_confirmation(
+                customer_order_number=po,
+                soldto=o.get("soldto"),
+                sap_sent_at=o.get("sap_sent_at"),
+                salesorders_by_bstnk=index,
+            )
+            if hit and hit.get("vbeln"):
+                o["sap_vbeln"] = hit["vbeln"]
+    except Exception:
+        pass
+
+
 def _order_list_item(o: dict) -> dict:
     created_at = _to_iso_utc(o.get("created_at"))
     updated_at = _to_iso_utc(o.get("updated_at"))
@@ -2356,7 +2385,7 @@ def _order_list_item(o: dict) -> dict:
         "processedAt": sap_confirmed_at or sap_sent_at or processed_at,
         "sapSentAt": sap_sent_at,
         "sapSentBy": o.get("sap_sent_by") or None,
-        "sapVbeln": o.get("sap_vbeln") or None,
+        "sapVbeln": (o.get("sap_vbeln") or "").lstrip("0") or None,
         "sapConfirmedAt": sap_confirmed_at,
         "processedBy": o.get("processed_by") or o.get("uploaded_by"),
         "assignedTo": o.get("assigned_to"),
