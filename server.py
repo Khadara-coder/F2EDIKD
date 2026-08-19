@@ -3408,9 +3408,10 @@ def _finalize_masterdata_import(key: str, result: dict, *, actor: str, filename:
     }
     if key == "salesorders":
         try:
-            from src.sap_feedback import reconcile_sent_orders_with_sap
+            from src.sap_feedback import reconcile_sent_orders_with_sap, enrich_all_orders_vbeln
 
             payload["sapFeedback"] = reconcile_sent_orders_with_sap()
+            enrich_all_orders_vbeln()
         except Exception as exc:
             log.warning("SAP feedback reconcile after masterdata import failed: %s", exc)
             payload["sapFeedback"] = {"ok": False, "error": str(exc)}
@@ -4172,9 +4173,10 @@ def api_md_reload_cache():
     md_sync = _masterdata_sync_freshness()
     sap_feedback: dict = {}
     try:
-        from src.sap_feedback import reconcile_sent_orders_with_sap
+        from src.sap_feedback import reconcile_sent_orders_with_sap, enrich_all_orders_vbeln
 
         sap_feedback = reconcile_sent_orders_with_sap()
+        enrich_all_orders_vbeln()
     except Exception as exc:
         log.warning("SAP feedback reconcile after masterdata reload failed: %s", exc)
         sap_feedback = {"ok": False, "error": str(exc)}

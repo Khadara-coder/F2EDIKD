@@ -198,6 +198,47 @@ def reconcile_sent_orders_with_sap(store=None) -> dict[str, Any]:
     return result
 
 
+def enrich_all_orders_vbeln(store=None) -> int:
+    """Backfill sap_vbeln for all orders missing it, using salesorders masterdata."""
+    from src.file2edi.store import get_store
+    from src.masterdata_runtime import table_records
+
+    store = store or get_store()
+    rows = table_records("salesorders")
+    if not rows:
+        return 0
+    index = build_salesorder_index(rows)
+
+    conn = store._conn()
+    orders = conn.execute(
+        """SELECT order_id, customer_order_number, soldto, sap_sent_at
+           FROM file2edi_orders
+           WHERE (sap_vbeln IS NULL OR sap_vbeln = '')
+             AND customer_order_number IS NOT NULL
+             AND customer_order_number != ''"""
+    ).fetchall()
+
+    updated = 0
+    for order in orders:
+        hit = find_sap_confirmation(
+            customer_order_number=order["customer_order_number"],
+            soldto=order["soldto"],
+            sap_sent_at=order["sap_sent_at"],
+            salesorders_by_bstnk=index,
+        )
+        if hit and hit.get("vbeln"):
+            conn.execute(
+                "UPDATE file2edi_orders SET sap_vbeln=? WHERE order_id=?",
+                (str(hit["vbeln"]), str(order["order_id"])),
+            )
+            updated += 1
+    if updated:
+        conn.commit()
+    conn.close()
+    log.info("VBELN enrichment: %s orders updated out of %s candidates", updated, len(orders))
+    return updated
+
+
 def _row_get(row: dict[str, Any], *names: str) -> str:
     lowered = {str(k).strip().lower(): v for k, v in row.items()}
     for name in names:

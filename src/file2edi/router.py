@@ -657,9 +657,7 @@ def create_router() -> APIRouter:
         """All converted orders for the Revue list page."""
         actor = resolve_actor(req)
         role = resolve_role_for_request(actor, req)
-        orders = _list_combined_orders(actor=actor, role=role, include_done=True)
-        _enrich_vbeln_from_salesorders(orders)
-        return [_order_list_item(o) for o in orders]
+        return [_order_list_item(o) for o in _list_combined_orders(actor=actor, role=role, include_done=True)]
 
     @router.get("/dashboard/review-queue")
     def review_queue(req: Request):
@@ -2337,33 +2335,6 @@ def _require_mutable_order(order_id: str) -> dict:
             "Cette commande a déjà été envoyée vers SAP et ne peut plus être modifiée.",
         )
     return review
-
-
-def _enrich_vbeln_from_salesorders(orders: list[dict]) -> None:
-    """Fill sap_vbeln from masterdata salesorders for orders that don't have one yet."""
-    try:
-        from src.sap_feedback import build_salesorder_index, find_sap_confirmation
-        from src.masterdata_runtime import table_records
-        rows = table_records("salesorders")
-        if not rows:
-            return
-        index = build_salesorder_index(rows)
-        for o in orders:
-            if o.get("sap_vbeln"):
-                continue
-            po = o.get("customer_order_number")
-            if not po:
-                continue
-            hit = find_sap_confirmation(
-                customer_order_number=po,
-                soldto=o.get("soldto"),
-                sap_sent_at=o.get("sap_sent_at"),
-                salesorders_by_bstnk=index,
-            )
-            if hit and hit.get("vbeln"):
-                o["sap_vbeln"] = hit["vbeln"]
-    except Exception:
-        pass
 
 
 def _order_list_item(o: dict) -> dict:
