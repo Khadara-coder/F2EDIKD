@@ -78,8 +78,9 @@ export function Sidebar() {
       />
 
       <aside
+        id="app-sidebar"
         className={cn(
-          "fixed left-0 top-0 z-50 flex h-screen w-[min(260px,88vw)] flex-col bg-sidebar text-sidebar-foreground shadow-xl transition-transform duration-200 ease-out lg:w-[260px] lg:translate-x-0 lg:shadow-none",
+          "fixed left-0 top-0 z-50 flex h-dvh w-[min(260px,88vw)] flex-col bg-sidebar text-sidebar-foreground shadow-xl transition-transform duration-200 ease-out lg:w-[260px] lg:translate-x-0 lg:shadow-none",
           open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >

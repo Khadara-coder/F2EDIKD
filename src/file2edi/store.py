@@ -14,6 +14,9 @@ from urllib.parse import urlsplit, urlunsplit
 _SCHEMA_PATH = Path(__file__).resolve().parents[2] / "data" / "file2edi_schema.sql"
 _APP_SETTINGS_KEY = "app_settings_v1"
 _log = logging.getLogger("edifact.file2edi.store")
+_SHIPTO_REMATCH_FIELDS = frozenset(
+    {"partnerCode", "partnerName", "addressLine1", "postalCode", "city"}
+)
 
 _APP_SETTINGS_DEFAULT: dict[str, Any] = {
     "defaultIncoterm": "DAP - Delivered At Place",
@@ -1394,6 +1397,8 @@ class File2EdiStore:
                     "UPDATE file2edi_orders SET client_name=?, updated_at=? WHERE order_id=?",
                     [payload["partnerName"], _now(), order_id],
                 )
+            if row["partner_function"] == "shipto" and _SHIPTO_REMATCH_FIELDS.intersection(payload):
+                self._rematch_shipto_after_update(conn, order_id, partner_id)
             self._invalidate_generated_edifact(conn, order_id)
             self._refresh_corrections_json(conn, order_id)
             conn.commit()
@@ -1401,6 +1406,174 @@ class File2EdiStore:
         review = self.load_order_review(order_id)
         self._sync_order_graph(review)
         return review
+
+    def _load_masterdata_safe(self) -> dict | None:
+        try:
+            from app.masterdata import get_master_data
+
+            md = get_master_data()
+            if not md or md.get("error"):
+                return md if md and md.get("partners_by_soldto") else None
+            return md
+        except Exception as exc:
+            _log.warning("masterdata unavailable for shipto rematch: %s", exc)
+            return None
+
+    def _find_partner_in_masterdata(
+        self,
+        masterdata: dict,
+        shipto_code: str,
+        soldto_code: str | None = None,
+    ) -> dict | None:
+        code = str(shipto_code or "").strip()
+        if not code:
+            return None
+        if soldto_code:
+            for partner in masterdata.get("partners_by_soldto", {}).get(soldto_code, []) or []:
+                if str(partner.get("id") or "") == code:
+                    return partner
+        for partners in (masterdata.get("partners_by_soldto") or {}).values():
+            for partner in partners or []:
+                if str(partner.get("id") or "") == code:
+                    return partner
+        return None
+
+    def _close_delivery_address_anomalies(self, conn, order_id: str) -> None:
+        conn.execute(
+            """UPDATE file2edi_order_anomalies
+               SET status='Corrigée'
+               WHERE order_id=?
+                 AND field_name IN ('DELIVERY_ADDRESS_INVALID', 'NO_DELIVERY_ADDRESS')
+                 AND status IN ('Ouverte', 'Bloquante')""",
+            [order_id],
+        )
+
+    def _rematch_shipto_after_update(self, conn, order_id: str, partner_id: str) -> None:
+        """Fill SAP ship-to when uniquely proven; close address anomalies when code is valid."""
+        from app.engines.shipto_scoring import match_shipto_strict
+
+        shipto_row = conn.execute(
+            """SELECT partner_code, partner_name, address_line_1, postal_code, city, country,
+                      edited_fields_json
+               FROM file2edi_order_partners WHERE partner_id=?""",
+            [partner_id],
+        ).fetchone()
+        if not shipto_row:
+            return
+
+        soldto_row = conn.execute(
+            """SELECT partner_code FROM file2edi_order_partners
+               WHERE order_id=? AND partner_function='soldto'""",
+            [order_id],
+        ).fetchone()
+        soldto_code = str((soldto_row["partner_code"] if soldto_row else "") or "").strip()
+
+        masterdata = self._load_masterdata_safe()
+        if not masterdata:
+            return
+
+        current_code = str(shipto_row["partner_code"] or "").strip()
+        matched_partner: dict | None = None
+        auto_filled_code = False
+
+        if current_code:
+            matched_partner = self._find_partner_in_masterdata(
+                masterdata, current_code, soldto_code or None
+            )
+        elif soldto_code:
+            strict = match_shipto_strict(
+                soldto_code,
+                masterdata,
+                name=str(shipto_row["partner_name"] or "") or None,
+                street=str(shipto_row["address_line_1"] or "") or None,
+                postal=str(shipto_row["postal_code"] or "") or None,
+                city=str(shipto_row["city"] or "") or None,
+            )
+            if strict and strict.get("shipto_id"):
+                matched_partner = self._find_partner_in_masterdata(
+                    masterdata, strict["shipto_id"], soldto_code
+                ) or {
+                    "id": strict["shipto_id"],
+                    "name": strict.get("name") or "",
+                    "street": strict.get("street") or "",
+                    "city": strict.get("city") or "",
+                    "postal": strict.get("postal") or "",
+                    "country": strict.get("country") or "FR",
+                }
+                auto_filled_code = True
+
+        if not matched_partner:
+            return
+
+        edited_fields: dict[str, str] = {}
+        if shipto_row["edited_fields_json"]:
+            try:
+                parsed = json.loads(shipto_row["edited_fields_json"])
+                if isinstance(parsed, dict):
+                    edited_fields = {
+                        str(k): v for k, v in parsed.items() if v in ("manual", "auto")
+                    }
+            except json.JSONDecodeError:
+                pass
+
+        sets: list[str] = []
+        vals: list[Any] = []
+        new_code = str(matched_partner.get("id") or current_code).strip()
+        if auto_filled_code and new_code and new_code != current_code:
+            sets.append("partner_code=?")
+            vals.append(new_code)
+            edited_fields["partnerCode"] = "auto"
+            current_code = new_code
+
+        # Complete blank address/name from masterdata (never overwrite manual values)
+        fill_map = [
+            ("partner_name", "partnerName", matched_partner.get("name") or ""),
+            ("address_line_1", "addressLine1", matched_partner.get("street") or ""),
+            ("postal_code", "postalCode", matched_partner.get("postal") or ""),
+            ("city", "city", matched_partner.get("city") or ""),
+            ("country", "country", matched_partner.get("country") or "FR"),
+        ]
+        for col, api_key, md_value in fill_map:
+            current_val = str(shipto_row[col] if col in shipto_row.keys() else "") or ""
+            # After possible code auto-fill, re-read isn't needed for other cols from original row
+            if col == "partner_name":
+                current_val = str(shipto_row["partner_name"] or "")
+            elif col == "address_line_1":
+                current_val = str(shipto_row["address_line_1"] or "")
+            elif col == "postal_code":
+                current_val = str(shipto_row["postal_code"] or "")
+            elif col == "city":
+                current_val = str(shipto_row["city"] or "")
+            elif col == "country":
+                current_val = str(shipto_row["country"] or "")
+            if not current_val.strip() and str(md_value or "").strip():
+                sets.append(f"{col}=?")
+                vals.append(str(md_value).strip())
+                edited_fields[api_key] = "auto"
+
+        if sets:
+            sets.append("edited_fields_json=?")
+            vals.append(json.dumps(edited_fields))
+            sets.append("manually_edited=?")
+            vals.append(1 if any(v == "manual" for v in edited_fields.values()) else 0)
+            vals.append(partner_id)
+            conn.execute(
+                f"UPDATE file2edi_order_partners SET {', '.join(sets)} WHERE partner_id=?",
+                vals,
+            )
+            filled_name = str(matched_partner.get("name") or "").strip()
+            if filled_name and (
+                auto_filled_code or not str(shipto_row["partner_name"] or "").strip()
+            ):
+                conn.execute(
+                    "UPDATE file2edi_orders SET client_name=?, updated_at=? WHERE order_id=?",
+                    [filled_name, _now(), order_id],
+                )
+
+        if current_code and self._find_partner_in_masterdata(
+            masterdata, current_code, soldto_code or None
+        ):
+            self._close_delivery_address_anomalies(conn, order_id)
 
     def update_line(self, line_id: str, payload: dict) -> dict | None:
         conn = self._conn()

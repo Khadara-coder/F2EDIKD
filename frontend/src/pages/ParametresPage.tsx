@@ -4,6 +4,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Brain, CheckCircle2, Database, Key, Lock, RefreshCw, Save, Search, Server, Shield, Trash2, UserPlus, Wifi, XCircle } from "lucide-react";
+import { LiveRegion, useLiveAnnounce } from "@/components/a11y/LiveRegion";
 import { api } from "@/lib/api";
 import { useSettings } from "@/hooks/useFile2Edi";
 import { appSettingsSchema, type AppSettingsForm } from "@/schemas";
@@ -113,6 +114,7 @@ export function ParametresPage() {
   const [newUserSuccess, setNewUserSuccess] = useState("");
   const [showNewUserForm, setShowNewUserForm] = useState(false);
   const [userFilter, setUserFilter] = useState("");
+  const { message: liveMessage, announce } = useLiveAnnounce();
   const [resetUserId, setResetUserId] = useState<string | null>(null);
   const [resetPassword, setResetPassword] = useState("");
   const [resetMsg, setResetMsg] = useState("");
@@ -164,6 +166,7 @@ export function ParametresPage() {
       setNewUsername(""); setNewDisplayName(""); setNewEmail(""); setNewSapId("");
       setNewUserRole("adv"); setNewPassword("");
       setNewUserError(""); setNewUserSuccess("Utilisateur créé avec succès");
+      announce("Utilisateur créé avec succès");
       setTimeout(() => { setNewUserSuccess(""); setShowNewUserForm(false); }, 2000);
     },
     onError: (e) => setNewUserError(e instanceof Error ? e.message : "Erreur"),
@@ -291,6 +294,7 @@ export function ParametresPage() {
       const label = res.status === "connected" ? "Connecté" : "Déconnecté";
       const msg = res.message ? `${label} - ${res.message}` : label;
       setConnectorMessages((prev) => ({ ...prev, [connector]: msg }));
+      announce(msg);
       queryClient.setQueryData(["settings"], (current: unknown) => {
         const settings = current && typeof current === "object" ? (current as Record<string, unknown>) : {};
         const connectors =
@@ -310,6 +314,7 @@ export function ParametresPage() {
       const connector = vars.connector;
       const msg = err instanceof Error ? err.message : "Échec du test de connexion";
       setConnectorMessages((prev) => ({ ...prev, [connector]: msg }));
+      announce(msg);
     },
     onSettled: () => {
       setTestingConnector(null);
@@ -421,19 +426,23 @@ export function ParametresPage() {
 
   return (
     <>
+      <LiveRegion message={liveMessage} />
       <Header
         title="Paramètres"
         subtitle="Configuration de l'application et des intégrations"
       />
 
-      <div className="grid gap-6 lg:grid-cols-12">
-        <Card className="h-fit lg:col-span-2">
-          <CardContent className="flex gap-1 overflow-x-auto p-2 lg:flex-col lg:overflow-visible">
+      <div className="grid gap-4 lg:grid-cols-12 lg:gap-6">
+        <Card className="sticky top-[3.5rem] z-20 h-fit border-b bg-background/95 backdrop-blur lg:static lg:col-span-2 lg:border lg:bg-card lg:backdrop-blur-none">
+          <CardContent className="flex gap-1 overflow-x-auto p-2 scrollbar-thin-x lg:flex-col lg:overflow-visible">
             {SECTIONS.map((s) => (
               <button
                 key={s.id}
                 type="button"
-                onClick={() => selectSection(s.id)}
+                onClick={() => {
+                  selectSection(s.id);
+                  window.scrollTo({ top: 0, behavior: "smooth" });
+                }}
                 className={cn(
                   "shrink-0 rounded-lg px-3 py-2 text-left text-sm transition-colors whitespace-nowrap lg:w-full",
                   activeSection === s.id
@@ -819,7 +828,9 @@ export function ParametresPage() {
                     {testingConnector === "csvExport" ? "Test..." : "Tester le webhook n8n"}
                   </Button>
                   {connectorMessages.csvExport && (
-                    <p className="text-xs text-muted-foreground">{connectorMessages.csvExport}</p>
+                    <p className="text-xs text-muted-foreground" role="status" aria-live="polite">
+                      {connectorMessages.csvExport}
+                    </p>
                   )}
                 </div>
               </CardContent>

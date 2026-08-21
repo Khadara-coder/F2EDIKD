@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, ChevronLeft, ChevronRight, Plus, TableProperties, Trash2 } from "lucide-react";
 import type { OrderLine } from "@/types";
-import { REVIEW_LINES_PAGE_SIZE, REVIEW_PANEL_BODY_MIN_HEIGHT } from "@/lib/reviewLayout";
+import { REVIEW_LINES_PAGE_SIZE } from "@/lib/reviewLayout";
 import { BulkOrderLinesDialog } from "@/components/file2edi/BulkOrderLinesDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -98,8 +98,7 @@ export function OrderLinesEditPanel({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div
-        className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border"
-        style={{ minHeight: REVIEW_PANEL_BODY_MIN_HEIGHT }}
+        className="flex min-h-0 flex-1 flex-col overflow-x-auto overflow-y-visible rounded-lg border lg:min-h-[520px] lg:overflow-hidden"
       >
         <Table>
           <TableHeader>

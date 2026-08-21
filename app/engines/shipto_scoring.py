@@ -125,6 +125,195 @@ def normalize_postal(s: str) -> str:
     return re.sub(r"[^0-9]", "", s or "")[:5]
 
 
+def _clean_site_name(name: str) -> str:
+    """Normalize site name without agency parentheses (e.g. '.ISERBA (OUL)' → 'ISERBA')."""
+    raw = re.sub(r"\([^)]*\)", " ", name or "")
+    return normalize_text(raw)
+
+
+def _agency_from_name(name: str) -> str | None:
+    match = re.search(r"\(([A-Z0-9]{2,5})\)", (name or "").upper())
+    return match.group(1) if match else None
+
+
+def _street_key(street: str) -> str:
+    parsed = _parse_street(street or "")
+    if parsed.get("number") and parsed.get("stype"):
+        return f"{parsed['number']}|{parsed['stype']}|{parsed['name']}"
+    return normalize_text(street or "")
+
+
+def _partners_for_soldto(masterdata: dict, soldto_id: str) -> list[dict]:
+    partners = masterdata.get("partners_by_soldto", {}).get(soldto_id, []) or []
+    return [
+        p for p in partners
+        if p.get("id") and str(p.get("id")) != str(soldto_id)
+    ]
+
+
+def _strict_match_payload(partner: dict, confidence: int, reason: str) -> dict[str, Any]:
+    return {
+        "shipto_id": str(partner.get("id") or ""),
+        "name": partner.get("name") or "",
+        "street": partner.get("street") or "",
+        "city": partner.get("city") or "",
+        "postal": partner.get("postal") or "",
+        "country": partner.get("country") or "FR",
+        "confidence": confidence,
+        "reason": reason,
+    }
+
+
+def match_shipto_strict(
+    soldto_id: str,
+    masterdata: dict,
+    *,
+    name: str | None = None,
+    street: str | None = None,
+    postal: str | None = None,
+    city: str | None = None,
+    text: str | None = None,
+) -> dict[str, Any] | None:
+    """Return a single strong SHIPTO match, or None when unsure / ambiguous.
+
+    Acceptance (exactly one candidate):
+      - postal + normalized street exact
+      - unique agency code in partner name, optionally constrained by postal/city
+      - unique cleaned site name, optionally constrained by postal/city
+    """
+    candidates = _partners_for_soldto(masterdata, soldto_id)
+    if not candidates:
+        return None
+
+    postal_n = normalize_postal(postal or "")
+    street_n = normalize_text(street or "")
+    street_k = _street_key(street) if street else ""
+    city_n = normalize_text(city or "")
+    name_n = normalize_text(name or "") if name else ""
+    name_clean = _clean_site_name(name) if name else ""
+
+    agency_codes: list[str] = []
+    if name:
+        agency = _agency_from_name(name)
+        if agency:
+            agency_codes.append(agency)
+
+    evidence: ScoringEvidence | None = None
+    if text:
+        evidence = extract_evidence(text)
+        for code in evidence.agency_codes:
+            if code not in agency_codes:
+                agency_codes.append(code)
+        for match in re.finditer(r"\(([A-Z0-9]{2,5})\)", text.upper()):
+            code = match.group(1)
+            if code not in agency_codes:
+                agency_codes.append(code)
+        if not postal_n and evidence.postal_codes_in_text:
+            # Prefer delivery-section postal when unique there
+            delivery_postals = [
+                p for p in evidence.postal_codes_in_text
+                if evidence.delivery_section and p in evidence.delivery_section
+            ]
+            if len(delivery_postals) == 1:
+                postal_n = delivery_postals[0]
+            elif len(evidence.postal_codes_in_text) == 1:
+                postal_n = evidence.postal_codes_in_text[0]
+        if not street_n:
+            detected = extract_detected_streets(evidence)
+            if len(detected) == 1:
+                street_n = detected[0].get("raw") or ""
+                street_k = _street_key(street_n)
+        if not city_n and evidence.delivery_section:
+            # city filled only when caller provided it; text path relies on postal/street/agency
+            pass
+
+    def _filter_postal_city(rows: list[dict]) -> list[dict]:
+        out = rows
+        if postal_n:
+            out = [p for p in out if normalize_postal(p.get("postal", "")) == postal_n]
+        if city_n:
+            out = [p for p in out if normalize_text(p.get("city", "")) == city_n]
+        return out
+
+    # 1) Exact unique postal + street
+    if postal_n and (street_k or street_n):
+        hits: list[dict] = []
+        for partner in candidates:
+            if normalize_postal(partner.get("postal", "")) != postal_n:
+                continue
+            p_key = _street_key(partner.get("street", ""))
+            p_street = normalize_text(partner.get("street", ""))
+            if street_k and p_key and street_k == p_key:
+                hits.append(partner)
+            elif street_n and p_street and street_n == p_street:
+                hits.append(partner)
+        if len(hits) == 1:
+            return _strict_match_payload(hits[0], 100, "EXACT_UNIQUE_ADDRESS")
+
+    # Text path: try each (postal, street) pair from evidence when fields incomplete
+    if evidence and not (postal_n and (street_k or street_n)):
+        detected_streets = extract_detected_streets(evidence)
+        postals = list(evidence.postal_codes_in_text)
+        if evidence.delivery_section:
+            delivery_postals = [p for p in postals if p in evidence.delivery_section]
+            if delivery_postals:
+                postals = delivery_postals
+        pair_hits: list[dict] = []
+        for post in postals:
+            for det in detected_streets:
+                det_key = f"{det.get('number')}|{det.get('stype')}|{det.get('name')}"
+                det_raw = det.get("raw") or ""
+                for partner in candidates:
+                    if normalize_postal(partner.get("postal", "")) != post:
+                        continue
+                    p_key = _street_key(partner.get("street", ""))
+                    p_street = normalize_text(partner.get("street", ""))
+                    if (det_key and p_key == det_key) or (
+                        det_raw and p_street and normalize_text(det_raw) == p_street
+                    ):
+                        pair_hits.append(partner)
+        unique_ids = {p.get("id") for p in pair_hits}
+        if len(unique_ids) == 1:
+            return _strict_match_payload(pair_hits[0], 100, "EXACT_UNIQUE_ADDRESS")
+
+    # 2) Unique agency code (optionally + postal/city)
+    for code in agency_codes:
+        hits = [
+            p for p in candidates
+            if f"({code})" in (p.get("name") or "").upper()
+        ]
+        hits = _filter_postal_city(hits)
+        if len(hits) == 1:
+            return _strict_match_payload(hits[0], 95, f"EXACT_UNIQUE_AGENCY:{code}")
+
+    # 3) Unique cleaned site name (optionally + postal/city)
+    if name_clean and len(name_clean) > 3:
+        hits = []
+        for partner in candidates:
+            p_clean = _clean_site_name(partner.get("name", ""))
+            p_full = normalize_text(partner.get("name", ""))
+            if name_clean == p_clean or (name_n and name_n == p_full):
+                hits.append(partner)
+        hits = _filter_postal_city(hits)
+        if len(hits) == 1:
+            return _strict_match_payload(hits[0], 90, "EXACT_UNIQUE_NAME")
+
+    if evidence and not name_clean:
+        # Pull obvious site tokens like ISERBA from delivery section / text
+        blob = evidence.delivery_section or evidence.text_normalized
+        name_hits: list[dict] = []
+        for partner in candidates:
+            p_clean = _clean_site_name(partner.get("name", ""))
+            if p_clean and len(p_clean) > 3 and p_clean in blob:
+                name_hits.append(partner)
+        name_hits = _filter_postal_city(name_hits)
+        unique_ids = {p.get("id") for p in name_hits}
+        if len(unique_ids) == 1:
+            return _strict_match_payload(name_hits[0], 90, "EXACT_UNIQUE_NAME")
+
+    return None
+
+
 # ─── Data classes ────────────────────────────────────────────────────────────
 
 @dataclass
@@ -408,6 +597,31 @@ def score_shipto_candidates(
         result.error = f"No SHIPTO partners found for SOLDTO {soldto_id}"
         result.decision = "ERROR"
         result.reason_codes.append("NO_PARTNERS_FOR_SOLDTO")
+        return result
+
+    # Exact unique proof (postal+street / agency / name) → accept without LLM
+    strict = match_shipto_strict(soldto_id, masterdata, text=text)
+    if strict and strict.get("shipto_id"):
+        best = CandidateScore(
+            shipto_id=strict["shipto_id"],
+            name=strict.get("name", ""),
+            street=strict.get("street", ""),
+            city=strict.get("city", ""),
+            postal=strict.get("postal", ""),
+            country=strict.get("country", "FR"),
+            score=100,
+            reason_codes=[strict.get("reason") or "EXACT_UNIQUE_MATCH"],
+        )
+        result.best_candidate = best
+        result.all_candidates = [best]
+        result.decision = "ACCEPTED"
+        result.shipto_confidence = int(strict.get("confidence") or 100)
+        result.reason_codes = list(best.reason_codes)
+        result.matched_by = list(best.reason_codes)
+        result.explanation = (
+            f"Best: {best.shipto_id} ({best.name}) score=100 | "
+            f"evidence=[{best.reason_codes[0]}] | decision=ACCEPTED"
+        )
         return result
 
     # If only 1 candidate, it's straightforward

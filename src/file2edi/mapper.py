@@ -194,9 +194,10 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "partnerId": f"p-shipto-{order_id}",
             "orderId": order_id,
             "partnerFunction": "shipto",
-            "partnerCode": str(cust.get("shipto") or det.get("name") or ""),
-            # Partners.NAME for SHIPTO
-            "partnerName": str(det.get("name") or cust.get("shipto") or ""),
+            # Never invent a SAP code: leave empty when shipto is unresolved
+            "partnerCode": str(cust.get("shipto") or ""),
+            # Partners.NAME for SHIPTO (PDF/masterdata name only — not a code fallback)
+            "partnerName": str(det.get("name") or ""),
             # Prefer validated masterdata street (Partners.STRAS) over OCR detection
             "addressLine1": addr.get("street") or det.get("street") or "",
             "postalCode": addr.get("postal_code") or det.get("postal_code") or "",

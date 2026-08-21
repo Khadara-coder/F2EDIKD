@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { Menu } from "lucide-react";
 import { api } from "@/lib/api";
@@ -60,7 +61,7 @@ function SystemBadges() {
   ];
 
   return (
-    <div className="flex max-w-full flex-wrap items-center gap-1.5 sm:gap-2">
+    <div className="hidden max-w-full flex-wrap items-center gap-1.5 sm:flex sm:gap-2">
       {badges.map((b) => (
         <Badge
           key={b.key}
@@ -84,46 +85,56 @@ export function Header({ title, subtitle, actions, breadcrumbs }: HeaderProps) {
   const { toggle } = useSidebar();
 
   return (
-    <header className="mb-4 sm:mb-6">
+    <header className="sticky top-0 z-30 -mx-3 mb-4 border-b bg-background/95 px-3 py-3 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:-mx-5 sm:mb-6 sm:px-5 sm:py-4 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:backdrop-blur-none">
       {breadcrumbs && breadcrumbs.length > 0 && (
-        <nav className="mb-2 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+        <nav aria-label="Fil d'Ariane" className="mb-2 hidden flex-wrap items-center gap-1.5 text-sm text-muted-foreground sm:flex">
           {breadcrumbs.map((crumb, i) => (
             <span key={i} className="flex items-center gap-1.5">
-              {i > 0 && <span>/</span>}
+              {i > 0 && <span aria-hidden>/</span>}
               {crumb.href ? (
-                <a href={crumb.href} className="hover:text-foreground">
+                <Link to={crumb.href} className="hover:text-foreground">
                   {crumb.label}
-                </a>
+                </Link>
               ) : (
-                <span className="text-foreground">{crumb.label}</span>
+                <span className="truncate text-foreground">{crumb.label}</span>
               )}
             </span>
           ))}
         </nav>
       )}
-      <div className="flex flex-col gap-3 sm:gap-4">
-        <div className="flex items-start gap-3">
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-3">
           <Button
             type="button"
             variant="outline"
             size="icon"
-            className="mt-0.5 shrink-0 lg:hidden"
+            className="shrink-0 lg:hidden"
             onClick={toggle}
             aria-label="Ouvrir le menu"
+            aria-controls="app-sidebar"
           >
             <Menu className="h-5 w-5" />
           </Button>
           <div className="min-w-0 flex-1">
-            <h1 className="text-xl font-bold tracking-tight text-foreground sm:text-2xl">{title}</h1>
+            <h1 className="truncate text-lg font-bold tracking-tight text-foreground sm:text-2xl">
+              {title}
+            </h1>
             {subtitle && (
-              <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
+              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground sm:text-sm">
+                {subtitle}
+              </p>
             )}
           </div>
+          {actions && (
+            <div className="hidden shrink-0 flex-wrap items-center gap-2 md:flex">
+              {actions}
+            </div>
+          )}
         </div>
-        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-          <div className="flex flex-wrap items-center gap-2">{actions}</div>
-          <SystemBadges />
-        </div>
+        {actions && (
+          <div className="flex flex-wrap items-center gap-2 md:hidden">{actions}</div>
+        )}
+        <SystemBadges />
       </div>
     </header>
   );

@@ -52,5 +52,6 @@
   .scrollbar-thin-x {
     @apply overflow-x-auto;
     -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
   }
 }

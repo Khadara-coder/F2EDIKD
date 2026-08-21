@@ -28,7 +28,14 @@ import {
   TRANSFER_MOTIF_TEMPLATES,
 } from "@/lib/motifTemplates";
 import { formatCurrency, formatDate, formatDateTime, downloadTextFile } from "@/lib/utils";
-import { collectReviewBlockers, countPendingAnomalies } from "@/lib/reviewValidation";
+import { LiveRegion, useLiveAnnounce } from "@/components/a11y/LiveRegion";
+import {
+  collectReviewBlockersDetailed,
+  countPendingAnomalies,
+  fieldErrorMap,
+  focusFirstBlocker,
+  type ReviewFieldKey,
+} from "@/lib/reviewValidation";
 import type { GestionnaireUser } from "@/types";
 
 function formatCooldownMmSs(seconds: number): string {
@@ -81,6 +88,11 @@ export function RevuePage() {
   const [transferNote, setTransferNote] = useState("");
   const [reprocessOpen, setReprocessOpen] = useState(false);
   const [selectedAnomalyId, setSelectedAnomalyId] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<ReviewFieldKey, string>>>({});
+  const [pdfExpanded, setPdfExpanded] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia("(min-width: 1024px)").matches : true,
+  );
+  const { message: liveMessage, announce } = useLiveAnnounce();
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
@@ -114,6 +126,7 @@ export function RevuePage() {
     onSuccess: (result) => {
       const blockers = result.blockers ?? [];
       if (blockers.length) {
+        announce(`Enregistré avec alertes. ${blockers.length} point(s) bloquent encore l'envoi SAP.`);
         setInfoDialog({
           title: "Enregistré avec alertes",
           message:
@@ -121,6 +134,7 @@ export function RevuePage() {
             + blockers.join("\n"),
         });
       } else {
+        announce(result.message || "Modifications enregistrées");
         setInfoDialog({
           title: "Succès",
           message: result.message || "Modifications enregistrées",
@@ -129,6 +143,7 @@ export function RevuePage() {
       invalidate();
     },
     onError: (err) => {
+      announce("Impossible d'enregistrer la commande");
       setInfoDialog({
         title: "Erreur",
         message: `Impossible d'enregistrer :\n\n${err instanceof Error ? err.message : "Erreur inconnue"}`,
@@ -254,14 +269,18 @@ export function RevuePage() {
   };
 
   const handleDownloadEdifact = () => {
-    const errors = collectReviewBlockers(order, partners, lines, anomalies);
-    if (errors.length) {
+    const blockers = collectReviewBlockersDetailed(order, partners, lines, anomalies);
+    if (blockers.length) {
+      setFieldErrors(fieldErrorMap(blockers));
+      focusFirstBlocker(blockers);
+      announce(`Impossible de télécharger l'EDIFACT. ${blockers[0].message}`);
       setInfoDialog({
         title: "Erreur",
-        message: "Impossible de télécharger l'EDIFACT :\n\n" + errors.join("\n"),
+        message: "Impossible de télécharger l'EDIFACT :\n\n" + blockers.map((b) => b.message).join("\n"),
       });
       return;
     }
+    setFieldErrors({});
     downloadEdifact.mutate();
   };
 
@@ -274,6 +293,7 @@ export function RevuePage() {
       const detail = generated.errors?.length
         ? generated.errors.join("\n")
         : generated.message ?? "Génération échouée";
+      announce("Impossible d'envoyer vers SAP");
       setInfoDialog({
         title: "Erreur",
         message: `Impossible d'envoyer vers SAP :\n\n${detail}`,
@@ -285,19 +305,24 @@ export function RevuePage() {
   };
 
   const handleSendToSap = async () => {
-    const errors = collectReviewBlockers(order, partners, lines, anomalies);
-    if (errors.length) {
+    const blockers = collectReviewBlockersDetailed(order, partners, lines, anomalies);
+    if (blockers.length) {
+      setFieldErrors(fieldErrorMap(blockers));
+      focusFirstBlocker(blockers);
+      announce(`Impossible d'envoyer vers SAP. ${blockers[0].message}`);
       setInfoDialog({
         title: "Erreur",
-        message: "Impossible d'envoyer vers SAP :\n\n" + errors.join("\n"),
+        message: "Impossible d'envoyer vers SAP :\n\n" + blockers.map((b) => b.message).join("\n"),
       });
       return;
     }
+    setFieldErrors({});
     try {
       const ready = await ensureEdifactReady();
       if (!ready) return;
       const result = await sendToSap.mutateAsync({});
       if (result.success) {
+        announce(result.message || "Commande envoyée vers SAP");
         setInfoDialog({
           title: "Succès",
           message: result.message || "Commande envoyée vers SAP",
@@ -313,11 +338,13 @@ export function RevuePage() {
         }
       }
 
+      announce(result.message || "Impossible d'envoyer vers SAP");
       setInfoDialog({
         title: "Erreur",
         message: `Impossible d'envoyer vers SAP :\n\n${result.message || "Erreur inconnue"}`,
       });
     } catch (err) {
+      announce("Impossible d'envoyer vers SAP");
       setInfoDialog({
         title: "Erreur",
         message: `Impossible d'envoyer vers SAP :\n\n${err instanceof Error ? err.message : "Erreur inconnue"}`,
@@ -371,14 +398,18 @@ export function RevuePage() {
   };
 
   const handleSendClick = () => {
-    const errors = collectReviewBlockers(order, partners, lines, anomalies);
-    if (errors.length) {
+    const blockers = collectReviewBlockersDetailed(order, partners, lines, anomalies);
+    if (blockers.length) {
+      setFieldErrors(fieldErrorMap(blockers));
+      focusFirstBlocker(blockers);
+      announce(`Impossible d'envoyer vers SAP. ${blockers[0].message}`);
       setInfoDialog({
         title: "Erreur",
-        message: "Impossible d'envoyer vers SAP :\n\n" + errors.join("\n"),
+        message: "Impossible d'envoyer vers SAP :\n\n" + blockers.map((b) => b.message).join("\n"),
       });
       return;
     }
+    setFieldErrors({});
     if (isSentToSap && isAdmin) {
       setConfirmResendOpen(true);
       return;
@@ -419,6 +450,7 @@ export function RevuePage() {
 
   return (
     <>
+      <LiveRegion message={liveMessage} />
       <Header
         title="Détail de la commande"
         breadcrumbs={[
@@ -571,14 +603,26 @@ export function RevuePage() {
         order={order}
         soldto={soldto}
         shipto={shipto}
+        fieldErrors={fieldErrors}
         onUpdateHeader={async (payload) => {
           await updateHeader.mutateAsync(payload);
+          setFieldErrors((prev) => {
+            const next = { ...prev };
+            if (payload.customerOrderNumber !== undefined) delete next.customerOrderNumber;
+            if (payload.orderDate !== undefined) delete next.orderDate;
+            return next;
+          });
         }}
         onUpdateSoldto={async (payload, options) => {
           if (!soldto) throw new Error("Partenaire sold-to introuvable pour cette commande");
           await api.updateOrderPartner(soldto.partnerId, {
             ...payload,
             ...options,
+          });
+          setFieldErrors((prev) => {
+            const next = { ...prev };
+            delete next.soldto;
+            return next;
           });
           invalidate();
         }}
@@ -588,13 +632,24 @@ export function RevuePage() {
             ...payload,
             ...options,
           });
+          setFieldErrors((prev) => {
+            const next = { ...prev };
+            delete next.shipto;
+            return next;
+          });
           invalidate();
         }}
       />
 
-      <div className="mb-6 grid min-w-0 items-stretch gap-6 lg:grid-cols-[13fr_7fr]">
+      <div id="review-order-lines" tabIndex={-1} className="mb-6 grid min-w-0 items-start gap-4 lg:grid-cols-[13fr_7fr] lg:items-stretch lg:gap-6">
         <div className="min-w-0">
-          <PdfPreviewPanel fileName={order.fileName} orderId={order.orderId} pdfUrl={data.pdfUrl} />
+          <PdfPreviewPanel
+            fileName={order.fileName}
+            orderId={order.orderId}
+            pdfUrl={data.pdfUrl}
+            expanded={pdfExpanded}
+            onToggleExpanded={() => setPdfExpanded((v) => !v)}
+          />
         </div>
 
         <Card className="flex h-full min-w-0 flex-col">
@@ -652,7 +707,7 @@ export function RevuePage() {
               Ces boutons clôturent l&apos;alerte. Corrigez d&apos;abord les données dans le formulaire si besoin.
             </p>
             {pendingAnomalyCount > 0 && (
-              <p className="text-sm text-amber-700">
+              <p className="text-sm text-amber-700" role="status" aria-live="polite">
                 {pendingAnomalyCount} anomalie{pendingAnomalyCount > 1 ? "s" : ""} à traiter - choisissez
                 une action pour chacune avant d&apos;envoyer vers SAP.
               </p>
@@ -665,7 +720,14 @@ export function RevuePage() {
               selectedAnomalyId={selectedAnomalyId}
               onSelectAnomaly={setSelectedAnomalyId}
               onResolve={(anomalyId, action) => {
-                void api.resolveAnomaly(anomalyId, action).then(invalidate);
+                void api.resolveAnomaly(anomalyId, action).then(() => {
+                  announce(
+                    action === "corrected"
+                      ? "Anomalie marquée comme corrigée"
+                      : "Anomalie ignorée",
+                  );
+                  invalidate();
+                });
               }}
               disabled={workflowLocked}
             />
@@ -677,6 +739,11 @@ export function RevuePage() {
               disabled={workflowLocked}
               onSubmit={async (body, anomalyId) => {
                 await api.addOrderComment(orderId, body, anomalyId);
+                announce(
+                  anomalyId
+                    ? "Commentaire ajouté sur l'anomalie"
+                    : "Commentaire ajouté sur le dossier",
+                );
                 await invalidate();
               }}
             />
@@ -695,47 +762,48 @@ export function RevuePage() {
         )}
       </div>
 
-      <div className="mt-6 flex flex-wrap items-center justify-between gap-3 border-t pt-6">
-        {/* Actions secondaires (gauche) */}
-        <div className="flex flex-wrap gap-2">
+      {/* Actions secondaires : dans le flux de page */}
+      <div className="mt-6 flex flex-wrap gap-2 border-t pt-4">
+        <Button
+          variant="outline"
+          className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50"
+          onClick={() => setHoldOpen(true)}
+          disabled={isOnHold || workflowLocked}
+        >
+          <PauseCircle className="h-4 w-4" /> En attente
+        </Button>
+        <Button
+          variant="outline"
+          className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
+          onClick={() => setRejectOpen(true)}
+          disabled={workflowLocked || isRejected}
+        >
+          <XCircle className="h-4 w-4" /> Rejeter
+        </Button>
+        <Button
+          variant="outline"
+          className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
+          onClick={() => setTransferOpen(true)}
+          disabled={workflowLocked}
+        >
+          <UserCheck className="h-4 w-4" /> Transférer
+        </Button>
+        {isAdmin && (
           <Button
             variant="outline"
-            className="gap-2 border-orange-300 text-orange-700 hover:bg-orange-50"
-            onClick={() => setHoldOpen(true)}
-            disabled={isOnHold || workflowLocked}
+            className="gap-2 border-violet-300 text-violet-700 hover:bg-violet-50"
+            onClick={() => setReprocessOpen(true)}
+            disabled={reprocessMutation.isPending}
           >
-            <PauseCircle className="h-4 w-4" /> En attente
+            <RefreshCw className={`h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />
+            Retraiter
           </Button>
-          <Button
-            variant="outline"
-            className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
-            onClick={() => setRejectOpen(true)}
-            disabled={workflowLocked || isRejected}
-          >
-            <XCircle className="h-4 w-4" /> Rejeter
-          </Button>
-          <Button
-            variant="outline"
-            className="gap-2 border-sky-300 text-sky-700 hover:bg-sky-50"
-            onClick={() => setTransferOpen(true)}
-            disabled={workflowLocked}
-          >
-            <UserCheck className="h-4 w-4" /> Transférer
-          </Button>
-          {isAdmin && (
-            <Button
-              variant="outline"
-              className="gap-2 border-violet-300 text-violet-700 hover:bg-violet-50"
-              onClick={() => setReprocessOpen(true)}
-              disabled={reprocessMutation.isPending}
-            >
-              <RefreshCw className={`h-4 w-4 ${reprocessMutation.isPending ? "animate-spin" : ""}`} />
-              Retraiter
-            </Button>
-          )}
-        </div>
-        {/* Actions principales (droite) */}
-        <div className="flex flex-wrap gap-2">
+        )}
+      </div>
+
+      {/* Actions principales : barre sticky en bas sur mobile / tablette */}
+      <div className="fixed inset-x-0 bottom-0 z-20 border-t bg-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/90 lg:static lg:mt-4 lg:border-0 lg:bg-transparent lg:p-0 lg:backdrop-blur-none">
+        <div className="mx-auto flex max-w-full flex-wrap items-center justify-end gap-2">
           {!isAdv && (
             <Button
               variant="outline"
@@ -743,7 +811,8 @@ export function RevuePage() {
               onClick={handleDownloadEdifact}
               disabled={edifactBusy || workflowLocked}
             >
-              <Download className="h-4 w-4" /> Aperçu / Télécharger EDIFACT
+              <Download className="h-4 w-4" />
+              <span className="hidden sm:inline">EDIFACT</span>
             </Button>
           )}
           <Button

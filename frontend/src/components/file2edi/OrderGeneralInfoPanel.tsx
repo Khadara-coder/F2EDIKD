@@ -10,6 +10,7 @@ interface OrderGeneralInfoPanelProps {
   order: Order;
   soldto?: OrderPartner;
   shipto?: OrderPartner;
+  fieldErrors?: Partial<Record<"customerOrderNumber" | "orderDate" | "soldto" | "shipto", string>>;
   onUpdateHeader: (payload: UpdateOrderHeaderPayload) => Promise<void> | void;
   onUpdateSoldto: (
     payload: Partial<Record<PartnerFieldKey, string>>,
@@ -82,6 +83,7 @@ export function OrderGeneralInfoPanel({
   order,
   soldto,
   shipto,
+  fieldErrors,
   onUpdateHeader,
   onUpdateSoldto,
   onUpdateShipto,
@@ -201,6 +203,9 @@ export function OrderGeneralInfoPanel({
             <EditableField
               label="Compte SAP sold-to"
               value={soldtoSapId}
+              fieldId="field-soldto"
+              invalid={Boolean(fieldErrors?.soldto)}
+              errorMessage={fieldErrors?.soldto}
               editFlag={soldtoFieldFlag(soldto, "partnerCode")}
               onSave={handleSoldtoCodeSave}
             />
@@ -219,6 +224,9 @@ export function OrderGeneralInfoPanel({
             <EditableField
               label="N° commande client"
               value={cleanDisplay(order.customerOrderNumber)}
+              fieldId="field-customerOrderNumber"
+              invalid={Boolean(fieldErrors?.customerOrderNumber)}
+              errorMessage={fieldErrors?.customerOrderNumber}
               manuallyEdited={order.manuallyEditedFields?.includes("customerOrderNumber")}
               onSave={(v) =>
                 onUpdateHeader({ customerOrderNumber: cleanDisplay(v) })
@@ -227,6 +235,9 @@ export function OrderGeneralInfoPanel({
             <EditableField
               label="Compte client ship-to SAP"
               value={cleanDisplay(shiptoCode)}
+              fieldId="field-shipto"
+              invalid={Boolean(fieldErrors?.shipto)}
+              errorMessage={fieldErrors?.shipto}
               editFlag={shiptoFieldFlag(shipto, "partnerCode")}
               onSave={handleShiptoCodeSave}
             />
@@ -244,6 +255,9 @@ export function OrderGeneralInfoPanel({
               label="Date de la commande"
               type="date"
               value={toDateInput(order.orderDate)}
+              fieldId="field-orderDate"
+              invalid={Boolean(fieldErrors?.orderDate)}
+              errorMessage={fieldErrors?.orderDate}
               manuallyEdited={order.manuallyEditedFields?.includes("orderDate")}
               onSave={(v) => onUpdateHeader({ orderDate: v || null })}
             />

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/utils";
@@ -23,6 +23,7 @@ export function OrderCommentsPanel({
 }: OrderCommentsPanelProps) {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
+  const helpId = useId();
   const selected = anomalies.find((a) => a.anomalyId === selectedAnomalyId);
   const linkedLabel = selected
     ? (selected.message.length > 80 ? `${selected.message.slice(0, 80)}…` : selected.message)
@@ -42,11 +43,16 @@ export function OrderCommentsPanel({
 
   return (
     <div className="space-y-3 border-t pt-4">
-      <p className="text-sm font-medium text-foreground">Notes de revue</p>
+      <p className="text-sm font-medium text-foreground" id="review-comments-heading">
+        Notes de revue
+      </p>
       {comments.length === 0 ? (
         <p className="text-sm text-muted-foreground">Aucun commentaire pour l&apos;instant.</p>
       ) : (
-        <ul className="max-h-56 space-y-2 overflow-y-auto">
+        <ul
+          className="max-h-56 space-y-2 overflow-y-auto"
+          aria-labelledby="review-comments-heading"
+        >
           {[...comments].reverse().map((c) => {
             const linked = anomalies.find((a) => a.anomalyId === c.anomalyId);
             return (
@@ -71,7 +77,7 @@ export function OrderCommentsPanel({
 
       <div className="space-y-2">
         {linkedLabel && (
-          <p className="text-xs text-amber-800">
+          <p id={helpId} className="text-xs text-amber-800" role="status">
             Le commentaire sera rattaché à : {linkedLabel}
             {" — "}
             <button type="button" className="underline" onClick={onClearSelection}>
@@ -89,12 +95,23 @@ export function OrderCommentsPanel({
           }
           disabled={disabled || pending}
           rows={3}
+          aria-label={
+            selected
+              ? `Commentaire sur l'anomalie : ${linkedLabel}`
+              : "Commentaire sur le dossier"
+          }
+          aria-describedby={linkedLabel ? helpId : undefined}
         />
         <div className="flex justify-end">
           <Button
             size="sm"
             onClick={() => void handleSubmit()}
             disabled={disabled || pending || !draft.trim()}
+            aria-label={
+              selected
+                ? `Ajouter un commentaire sur l'anomalie : ${linkedLabel}`
+                : "Ajouter un commentaire sur le dossier"
+            }
           >
             {pending ? "Ajout…" : "Ajouter"}
           </Button>

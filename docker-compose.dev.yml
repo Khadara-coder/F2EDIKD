@@ -47,6 +47,13 @@ services:
       OUTBOX_DIR: /app/data/outbox
       LOG_DIR: /app/data/logs
       INTAKE_DIR: /app/data/intake
+      # Local Bosch: même proxy que le PC hôte (pas host.docker.internal:3128).
+      HTTP_PROXY: "http://rb-proxy-de.bosch.com:8080"
+      HTTPS_PROXY: "http://rb-proxy-de.bosch.com:8080"
+      http_proxy: "http://rb-proxy-de.bosch.com:8080"
+      https_proxy: "http://rb-proxy-de.bosch.com:8080"
+      NO_PROXY: "localhost,127.0.0.1,postgres,*.local,host.docker.internal"
+      no_proxy: "localhost,127.0.0.1,postgres,*.local,host.docker.internal"
     command: ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     # Permet d'appeler des webhooks sur l'hôte (n8n séparé sur :5678) sans réseau partagé
     extra_hosts:
