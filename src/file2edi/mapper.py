@@ -327,6 +327,34 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 else msg
             )
 
+    # Per-line MATERIAL_STATUS_INVALID already lists missing articles —
+    # drop the global Esker ARTICLE_NOT_FOUND banner to avoid duplicates.
+    has_line_material = any(
+        normalize_code(str(a.get("fieldName") or "")) == "MATERIAL_STATUS_INVALID"
+        for a in anomalies
+    )
+    if has_line_material:
+        anomalies = [
+            a for a in anomalies
+            if normalize_code(str(a.get("fieldName") or "")) != "ARTICLE_NOT_FOUND"
+        ]
+
+    # Per-line DELIVERY_DATE_INVALID already covers invalid dates —
+    # drop order-level entries of the same code (no lineId).
+    has_line_delivery_date = any(
+        normalize_code(str(a.get("fieldName") or "")) == "DELIVERY_DATE_INVALID"
+        and a.get("lineId")
+        for a in anomalies
+    )
+    if has_line_delivery_date:
+        anomalies = [
+            a for a in anomalies
+            if not (
+                normalize_code(str(a.get("fieldName") or "")) == "DELIVERY_DATE_INVALID"
+                and not a.get("lineId")
+            )
+        ]
+
     trace_steps = [
         {"id": "1", "label": "PDF reçu", "status": "completed", "timestamp": _now()},
         {"id": "2", "label": "Extraction OCR" + (" (fallback IA)" if result.get("salvage") else ""), "status": "completed"},

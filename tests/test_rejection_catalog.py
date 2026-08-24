@@ -175,6 +175,38 @@ def test_format_rejection_message_material_status_builds_from_article(monkeypatc
     assert "arrêtée (plus commercialisée)" in msg
 
 
+def test_issue_taxonomy_covers_all_catalog_codes():
+    assert set(rc.ISSUE_TAXONOMY) == set(rc.REJECTION_CATALOG)
+    valid_domains = {
+        "DOCUMENT", "PARTNER", "ARTICLE", "ORDER", "EDI", "DELIVERY",
+        "TECHNICAL", "DUPLICATE",
+    }
+    valid_stages = {
+        "INGESTION", "EXTRACTION", "CLASSIFICATION", "MATCHING",
+        "BUSINESS_VALIDATION", "REVIEW", "EDI_GENERATION", "EDI_VALIDATION",
+        "DELIVERY",
+    }
+    valid_sev = {"INFO", "WARNING", "ERROR", "CRITICAL"}
+    for code in rc.REJECTION_CATALOG:
+        tax = rc.issue_taxonomy(code)
+        assert tax["domain"] in valid_domains, f"{code} domain={tax['domain']}"
+        assert tax["stage"] in valid_stages, f"{code} stage={tax['stage']}"
+        assert tax["issue_severity"] in valid_sev, f"{code} sev={tax['issue_severity']}"
+        assert isinstance(tax["blocking"], bool)
+        assert tax["scope"] in {"ORDER", "LINE"}
+
+
+def test_salvage_and_resubmit_are_non_blocking_alerts():
+    assert rc.issue_taxonomy("EXTRACTION_LLM_SALVAGE")["blocking"] is False
+    assert rc.issue_taxonomy("RESUBMISSION_DETECTED")["blocking"] is False
+    assert rc.issue_taxonomy("ARTICLE_NOT_FOUND")["blocking"] is True
+
+
+def test_legacy_severity_unchanged_for_consumers():
+    assert rc.get("SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY")["severity"] == "BLOCKER"
+    assert rc.issue_taxonomy("SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY")["issue_severity"] == "ERROR"
+
+
 def test_messages_not_empty():
     for code, entry in rc.REJECTION_CATALOG.items():
         assert entry["message_fr"].strip(), f"{code} has empty message_fr"

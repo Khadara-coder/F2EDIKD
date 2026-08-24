@@ -144,3 +144,17 @@ def test_mapper_error_missing_article(materials_cache):
     msgs = [a["message"] for a in review["anomalies"]]
     assert any("absente du référentiel Articles" in m for m in msgs)
     assert any(a.get("severity") == "error" for a in review["anomalies"])
+
+
+def test_mapper_drops_global_article_not_found_when_line_material_exists(materials_cache):
+    payload = _engine_result("999999999")
+    payload["rejection"] = {
+        "decision": "REJECT",
+        "details": [
+            {"code": "ARTICLE_NOT_FOUND", "severity": "blocking", "message": "Article introuvable"},
+        ],
+    }
+    review = engine_to_order_review("hash-mat", "upl-1", payload)
+    codes = [a.get("fieldName") for a in review["anomalies"]]
+    assert "ARTICLE_NOT_FOUND" not in codes
+    assert "MATERIAL_STATUS_INVALID" in codes

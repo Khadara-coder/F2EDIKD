@@ -268,8 +268,11 @@ export function RevuePage() {
     saveOrder.mutate();
   };
 
+  const getReviewBlockers = () =>
+    collectReviewBlockersDetailed(order, partners, lines, anomalies);
+
   const handleDownloadEdifact = () => {
-    const blockers = collectReviewBlockersDetailed(order, partners, lines, anomalies);
+    const blockers = getReviewBlockers();
     if (blockers.length) {
       setFieldErrors(fieldErrorMap(blockers));
       focusFirstBlocker(blockers);
@@ -305,7 +308,7 @@ export function RevuePage() {
   };
 
   const handleSendToSap = async () => {
-    const blockers = collectReviewBlockersDetailed(order, partners, lines, anomalies);
+    const blockers = getReviewBlockers();
     if (blockers.length) {
       setFieldErrors(fieldErrorMap(blockers));
       focusFirstBlocker(blockers);
@@ -398,7 +401,7 @@ export function RevuePage() {
   };
 
   const handleSendClick = () => {
-    const blockers = collectReviewBlockersDetailed(order, partners, lines, anomalies);
+    const blockers = getReviewBlockers();
     if (blockers.length) {
       setFieldErrors(fieldErrorMap(blockers));
       focusFirstBlocker(blockers);
@@ -703,13 +706,9 @@ export function RevuePage() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Anomalies et commentaires</CardTitle>
-            <p className="text-xs text-muted-foreground">
-              Ces boutons clôturent l&apos;alerte. Corrigez d&apos;abord les données dans le formulaire si besoin.
-            </p>
             {pendingAnomalyCount > 0 && (
               <p className="text-sm text-amber-700" role="status" aria-live="polite">
-                {pendingAnomalyCount} anomalie{pendingAnomalyCount > 1 ? "s" : ""} à traiter - choisissez
-                une action pour chacune avant d&apos;envoyer vers SAP.
+                {pendingAnomalyCount} à traiter
               </p>
             )}
           </CardHeader>

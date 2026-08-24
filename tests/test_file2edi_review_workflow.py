@@ -103,6 +103,46 @@ def test_engine_review_flags_invalid_line_delivery_date():
     )
 
 
+def test_engine_review_drops_order_level_delivery_date_when_line_exists():
+    result = {
+        "status": "OK",
+        "filename": "order.pdf",
+        "pdf_hash": "hash-dd",
+        "order": {"po_number": "PO-123", "order_date": "2026-08-04"},
+        "customer": {"soldto": "15019903", "shipto": "15019903", "name": "Client Test", "confidence": 100},
+        "rejection": {
+            "decision": "REJECT",
+            "details": [
+                {
+                    "code": "DELIVERY_DATE_INVALID",
+                    "severity": "blocking",
+                    "message": "Date de livraison invalide (ordre)",
+                },
+            ],
+        },
+        "lines": {
+            "items": [
+                {
+                    "code_article": "7735500779",
+                    "description": "BALLON ECS",
+                    "quantite": 1,
+                    "prix_unitaire_ht": 10,
+                    "date_livraison": "32/26",
+                }
+            ]
+        },
+    }
+
+    review = engine_to_order_review("hash-dd", "upl-1", result)
+    delivery = [
+        a for a in review["anomalies"]
+        if a.get("fieldName") == "DELIVERY_DATE_INVALID"
+    ]
+    assert len(delivery) == 1
+    assert delivery[0].get("lineId")
+    assert "Ligne" in delivery[0]["message"]
+
+
 def test_global_confidence_is_capped_by_line_quality():
     result = {
         "status": "OK",

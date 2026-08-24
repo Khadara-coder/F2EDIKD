@@ -917,7 +917,10 @@ class File2EdiStore:
             "SELECT * FROM file2edi_order_lines WHERE order_id=? ORDER BY line_number", [order_id]
         ).fetchall()]
         anomalies = [dict(r) for r in conn.execute(
-            "SELECT * FROM file2edi_order_anomalies WHERE order_id=?", [order_id]
+            """SELECT * FROM file2edi_order_anomalies
+               WHERE order_id=?
+               ORDER BY created_at ASC, anomaly_id ASC""",
+            [order_id],
         ).fetchall()]
         comments: list[dict] = []
         try:
@@ -1034,6 +1037,7 @@ class File2EdiStore:
         from src.rejection_catalog import (
             REJECTION_CATALOG,
             format_rejection_message,
+            issue_taxonomy,
             normalize_code,
             review_actions,
         )
@@ -1060,6 +1064,13 @@ class File2EdiStore:
             mapped["autoActionAccept"] = actions["auto_action_accept"]
             mapped["autoActionReject"] = actions["auto_action_reject"]
             mapped["actionMode"] = actions["mode"]
+            tax = issue_taxonomy(code)
+            mapped["issueDomain"] = tax["domain"]
+            mapped["issueStage"] = tax["stage"]
+            mapped["issueSeverity"] = tax["issue_severity"]
+            mapped["blocking"] = tax["blocking"]
+            mapped["issueScope"] = tax["scope"]
+            mapped["requiresUserInput"] = tax["requires_user_input"]
         return mapped
 
     def _partner_to_api(self, partner: dict) -> dict:

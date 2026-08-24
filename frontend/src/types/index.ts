@@ -196,6 +196,12 @@ export interface OrderAnomaly {
   autoActionAccept?: string;
   autoActionReject?: string;
   actionMode?: string;
+  issueDomain?: string;
+  issueStage?: string;
+  issueSeverity?: string;
+  blocking?: boolean;
+  issueScope?: string;
+  requiresUserInput?: boolean;
 }
 
 export interface OrderComment {

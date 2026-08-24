@@ -35,6 +35,210 @@ def normalize_code(code: str) -> str:
     return CODE_ALIASES.get(raw, raw)
 
 
+class IssueTaxonomy(TypedDict):
+    """Orthogonal dimensions — do not reuse legacy ``severity`` (BLOCKER/BUSINESS/TECHNICAL)."""
+    domain: str
+    stage: str
+    issue_severity: str
+    blocking: bool
+    scope: str
+    requires_user_input: bool
+
+
+# Legacy ``severity`` stays BLOCKER|BUSINESS_REJECT|TECHNICAL for existing consumers.
+ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
+    "PDF_PARSE_FAILURE": {
+        "domain": "DOCUMENT", "stage": "INGESTION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "NOT_A_PDF": {
+        "domain": "DOCUMENT", "stage": "INGESTION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "EXTRACTION_LLM_SALVAGE": {
+        "domain": "DOCUMENT", "stage": "EXTRACTION", "issue_severity": "WARNING",
+        "blocking": False, "scope": "ORDER", "requires_user_input": True,
+    },
+    "PARTNER_UNRESOLVED": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "ORDER_KEY_MISSING": {
+        "domain": "ORDER", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "ORDER_DATE_INVALID": {
+        "domain": "ORDER", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "DELIVERY_DATE_INVALID": {
+        "domain": "ORDER", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
+        "blocking": True, "scope": "LINE", "requires_user_input": True,
+    },
+    "ORDER_CHANGE": {
+        "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "MASTERDATA_MISSING": {
+        "domain": "TECHNICAL", "stage": "MATCHING", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "MASTERDATA_SCHEMA_INVALID": {
+        "domain": "TECHNICAL", "stage": "MATCHING", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "MATERIAL_STATUS_INVALID": {
+        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "LINE", "requires_user_input": True,
+    },
+    "RESUBMISSION_DETECTED": {
+        "domain": "DUPLICATE", "stage": "INGESTION", "issue_severity": "INFO",
+        "blocking": False, "scope": "ORDER", "requires_user_input": False,
+    },
+    "NO_VALID_ARTICLE": {
+        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "CONTRACT_KEYWORD": {
+        "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "CONTRACT_BREAK_ADDRESSES_MISSING": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "CONTRACT_BREAK_ARTICLES_MISSING": {
+        "domain": "ARTICLE", "stage": "EXTRACTION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "CONTRACT_BREAK_SOLDTO_MISSING": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "SOLDTO_NOT_FOUND": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "SOLDTO_AMBIGUOUS_MATCH": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "SHIPTO_NO_STRONG_MATCH": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "SHIPTO_AMBIGUOUS_MATCH": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "EDIFACT_MISSING_BGM": {
+        "domain": "EDI", "stage": "EDI_VALIDATION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "EDIFACT_MISSING_DTM_137": {
+        "domain": "EDI", "stage": "EDI_VALIDATION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "EDIFACT_MISSING_NAD_BY": {
+        "domain": "EDI", "stage": "EDI_VALIDATION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "EDIFACT_MISSING_NAD_DP": {
+        "domain": "EDI", "stage": "EDI_VALIDATION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "EDIFACT_MISSING_LIN": {
+        "domain": "EDI", "stage": "EDI_VALIDATION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "ARTICLE_QUANTITY_INVALID": {
+        "domain": "ARTICLE", "stage": "EDI_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "LINE", "requires_user_input": True,
+    },
+    "UNIT_PRICE_MISSING": {
+        "domain": "ARTICLE", "stage": "EDI_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "LINE", "requires_user_input": True,
+    },
+    "EDIFACT_LINE_INTEGRITY_MISMATCH": {
+        "domain": "EDI", "stage": "EDI_VALIDATION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "EDIFACT_NAD_DP_MISMATCH": {
+        "domain": "EDI", "stage": "EDI_VALIDATION", "issue_severity": "CRITICAL",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "DUPLICATE_ALREADY_SENT": {
+        "domain": "DUPLICATE", "stage": "DELIVERY", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "DELIVERY_ADDRESS_INVALID": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "NO_DELIVERY_ADDRESS": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "ARTICLE_NOT_FOUND": {
+        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "PO_NUMBER_DUPLICATE": {
+        "domain": "DUPLICATE", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "CUSTOMER_NOT_DEFINED": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "NOT_AN_ORDER": {
+        "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "NO_LINE_ITEMS": {
+        "domain": "ARTICLE", "stage": "EXTRACTION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "QUANTITY_MISSING": {
+        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
+        "blocking": True, "scope": "LINE", "requires_user_input": True,
+    },
+    "PRICE_MISSING": {
+        "domain": "ARTICLE", "stage": "REVIEW", "issue_severity": "ERROR",
+        "blocking": True, "scope": "LINE", "requires_user_input": True,
+    },
+    "DELIVERY_SFTP_FAILED": {
+        "domain": "DELIVERY", "stage": "DELIVERY", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "DELIVERY_EMAIL_FAILED": {
+        "domain": "DELIVERY", "stage": "DELIVERY", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+}
+
+
+def issue_taxonomy(code: str) -> IssueTaxonomy:
+    """Return orthogonal issue metadata. Legacy catalog ``severity`` is not used here."""
+    canonical = normalize_code(code)
+    return ISSUE_TAXONOMY.get(canonical, {
+        "domain": "TECHNICAL",
+        "stage": "BUSINESS_VALIDATION",
+        "issue_severity": "ERROR",
+        "blocking": True,
+        "scope": "ORDER",
+        "requires_user_input": True,
+    })
+
+
 REJECTION_CATALOG: dict[str, RejectionEntry] = {
     "PDF_PARSE_FAILURE": {
         "severity": "BLOCKER",
