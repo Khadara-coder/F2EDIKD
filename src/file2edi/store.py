@@ -1108,6 +1108,7 @@ class File2EdiStore:
                FROM file2edi_orders o
                LEFT JOIN file2edi_pdf_uploads u ON u.upload_id = o.upload_id
                LEFT JOIN file2edi_conversion_history h ON h.order_id = o.order_id
+               WHERE o.status NOT IN ('Envoyé SAP', 'Confirmé SAP')
                ORDER BY o.created_at DESC
                LIMIT 500"""
         ).fetchall()
