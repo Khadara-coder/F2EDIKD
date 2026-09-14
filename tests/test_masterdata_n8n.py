@@ -52,7 +52,7 @@ def test_trigger_posts_configured_url(monkeypatch):
         def json(self):
             return {"ok": True, "synced": 4, "message": "done"}
 
-    def fake_post(url, headers=None, json=None, timeout=None):
+    def fake_post(url, headers=None, json=None, timeout=None, **kwargs):
         captured["url"] = url
         captured["headers"] = headers
         captured["json"] = json
@@ -122,7 +122,7 @@ def test_probe_n8n_uses_healthz_not_webhook(monkeypatch):
         status_code = 200
         text = "ok"
 
-    def fake_get(url, timeout=None):
+    def fake_get(url, timeout=None, **kwargs):
         calls.append(("GET", url, timeout))
         return FakeResp()
 
