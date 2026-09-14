@@ -1,23 +1,73 @@
 # PostgreSQL Migration Guide
 
-## Overview
+**Version:** Phase 4 (mandatory, no SQLite fallback)  
+**Last Updated:** 2026-09-14  
+**Audience:** Developers, DevOps, system administrators  
+**Language:** English (code examples + SQL), français (explanations)
 
-This guide explains how to migrate your EDIFACT File2EDI application from SQLite to PostgreSQL with full Row-Level Security (RLS) RBAC enforcement.
+---
 
-## Why PostgreSQL?
+## 📌 Vue d'Ensemble
 
-1. **RBAC at DB Level**: RLS policies enforce ADV access control at the database layer, making it impossible to bypass
-2. **Concurrency**: Multiple workers, multiple users, true transaction isolation
-3. **Production-Ready**: Better monitoring, performance tuning, cloud deployment
-4. **JSONB**: Native support for extraction_json and corrections_json as queryable data
+Ce guide explique comment **migrer** votre application File2EDI de SQLite vers PostgreSQL avec enforcement complet du **Row-Level Security (RLS)** pour le RBAC.
 
-## Prerequisites
+### Pourquoi PostgreSQL ?
 
-- PostgreSQL 15+ (local via Docker or cloud-hosted)
+1. **RBAC au niveau DB** → Les politiques RLS enforçent l'accès ADV au niveau database (impossible de contourner)
+2. **Concurrence** → Plusieurs workers, plusieurs utilisateurs, vrai isolation des transactions
+3. **Production-Ready** → Meilleur monitoring, tuning performance, déploiement cloud
+4. **JSONB** → Support natif pour extraction_json et corrections_json en tant que données queryables
+5. **Pas de fallback SQLite** → Runtime obligatoire PG (pas de ambiguïté)
+
+### Status Actuel (2026-09)
+
+- ✅ Migration script complète
+- ✅ Docker Compose avec PG 15 + pgAdmin
+- ✅ RLS policies définies & testées
+- ✅ Runtime server.py avec startup PG init
+- ✅ Documentation & troubleshooting
+
+---
+
+## 📋 Prérequis
+
+- PostgreSQL 15+ (via Docker, cloud-hosted, ou local)
 - Python 3.11+
-- Docker & Docker Compose (for local dev)
+- Docker & Docker Compose v2.20+
+- SQLite source (data/file2edi.db) si migrant depuis legacy
 
-## Step-by-Step Migration
+---
+
+## 🚀 Démarrage Rapide (6 Étapes)
+
+```bash
+# 1. Démarrer PostgreSQL + pgAdmin
+docker compose -f docker-compose-pg.yml up -d
+
+# 2. Installer dépendances
+pip install -r requirements.txt -r requirements-postgres.txt
+
+# 3. Migrer données SQLite → PG
+python migrate_to_postgres.py \
+  --src data/file2edi.db \
+  --dst "postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact" \
+  --masterdata data/masterdata
+
+# 4. Configurer .env
+echo "PG_DATABASE_URL=postgresql+psycopg://edifact:edifact_dev_password@localhost:5432/edifact" >> .env
+
+# 5. Tester connexion
+python -c "from src.database_pg import PostgresDB; print('✓ Connected')"
+
+# 6. Démarrer app
+python server.py
+# App: http://localhost:8000
+# pgAdmin: http://localhost:5050 (admin@edifact.local / admin)
+```
+
+---
+
+## 📊 Étapes Détaillées (Dev Local)
 
 ### 1. Start PostgreSQL locally (development)
 

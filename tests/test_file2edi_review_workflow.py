@@ -198,6 +198,117 @@ def test_manual_line_update_invalidates_generated_edifact_and_tracks_corrections
     assert snapshot["lines"][0]["manuallyEdited"] is True
 
 
+def test_shipto_address_change_rematches_existing_code_to_unique_masterdata_partner(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-shipto-rematch"
+    store.save_order_review(_review(order_id))
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {"15019903": {"id": "15019903", "name": "Client Test"}},
+        "partners_by_soldto": {
+            "15019903": [
+                {"id": "15019904", "name": "Depot Lyon", "street": "10 RUE A", "postal": "69000", "city": "LYON", "country": "FR"},
+                {"id": "15019905", "name": "Depot Paris", "street": "20 RUE B", "postal": "75000", "city": "PARIS", "country": "FR"},
+            ]
+        },
+    })
+
+    updated = store.update_partner(
+        f"p-shipto-{order_id}",
+        {"addressLine1": "20 RUE B", "postalCode": "75000", "city": "PARIS", "editSource": "manual"},
+    )
+
+    shipto = next(p for p in updated["partners"] if p["partnerFunction"] == "shipto")
+    assert shipto["partnerCode"] == "15019905"
+    assert shipto["partnerName"] == "Depot Paris"
+    assert shipto["postalCode"] == "75000"
+    assert not updated["anomalies"]
+
+
+def test_shipto_address_change_without_unique_match_creates_blocking_anomaly(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-shipto-ambiguous"
+    store.save_order_review(_review(order_id))
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {"15019903": {"id": "15019903", "name": "Client Test"}},
+        "partners_by_soldto": {
+            "15019903": [
+                {"id": "15019904", "name": "Depot A", "street": "10 RUE A", "postal": "69000", "city": "LYON", "country": "FR"},
+                {"id": "15019905", "name": "Depot B", "street": "20 RUE B", "postal": "69000", "city": "LYON", "country": "FR"},
+            ]
+        },
+    })
+
+    updated = store.update_partner(
+        f"p-shipto-{order_id}",
+        {"postalCode": "69000", "city": "LYON", "editSource": "manual"},
+    )
+
+    anomaly = next(a for a in updated["anomalies"] if a["fieldName"] == "SHIPTO_MASTERDATA_MISMATCH")
+    assert anomaly["status"] == "Bloquante"
+
+
+def test_soldto_change_propagates_billing_and_revalidates_shipto(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-soldto-propagation"
+    review = _review(order_id)
+    review["partners"][1].update({
+        "partnerCode": "OLD",
+        "partnerName": "New Depot",
+        "addressLine1": "20 RUE B",
+        "postalCode": "75000",
+        "city": "PARIS",
+    })
+    review["partners"].extend([
+        {
+            "partnerId": f"p-billto-{order_id}", "orderId": order_id, "partnerFunction": "billto",
+            "partnerCode": "OLD", "partnerName": "Old", "addressLine1": "Old street",
+            "postalCode": "00000", "city": "OLD", "country": "FR", "confidence": 100,
+        },
+        {
+            "partnerId": f"p-payer-{order_id}", "orderId": order_id, "partnerFunction": "payer",
+            "partnerCode": "OLD", "partnerName": "Old", "addressLine1": "Old street",
+            "postalCode": "00000", "city": "OLD", "country": "FR", "confidence": 100,
+        },
+    ])
+    store.save_order_review(review)
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {
+            "15019904": {"id": "15019904", "name": "New Customer", "street": "1 RUE C", "postal": "69000", "city": "LYON", "country": "FR"},
+        },
+        "partners_by_soldto": {
+            "15019904": [
+                {"id": "15019905", "name": "New Depot", "street": "20 RUE B", "postal": "75000", "city": "PARIS", "country": "FR"},
+            ]
+        },
+    })
+
+    updated = store.update_partner(
+        f"p-soldto-{order_id}",
+        {"partnerCode": "15019904", "editSource": "manual"},
+    )
+
+    by_function = {p["partnerFunction"]: p for p in updated["partners"]}
+    assert by_function["soldto"]["partnerName"] == "New Customer"
+    assert by_function["billto"]["partnerCode"] == "15019904"
+    assert by_function["payer"]["partnerCode"] == "15019904"
+    assert by_function["shipto"]["partnerCode"] == "15019905"
+
+
+def test_order_number_change_refreshes_duplicate_anomaly(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-po-duplicate-refresh"
+    store.save_order_review(_review(order_id))
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "salesorders_by_bstnk": {"PO-999": {"VBELN": "500009"}},
+    })
+
+    updated = store.update_order_header(order_id, {"customerOrderNumber": "PO-999"})
+
+    anomaly = next(a for a in updated["anomalies"] if a["fieldName"] == "PO_NUMBER_DUPLICATE")
+    assert anomaly["severity"] == "warning"
+    assert anomaly["status"] == "Ouverte"
+
+
 def test_add_lines_bulk_appends_numbered_lines(tmp_path):
     store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
     order_id = "ord-bulk"

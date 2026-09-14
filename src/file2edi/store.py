@@ -1265,11 +1265,39 @@ class File2EdiStore:
             )
             self._invalidate_generated_edifact(conn, order_id)
             self._refresh_corrections_json(conn, order_id)
+            if "customerOrderNumber" in payload:
+                self._refresh_po_duplicate_anomaly(conn, order_id, payload.get("customerOrderNumber"))
             conn.commit()
         conn.close()
         review = self.load_order_review(order_id)
         self._sync_order_graph(review)
         return review
+
+    def _refresh_po_duplicate_anomaly(self, conn, order_id: str, order_number: str | None) -> None:
+        """Recompute duplicate PO status after a customer order number edit."""
+        masterdata = self._load_masterdata_safe()
+        if not masterdata:
+            return
+        po_clean = str(order_number or "").strip().split("/")[0].strip()
+        duplicate = (masterdata.get("salesorders_by_bstnk") or {}).get(po_clean)
+        anomaly_id = f"{order_id}:PO_NUMBER_DUPLICATE"
+        if duplicate and po_clean:
+            if isinstance(duplicate, list):
+                duplicate = duplicate[0] if duplicate else {}
+            duplicate = duplicate if isinstance(duplicate, dict) else {}
+            message = (
+                f"Le numéro de commande {po_clean} existe déjà dans l'historique SAP "
+                f"({duplicate.get('VBELN', '')})."
+            )
+            self._upsert_partner_anomaly(
+                conn, order_id, "PO_NUMBER_DUPLICATE", message, severity="warning"
+            )
+            return
+        conn.execute(
+            "UPDATE file2edi_order_anomalies SET status='Corrigée' "
+            "WHERE anomaly_id=? AND status IN ('Ouverte', 'Bloquante')",
+            [anomaly_id],
+        )
 
     def _sync_billing_partners_from_soldto(
         self,
@@ -1403,13 +1431,19 @@ class File2EdiStore:
                     "UPDATE file2edi_orders SET soldto=?, updated_at=? WHERE order_id=?",
                     [payload["partnerCode"], _now(), order_id],
                 )
+            if row["partner_function"] == "soldto":
+                self._propagate_soldto_change(conn, order_id, partner_id)
             if row["partner_function"] == "shipto" and payload.get("partnerName"):
                 conn.execute(
                     "UPDATE file2edi_orders SET client_name=?, updated_at=? WHERE order_id=?",
                     [payload["partnerName"], _now(), order_id],
                 )
             if row["partner_function"] == "shipto" and _SHIPTO_REMATCH_FIELDS.intersection(payload):
-                self._rematch_shipto_after_update(conn, order_id, partner_id)
+                self._rematch_shipto_after_update(
+                    conn, order_id, partner_id,
+                    explicit_code="partnerCode" in payload,
+                    address_changed=bool(_SHIPTO_REMATCH_FIELDS.intersection(payload) - {"partnerCode", "partnerName"}),
+                )
             self._invalidate_generated_edifact(conn, order_id)
             self._refresh_corrections_json(conn, order_id)
             conn.commit()
@@ -1417,6 +1451,103 @@ class File2EdiStore:
         review = self.load_order_review(order_id)
         self._sync_order_graph(review)
         return review
+
+    def _propagate_soldto_change(self, conn, order_id: str, partner_id: str) -> None:
+        """Canonicalize Sold-to data and revalidate its dependent Ship-to."""
+        masterdata = self._load_masterdata_safe()
+        if not masterdata:
+            self._upsert_partner_anomaly(
+                conn, order_id, "SOLDTO_MASTERDATA_UNAVAILABLE",
+                "Le référentiel clients est indisponible ; le Sold-to ne peut pas être validé.",
+            )
+            return
+
+        soldto_row = conn.execute(
+            """SELECT partner_code, partner_name, address_line_1, postal_code, city, country
+               FROM file2edi_order_partners WHERE partner_id=?""",
+            [partner_id],
+        ).fetchone()
+        if not soldto_row:
+            return
+        soldto_code = str(soldto_row["partner_code"] or "").strip()
+        customer = (masterdata.get("customers_by_id") or {}).get(soldto_code)
+        if not customer:
+            from app.engines.shipto_scoring import normalize_text
+
+            current_name = normalize_text(str(soldto_row["partner_name"] or ""))
+            name_hits = [
+                item for item in (masterdata.get("customers") or [])
+                if current_name and normalize_text(str(item.get("name") or "")) == current_name
+            ]
+            if len(name_hits) == 1:
+                customer = name_hits[0]
+                soldto_code = str(customer.get("id") or "").strip()
+                if soldto_code:
+                    conn.execute(
+                        "UPDATE file2edi_order_partners SET partner_code=? WHERE partner_id=?",
+                        [soldto_code, partner_id],
+                    )
+                    conn.execute(
+                        "UPDATE file2edi_orders SET soldto=? WHERE order_id=?",
+                        [soldto_code, order_id],
+                    )
+        if not customer:
+            self._upsert_partner_anomaly(
+                conn, order_id, "SOLDTO_NOT_FOUND",
+                "Le compte Sold-to ne correspond pas à un client du masterdata.",
+            )
+            return
+
+        values = {
+            "partner_name": customer.get("name") or "",
+            "address_line_1": customer.get("street") or "",
+            "postal_code": customer.get("postal") or "",
+            "city": customer.get("city") or "",
+            "country": customer.get("country") or "FR",
+        }
+        sets = [f"{column}=?" for column in values]
+        vals = list(values.values())
+        sets.extend(["edited_fields_json=?", "manually_edited=?"])
+        vals.extend([
+            json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}),
+            0,
+        ])
+        vals.append(partner_id)
+        conn.execute(
+            f"UPDATE file2edi_order_partners SET {', '.join(sets)} WHERE partner_id=?",
+            vals,
+        )
+        conn.execute(
+            "UPDATE file2edi_orders SET client_name=?, soldto=?, updated_at=? WHERE order_id=?",
+            [values["partner_name"], soldto_code, _now(), order_id],
+        )
+        self._sync_billing_partners_from_soldto(
+            conn,
+            order_id,
+            {
+                "partnerCode": soldto_code,
+                "partnerName": values["partner_name"],
+                "addressLine1": values["address_line_1"],
+                "postalCode": values["postal_code"],
+                "city": values["city"],
+                "country": values["country"],
+            },
+            {key: "auto" for key in ("partnerCode", "partnerName", "addressLine1", "postalCode", "city", "country")},
+            "auto",
+        )
+        shipto = conn.execute(
+            """SELECT partner_id FROM file2edi_order_partners
+               WHERE order_id=? AND partner_function='shipto'""",
+            [order_id],
+        ).fetchone()
+        if shipto:
+            self._rematch_shipto_after_update(
+                conn, order_id, shipto["partner_id"],
+                explicit_code=False,
+                address_changed=True,
+            )
+        else:
+            self._close_delivery_address_anomalies(conn, order_id)
 
     def _load_masterdata_safe(self) -> dict | None:
         try:
@@ -1454,13 +1585,47 @@ class File2EdiStore:
             """UPDATE file2edi_order_anomalies
                SET status='Corrigée'
                WHERE order_id=?
-                 AND field_name IN ('DELIVERY_ADDRESS_INVALID', 'NO_DELIVERY_ADDRESS')
+                 AND field_name IN (
+                   'DELIVERY_ADDRESS_INVALID', 'NO_DELIVERY_ADDRESS',
+                   'SHIPTO_MASTERDATA_MISMATCH', 'SHIPTO_SOLDTO_MISMATCH'
+                 )
                  AND status IN ('Ouverte', 'Bloquante')""",
             [order_id],
         )
 
-    def _rematch_shipto_after_update(self, conn, order_id: str, partner_id: str) -> None:
-        """Fill SAP ship-to when uniquely proven; close address anomalies when code is valid."""
+    def _upsert_partner_anomaly(
+        self,
+        conn,
+        order_id: str,
+        field_name: str,
+        message: str,
+        *,
+        severity: str = "blocking",
+    ) -> None:
+        anomaly_id = f"{order_id}:{field_name}"
+        status = "Bloquante" if severity == "blocking" else "Ouverte"
+        conn.execute(
+            """INSERT INTO file2edi_order_anomalies
+               (anomaly_id, order_id, line_id, severity, field_name, message, status, created_at)
+                             VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
+               ON CONFLICT(anomaly_id) DO UPDATE SET
+                 severity=excluded.severity,
+                 message=excluded.message,
+                                 status=excluded.status,
+                 created_at=excluded.created_at""",
+                        [anomaly_id, order_id, severity, field_name, message, status, _now()],
+        )
+
+    def _rematch_shipto_after_update(
+        self,
+        conn,
+        order_id: str,
+        partner_id: str,
+        *,
+        explicit_code: bool = False,
+        address_changed: bool = False,
+    ) -> None:
+        """Resolve Ship-to against the current Sold-to after every relevant edit."""
         from app.engines.shipto_scoring import match_shipto_strict
 
         shipto_row = conn.execute(
@@ -1485,13 +1650,17 @@ class File2EdiStore:
 
         current_code = str(shipto_row["partner_code"] or "").strip()
         matched_partner: dict | None = None
-        auto_filled_code = False
-
-        if current_code:
+        if explicit_code and current_code:
             matched_partner = self._find_partner_in_masterdata(
                 masterdata, current_code, soldto_code or None
             )
-        elif soldto_code:
+            if not matched_partner:
+                self._upsert_partner_anomaly(
+                    conn, order_id, "SHIPTO_SOLDTO_MISMATCH",
+                    "Le compte Ship-to sélectionné n'appartient pas au Sold-to courant.",
+                )
+                return
+        elif soldto_code and (address_changed or not current_code):
             strict = match_shipto_strict(
                 soldto_code,
                 masterdata,
@@ -1511,10 +1680,21 @@ class File2EdiStore:
                     "postal": strict.get("postal") or "",
                     "country": strict.get("country") or "FR",
                 }
-                auto_filled_code = True
+            if not matched_partner:
+                self._upsert_partner_anomaly(
+                    conn, order_id, "SHIPTO_MASTERDATA_MISMATCH",
+                    "L'adresse de livraison ne correspond pas à un Ship-to unique du Sold-to courant.",
+                )
+                return
+        elif current_code:
+            matched_partner = self._find_partner_in_masterdata(
+                masterdata, current_code, soldto_code or None
+            )
 
         if not matched_partner:
             return
+
+        self._close_delivery_address_anomalies(conn, order_id)
 
         edited_fields: dict[str, str] = {}
         if shipto_row["edited_fields_json"]:
@@ -1530,13 +1710,13 @@ class File2EdiStore:
         sets: list[str] = []
         vals: list[Any] = []
         new_code = str(matched_partner.get("id") or current_code).strip()
-        if auto_filled_code and new_code and new_code != current_code:
+        if new_code and new_code != current_code:
             sets.append("partner_code=?")
             vals.append(new_code)
             edited_fields["partnerCode"] = "auto"
             current_code = new_code
 
-        # Complete blank address/name from masterdata (never overwrite manual values)
+        # A resolved masterdata partner is authoritative for its identity fields.
         fill_map = [
             ("partner_name", "partnerName", matched_partner.get("name") or ""),
             ("address_line_1", "addressLine1", matched_partner.get("street") or ""),
@@ -1557,7 +1737,7 @@ class File2EdiStore:
                 current_val = str(shipto_row["city"] or "")
             elif col == "country":
                 current_val = str(shipto_row["country"] or "")
-            if not current_val.strip() and str(md_value or "").strip():
+            if str(md_value or "").strip() and (explicit_code or address_changed):
                 sets.append(f"{col}=?")
                 vals.append(str(md_value).strip())
                 edited_fields[api_key] = "auto"
@@ -1573,18 +1753,19 @@ class File2EdiStore:
                 vals,
             )
             filled_name = str(matched_partner.get("name") or "").strip()
-            if filled_name and (
-                auto_filled_code or not str(shipto_row["partner_name"] or "").strip()
-            ):
+            if filled_name:
                 conn.execute(
                     "UPDATE file2edi_orders SET client_name=?, updated_at=? WHERE order_id=?",
                     [filled_name, _now(), order_id],
                 )
 
-        if current_code and self._find_partner_in_masterdata(
+        if current_code and not self._find_partner_in_masterdata(
             masterdata, current_code, soldto_code or None
         ):
-            self._close_delivery_address_anomalies(conn, order_id)
+            self._upsert_partner_anomaly(
+                conn, order_id, "SHIPTO_SOLDTO_MISMATCH",
+                "Le compte Ship-to ne correspond pas au Sold-to courant.",
+            )
 
     def update_line(self, line_id: str, payload: dict) -> dict | None:
         conn = self._conn()

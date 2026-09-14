@@ -104,6 +104,7 @@ export interface ReviewQueueItem {
   sapSentBy?: string;
   sapVbeln?: string;
   sapConfirmedAt?: string;
+  submittedBy?: string;
   processedBy?: string;
   assignedTo?: string;       // username du gestionnaire assigné
   holdReason?: string;       // motif mise en attente

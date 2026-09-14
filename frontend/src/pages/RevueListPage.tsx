@@ -52,6 +52,7 @@ type ReviewSortKey =
   | "createdAt"
   | "processedAt"
   | "sapVbeln"
+  | "submittedBy"
   | "processedBy"
   | "status";
 type SortDirection = "asc" | "desc";
@@ -79,6 +80,7 @@ export function RevueListPage() {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<ReviewStatusFilter>("all");
   const [managerFilter, setManagerFilter] = useState<string>("all");  // "all" | username
+  const [submittedByFilter, setSubmittedByFilter] = useState<string>("all");
   const [myOrdersOnly, setMyOrdersOnly] = useState(false);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -99,6 +101,12 @@ export function RevueListPage() {
     { queryKey: ["users"], queryFn: () => fetch("/api/users").then(r => r.json()), staleTime: 60_000 }
   );
   const gestionnaires = usersQuery.data ?? [];
+  const items = Array.isArray(ordersList.data) ? ordersList.data : [];
+  const submitters = useMemo(() => {
+    const values = new Set(items.map((row) => row.submittedBy).filter(Boolean) as string[]);
+    gestionnaires.forEach((user) => values.add(user.username));
+    return Array.from(values).sort((left, right) => left.localeCompare(right, "fr"));
+  }, [gestionnaires, items]);
   // Map username → displayName pour la colonne
   const displayNameMap = useMemo(
     () => Object.fromEntries(gestionnaires.map(u => [u.username.toLowerCase(), u.displayName])),
@@ -126,7 +134,6 @@ export function RevueListPage() {
     return getDisplayName(key) || UNIDENTIFIED_LABEL;
   };
 
-  const items = Array.isArray(ordersList.data) ? ordersList.data : [];
   const pendingCount = reviewQueue.data?.length ?? 0;
 
   const handleSort = (key: ReviewSortKey) => {
@@ -150,6 +157,8 @@ export function RevueListPage() {
         return row.sapVbeln || "";
       case "processedBy":
         return getManagerLabel(row).toLowerCase();
+      case "submittedBy":
+        return (row.submittedBy || "").toLowerCase();
       case "status":
         return businessStatusLabel(statusToBusinessGroup(row.status as OrderStatus));
       case "issue":
@@ -167,16 +176,20 @@ export function RevueListPage() {
     const filtered = items.filter((row) => {
       const matchesSearch =
         !query ||
-        [row.fileName, row.clientName, row.issue, row.status, getManagerLabel(row), row.date, row.createdAt, row.processedAt, row.sapSentAt, row.sapVbeln, row.sapSentBy]
+        [row.fileName, row.clientName, row.issue, row.status, row.submittedBy, row.processedBy, row.assignedTo, getManagerLabel(row), row.date, row.createdAt, row.processedAt, row.sapSentAt, row.sapVbeln, row.sapSentBy]
           .filter(Boolean)
           .some((value) => String(value).toLowerCase().includes(query));
       const matchesStatus = statusFilter === "all" || statusToBusinessGroup(row.status as OrderStatus) === statusFilter;
-      // "Mes dossiers" filter - match if user is assignee OR processor
-      const rowAssignee = row.assignedTo?.toLowerCase() || "";
-      const rowProcessor = (row.processedBy || "").toLowerCase();
+      // "Mes dossiers" = current user appears in any ownership/traceability field.
       const userLc = (currentUsername || "").toLowerCase();
+      const ownershipFields = [row.submittedBy, row.processedBy, row.assignedTo, row.sapSentBy]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
       const matchesMyOrders = !myOrdersOnly || !currentUsername ||
-        rowAssignee === userLc || rowProcessor === userLc;
+        ownershipFields.includes(userLc);
+      const matchesSubmitter = submittedByFilter === "all"
+        || (submittedByFilter === UNIDENTIFIED_MANAGER && !row.submittedBy)
+        || row.submittedBy?.toLowerCase() === submittedByFilter.toLowerCase();
       const managerKey = rowManagerKey(row);
       const matchesManager =
         managerFilter === "all" ||
@@ -187,7 +200,7 @@ export function RevueListPage() {
       const rowDate = row.createdAt || row.date || "";
       const matchesDateFrom = !dateFrom || rowDate >= dateFrom;
       const matchesDateTo = !dateTo || rowDate <= (dateTo + "T23:59:59");
-      return matchesSearch && matchesStatus && matchesMyOrders && matchesManager && matchesDateFrom && matchesDateTo;
+      return matchesSearch && matchesStatus && matchesMyOrders && matchesManager && matchesSubmitter && matchesDateFrom && matchesDateTo;
     });
 
     return filtered.sort((left, right) => {
@@ -208,7 +221,7 @@ export function RevueListPage() {
 
       return sortDirection === "asc" ? comparison : -comparison;
     });
-  }, [items, managerFilter, myOrdersOnly, currentUsername, dateFrom, dateTo, search, sortDirection, sortKey, statusFilter]);
+  }, [items, managerFilter, myOrdersOnly, currentUsername, dateFrom, dateTo, search, sortDirection, sortKey, statusFilter, submittedByFilter]);
 
   return (
     <>
@@ -258,7 +271,7 @@ export function RevueListPage() {
                 : "Tous les dossiers"}
             </Button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_190px_310px_auto] lg:items-center">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_190px_190px_310px_auto] lg:items-center">
             <div className="relative sm:col-span-2 lg:col-span-1">
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input
@@ -280,6 +293,21 @@ export function RevueListPage() {
                 {gestionnaires.map((u) => (
                   <SelectItem key={u.userId} value={u.username}>
                     {u.displayName}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Select value={submittedByFilter} onValueChange={setSubmittedByFilter}>
+              <SelectTrigger>
+                <SelectValue placeholder="Soumis par" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Tous les soumetteurs</SelectItem>
+                <SelectItem value={UNIDENTIFIED_MANAGER}>{UNIDENTIFIED_LABEL}</SelectItem>
+                {submitters.map((username) => (
+                  <SelectItem key={username} value={username}>
+                    {getDisplayName(username)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -312,6 +340,7 @@ export function RevueListPage() {
                   setSearch("");
                   setStatusFilter("all");
                   setManagerFilter("all");
+                  setSubmittedByFilter("all");
                   setDateFrom("");
                   setDateTo("");
                   setMyOrdersOnly(false);   // tout effacer, y compris le filtre "Mes dossiers"
@@ -363,6 +392,12 @@ export function RevueListPage() {
               <TableHeader>
                 <TableRow>
                   {/* 1. Identification */}
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("submittedBy")}>
+                      Soumis par
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
                   <TableHead>
                     <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("fileName")}>
                       Fichier
@@ -475,6 +510,9 @@ export function RevueListPage() {
                     </TableCell>
                     <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
                       {getDisplayName(row.sapSentBy) || <span className="text-muted-foreground">-</span>}
+                    </TableCell>
+                    <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
+                      {getDisplayName(row.submittedBy) || <span className="text-muted-foreground">-</span>}
                     </TableCell>
                     <TableCell className="max-w-[160px] truncate text-sm text-muted-foreground">
                       {rowManagerKey(row) ? (

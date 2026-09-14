@@ -25,6 +25,7 @@ CODE_ALIASES: dict[str, str] = {
     "NO_ORDER_LINES": "NO_LINE_ITEMS",
     "ORDER_DATE_MISSING": "ORDER_DATE_INVALID",
     "INVALID_QUANTITY": "ARTICLE_QUANTITY_INVALID",
+    "QUANTITY_INVALID": "ARTICLE_QUANTITY_INVALID",
     "SHIPTO_MISSING": "SHIPTO_NO_STRONG_MATCH",
 }
 
@@ -193,7 +194,7 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
     },
     "PO_NUMBER_DUPLICATE": {
         "domain": "DUPLICATE", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+        "blocking": False, "scope": "ORDER", "requires_user_input": True,
     },
     "CUSTOMER_NOT_DEFINED": {
         "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",

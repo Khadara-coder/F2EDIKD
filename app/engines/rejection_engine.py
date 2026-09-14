@@ -198,12 +198,11 @@ def _check_line_items(lignes: dict, materials: dict = None) -> list[dict]:
     items = lignes.get("lignes", [])
 
     if not items:
-        # No line items at all - might be acceptable for some documents
-        # but flag as warning
+        # Without a line item, no valid ORDERS message can be generated.
         rejections.append({
             "code": "NO_LINE_ITEMS",
             "message": format_rejection_message("NO_LINE_ITEMS"),
-            "severity": "warning",
+            "severity": "blocking",
             "details": {},
         })
         return rejections
@@ -267,7 +266,7 @@ def _check_line_items(lignes: dict, materials: dict = None) -> list[dict]:
                 "ARTICLE_NOT_FOUND",
                 {"articles": lines_article_not_found},
             ),
-            "severity": "warning",
+            "severity": "blocking",
             "details": {"articles": lines_article_not_found, "action": "saisir_et_informer"},
         })
 

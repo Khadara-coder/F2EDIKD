@@ -933,6 +933,7 @@ def create_router() -> APIRouter:
 
     @router.patch("/orders/{order_id}")
     async def patch_order(order_id: str, req: Request, payload: dict = Body(...)):
+        _require_mutable_order(order_id)
         try:
             actor = resolve_actor(req)
         except Exception:
@@ -964,6 +965,8 @@ def create_router() -> APIRouter:
             actor = "operator"
         store = get_store()
         order_id_before = store.find_partner_order_id(partner_id)
+        if order_id_before:
+            _require_mutable_order(order_id_before)
         before_partner = None
         if order_id_before:
             before_partner = _partner_snapshot_from_review(
@@ -1000,6 +1003,8 @@ def create_router() -> APIRouter:
             actor = "operator"
         store = get_store()
         order_id_before = store.find_line_order_id(line_id)
+        if order_id_before:
+            _require_mutable_order(order_id_before)
         before_line = None
         if order_id_before:
             before_line = _line_snapshot_from_review(
@@ -2185,6 +2190,17 @@ def _map_platform_status(status: str | None) -> str:
     return m.get(status or "", "À revoir")
 
 
+def _actor_matches_order(row: dict, actor: str) -> bool:
+    """Return whether an actor owns or participated in an order lifecycle."""
+    actor_values = {str(actor).strip().lower()}
+    if "@" in actor:
+        actor_values.add(actor.split("@", 1)[0].strip().lower())
+    return any(
+        str(row.get(field) or "").strip().lower() in actor_values
+        for field in ("uploaded_by", "processed_by", "assigned_to", "sap_sent_by")
+    )
+
+
 def _list_combined_orders(actor: str | None = None, role: str | None = None, include_done: bool = False) -> list[dict]:
     """List all orders with optional actor/role context (for future RBAC filtering).
     
@@ -2233,6 +2249,8 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None, inc
         pass
     _DONE_STATUSES = {"Envoyé SAP", "Confirmé SAP"}
     rows = list(rows_by_id.values()) if include_done else [r for r in rows_by_id.values() if r.get("status") not in _DONE_STATUSES]
+    if role == "adv" and actor:
+        rows = [row for row in rows if _actor_matches_order(row, actor)]
     rows.sort(key=_row_sort_timestamp, reverse=True)
     return rows[:200]
 
@@ -2358,7 +2376,8 @@ def _order_list_item(o: dict) -> dict:
         "sapSentBy": o.get("sap_sent_by") or None,
         "sapVbeln": (o.get("sap_vbeln") or "").lstrip("0") or None,
         "sapConfirmedAt": sap_confirmed_at,
-        "processedBy": o.get("processed_by") or o.get("uploaded_by"),
+        "submittedBy": o.get("uploaded_by"),
+        "processedBy": o.get("processed_by"),
         "assignedTo": o.get("assigned_to"),
         "holdReason": o.get("hold_reason"),
         "transferredFrom": o.get("transferred_from"),

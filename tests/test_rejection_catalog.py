@@ -199,6 +199,7 @@ def test_issue_taxonomy_covers_all_catalog_codes():
 def test_salvage_and_resubmit_are_non_blocking_alerts():
     assert rc.issue_taxonomy("EXTRACTION_LLM_SALVAGE")["blocking"] is False
     assert rc.issue_taxonomy("RESUBMISSION_DETECTED")["blocking"] is False
+    assert rc.issue_taxonomy("PO_NUMBER_DUPLICATE")["blocking"] is False
     assert rc.issue_taxonomy("ARTICLE_NOT_FOUND")["blocking"] is True
 
 

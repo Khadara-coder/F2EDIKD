@@ -1,12 +1,60 @@
-# GenieCommande
+# GenieCommande - File2EDI
 
-Application **File2EDI** (React + FastAPI) et moteur Python de génération EDIFACT ORDERS D.96A (`.tst`) pour Bosch Thermotechnologie France.
+Application **File2EDI** (React SPA + FastAPI Python) et moteur de génération **EDIFACT ORDERS D.96A** (`.tst`) pour Bosch Thermotechnologie France.
 
-**Dépôt :** [github.boschdevcloud.com/DIK1DY/GenieCommande](https://github.boschdevcloud.com/DIK1DY/GenieCommande)
+**Dépôt :** [github.boschdevcloud.com/DIK1DY/GenieCommande](https://github.boschdevcloud.com/DIK1DY/GenieCommande)  
+**Version :** Phase 4 complète (PostgreSQL mandatory) + Phase 5+ (RBAC 2-role)  
+**Status :** Production-ready (VM Azure + Docker Compose)
 
 ---
 
-## Workflow de développement
+## 🏗️ Architecture Actuelle (2026-09)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ VM Azure (Docker Compose)                                   │
+│                                                              │
+│  ┌──────────────────┐         ┌──────────────────┐         │
+│  │   React SPA      │         │   FastAPI        │         │
+│  │  (port 8090)     │────────│   server.py      │         │
+│  │   • Cockpit      │         │  (port 8000)     │         │
+│  │   • Convertir    │         │  • REST API      │         │
+│  │   • Revue        │         │  • LLM IA        │         │
+│  │   • Historique   │         │  • RBAC          │         │
+│  │   • Masterdata   │         │  • Workflows     │         │
+│  │   • Paramètres   │         │  • PDF Extract   │         │
+│  └──────────────────┘         └──────────────────┘         │
+│                                       │                     │
+│                           ┌───────────┴──────────┐          │
+│                           │                      │          │
+│                    ┌──────▼──────┐      ┌───────▼─────┐   │
+│                    │ PostgreSQL   │      │  File2EDI   │   │
+│                    │  (RLS + RBAC)│      │   Engine    │   │
+│                    │  • auth_*    │      │ (OCR, LLM,  │   │
+│                    │  • file2edi_*│      │  EDIFACT)   │   │
+│                    └─────────────┘      └─────────────┘   │
+└─────────────────────────────────────────────────────────────┘
+               │                          │
+     ┌─────────┴────────┐                │
+     │                  │                │
+  ┌──▼──┐          ┌────▼────┐        ┌──▼─────┐
+  │SFTP │          │Databricks│       │GitHub  │
+  │(SAP)│          │Model API │       │Repo    │
+  │     │          │ (LLM)    │       │Masterdata
+  └─────┘          └──────────┘       └────────┘
+```
+
+**Composants clés :**
+- **PostgreSQL 15** : RBAC via RLS, persistance complète (no SQLite)
+- **FastAPI** : REST API, LLM gateway (Databricks/OpenAI), auth, file routing
+- **React SPA** : Interface responsive (desktop + mobile), Tailwind CSS
+- **Databricks** : LLM Model Serving uniquement (endpoint distant)
+- **GitHub** : Repo masterdata sync (via n8n webhook)
+- **SFTP** : Livraison `.tst` vers SAP (stratégie temp + rename)
+
+---
+
+## 📊 Workflow de Développement
 
 ```
 dev  ──PR──▶  staging  ──PR──▶  main
@@ -18,65 +66,105 @@ local          VM Azure        VM Azure
 | Branche | Rôle | Déploiement |
 |---------|------|-------------|
 | `dev` | Développement quotidien | Local (`docker compose`) |
-| `staging` | Validation pré-prod | VM Azure (`docker compose`) |
-| `main` | Production | VM Azure (`docker compose`) |
+| `staging` | Validation pré-prod | VM Azure (`docker compose.file2edi.yml`) |
+| `main` | Production | VM Azure (`docker compose.file2edi.yml`) |
 
-### Cloner et démarrer en local
+---
+
+## 🔍 Documentation Complète
+
+| Document | Audience | Contenu |
+|----------|----------|---------|
+| [**VALIDATION_RULES_ANALYSIS.md**](docs/VALIDATION_RULES_ANALYSIS.md) | Devs + Admins | **10 catégories de validation** : classification, extraction, matching, matière, EDIFACT, dédup, SFTP. Règles métier détaillées, decision tree, customisation. |
+| [**VALIDATION_RULES_CLASSIFICATION.md**](docs/VALIDATION_RULES_CLASSIFICATION.md) | Devs + Product Owners | Classement par nature, étape, portée, impact et action de récupération. Points de cohérence à surveiller. |
+| [**HEADER_FIELDS_PROPAGATION.md**](docs/HEADER_FIELDS_PROPAGATION.md) | Devs + Product Owners | Schéma de propagation des modifications d'en-tête, Sold-to, Ship-to, adresses et codes postaux. |
+| [**validation_rules_inventory.xlsx**](docs/validation_rules_inventory.xlsx) | Managers + Ops + Devs | Classeur filtrable des règles, classes, blocages, sévérités, actions et incohérences. Générateur : `scripts/generate_validation_rules_excel.py`. |
+| [**VALIDATION_RULES_QUICK_REFERENCE.md**](docs/VALIDATION_RULES_QUICK_REFERENCE.md) | Managers + Ops | **Quick ref** des sévérités, blocages, revue. Cas d'usage, SLA, monitoring. |
+| [**REJECTION_CODES_CATALOG.md**](docs/REJECTION_CODES_CATALOG.md) | Devs + Support | **11 codes rejection** : descriptions, triggers, récupération. Issue taxonomy, aliases, FAQ. |
+| [**FILE2EDI_DEPLOYMENT.md**](docs/FILE2EDI_DEPLOYMENT.md) | DevOps + Admins | Déploiement complet 3 phases (local, staging, prod), env vars, troubleshooting. |
+| [**RUN_ME.md**](docs/RUN_ME.md) | Ops | Quick commands : start/deploy/monitor. |
+| [**SUPPORT_GUIDE.md**](docs/SUPPORT_GUIDE.md) | Ops + Support | Daily checks, problem matrix, backup/restore, RBAC admin. |
+| [**POSTGRES_IMPLEMENTATION_STATUS.md**](docs/POSTGRES_IMPLEMENTATION_STATUS.md) | Product Owners | Phase 4 complete (mandatory PG), Phase 5 decision pending (RBAC filtering strategy). |
+| [**PROJECT_STATUS.md**](docs/PROJECT_STATUS.md) | Management | Global status matrix, all phases 1-6, next steps. |
+
+
+## ⚡ Démarrage Rapide (Local)
+
+### 1. Cloner et configurer
 
 ```bash
 git clone https://github.boschdevcloud.com/DIK1DY/GenieCommande.git
 cd GenieCommande
 git checkout dev
 cp .env.example .env
-# Renseigner les valeurs dans .env (voir section Variables d'environnement)
+# Renseigner DATABRICKS_TOKEN, SFTP_* dans .env
+# Copier masterdata CSV dans data/masterdata/
 ```
 
-Copier les CSV masterdata dans `data/masterdata/` (voir [data/masterdata/README.md](data/masterdata/README.md)).
+### 2. Lancer l'app
 
+**Avec Docker** (recommandé) :
 ```bash
 docker compose -f docker-compose.file2edi.yml up --build -d
-# UI  : http://localhost:8080
-# API : http://localhost:8080/api/health/system
-# OCR : installe au build (tesseract-ocr + fra/eng + pytesseract)
+# UI  : http://localhost:8090
+# API : http://localhost:8090/api/health/system
 ```
 
-### Pousser en staging (VM Azure)
-
-Le dépôt canonique est Bosch (`bosch`). Ne plus pousser vers GitHub.com (`origin` local).
-
+**Natif Python** :
 ```bash
-# Depuis ta branche locale dev
-git push bosch dev
-# Ouvrir une PR dev → staging sur Bosch GitHub, merger
-
-# Sur la VM Azure (remote clone = origin → Bosch)
-git -C /root/GenieCommande pull origin staging
-git -C /root/GenieCommande checkout staging
-docker compose -f docker-compose.file2edi.yml up --build -d
+pip install -r requirements.txt -r requirements-postgres.txt
+cd frontend && npm install && npm run build && cd ..
+python server.py
+# UI & API : http://localhost:8000
 ```
 
-### Passer en production (VM Azure)
-
+**Avec PostgreSQL local** (dev only) :
 ```bash
-# PR staging → main sur Bosch GitHub, merger
-# Sur la VM prod : git pull origin main, puis relancer docker compose
+docker compose -f docker-compose-pg.yml up -d         # PG 15 + pgAdmin
+docker compose -f docker-compose.file2edi.yml up -d   # App
+# pgAdmin: http://localhost:5050 (admin@edifact.local / admin)
 ```
 
 ---
 
-## Lancer sans Docker (Python natif)
+## 🚀 Déploiement (VM Azure)
+
+### Staging
 
 ```bash
-pip install -r requirements.txt -r requirements-postgres.txt
-cd frontend && npm install && npm run build && cd ..
-python -m uvicorn server:app --host 0.0.0.0 --port 8000
+# 1. Push local vers Bosch remote (dev branche)
+git push bosch dev
+
+# 2. Créer PR : dev → staging sur GitHub
+# 3. Merger la PR
+# 4. Sur VM staging :
+cd /root/GenieCommande
+git fetch origin
+git checkout staging
+git pull origin staging
+docker compose -f docker-compose.file2edi.yml up --build -d
 ```
 
-- **UI :** http://localhost:8000
-- **API :** http://localhost:8000/api/health/system
+### Production
 
-Pages : Cockpit · Convertir · Revue · Historique · Données maîtres · Paramètres  
-UI responsive (desktop + mobile) avec sidebar, hamburger menu, dialogs adaptatifs.
+```bash
+# 1. Créer PR : staging → main
+# 2. Merger
+# 3. Sur VM prod :
+cd /root/GenieCommande
+git fetch origin
+git checkout main
+git pull origin main
+docker compose -f docker-compose.file2edi.yml up --build -d
+```
+
+**Vérification post-déploiement :**
+```bash
+curl http://localhost:8090/api/health/system
+# Doit voir : {"status":"ok","ocr":"connected","masterdata_sync":{...}}
+docker compose -f docker-compose.file2edi.yml ps
+docker compose -f docker-compose.file2edi.yml logs file2edi --tail 50
+```
 
 ---
 
