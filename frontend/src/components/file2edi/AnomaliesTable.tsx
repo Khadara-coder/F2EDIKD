@@ -24,11 +24,11 @@ interface AnomaliesTableProps {
 const DOMAIN_ORDER = [
   "DOCUMENT",
   "PARTNER",
+  "DUPLICATE",
   "ARTICLE",
   "ORDER",
   "EDI",
   "DELIVERY",
-  "DUPLICATE",
   "TECHNICAL",
 ] as const;
 
