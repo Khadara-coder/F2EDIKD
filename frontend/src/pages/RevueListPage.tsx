@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowUpDown, FileIcon, Search, SlidersHorizontal, Upload, X } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -88,13 +88,6 @@ export function RevueListPage() {
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
   const currentUsername = me?.username ?? me?.actor?.split("@")[0] ?? null;
-
-  // Auto-activer le filtre "Mes dossiers" pour les ADV à l'ouverture
-  useEffect(() => {
-    if (!isAdmin && currentUsername) {
-      setMyOrdersOnly(true);
-    }
-  }, [isAdmin, currentUsername]);
 
   // Liste des gestionnaires pour le filtre (username → displayName)
   const usersQuery = useQuery<Array<{ userId: string; username: string; displayName: string }>>(

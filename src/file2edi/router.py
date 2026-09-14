@@ -570,6 +570,13 @@ def create_router() -> APIRouter:
         previous = existing.get("order") or {}
         filename = str(previous.get("fileName") or pdf_path.name)
         upload_id = str(previous.get("uploadId") or "")
+        upload_meta = store.get_upload_meta(upload_id) or {}
+        submitted_by = str(
+            upload_meta.get("uploaded_by")
+            or previous.get("submittedBy")
+            or previous.get("uploadedBy")
+            or "operator"
+        )
         payload = pdf_path.read_bytes()
         started = _time.perf_counter()
         result = engine_bridge.process_pdf(
@@ -582,6 +589,7 @@ def create_router() -> APIRouter:
         review["order"]["uploadId"] = upload_id or review["order"].get("uploadId")
         review["order"]["fileName"] = filename
         review["order"]["pdfPath"] = str(pdf_path)
+        review["order"]["submittedBy"] = submitted_by
         review["order"]["processedBy"] = assigned_actor
         review["order"]["source"] = previous.get("source") or "ui"
         if previous.get("createdAt"):
@@ -830,6 +838,7 @@ def create_router() -> APIRouter:
         review = engine_to_order_review(order_id, upload_id, result)
         review["order"]["fileName"] = meta.get("file_name") or pdf.filename
         review["order"]["pdfPath"] = str(dest)
+        review["order"]["submittedBy"] = uploaded_by
         review["order"]["processedBy"] = assigned_actor
         review["order"]["source"] = "api"
         # Détecter re-soumission
@@ -2249,8 +2258,6 @@ def _list_combined_orders(actor: str | None = None, role: str | None = None, inc
         pass
     _DONE_STATUSES = {"Envoyé SAP", "Confirmé SAP"}
     rows = list(rows_by_id.values()) if include_done else [r for r in rows_by_id.values() if r.get("status") not in _DONE_STATUSES]
-    if role == "adv" and actor:
-        rows = [row for row in rows if _actor_matches_order(row, actor)]
     rows.sort(key=_row_sort_timestamp, reverse=True)
     return rows[:200]
 

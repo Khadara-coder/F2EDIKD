@@ -600,6 +600,10 @@ class File2EdiStore:
             conn = self._conn()
             engine = review.pop("_engine_result", None)
             pdf_path = o.get("pdfPath") or o.get("pdf_path")
+            uploaded_by = o.get("submittedBy") or o.get("uploadedBy")
+            if not uploaded_by and o.get("uploadId"):
+                upload_meta = self.get_upload_meta(o["uploadId"]) or {}
+                uploaded_by = upload_meta.get("uploaded_by")
             if not pdf_path and o.get("uploadId"):
                 up = self.get_upload_path(o["uploadId"])
                 if up:
@@ -610,8 +614,8 @@ class File2EdiStore:
                       order_id,upload_id,file_name,client_name,customer_order_number,document_reference,
                       order_date,requested_delivery_date,currency,incoterm,delivery_mode,message_type,vendor,
                       total_amount,global_confidence,status,review_required,line_count,pdf_hash,pdf_path,source,
-                      extraction_json,corrections_json,processed_by,soldto,assigned_to,created_at,updated_at
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                                            extraction_json,corrections_json,uploaded_by,processed_by,soldto,assigned_to,created_at,updated_at
+                                        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                     ON CONFLICT(order_id) DO UPDATE SET
                       upload_id=excluded.upload_id,
                       file_name=excluded.file_name,
@@ -632,6 +636,7 @@ class File2EdiStore:
                       source=excluded.source,
                       extraction_json=excluded.extraction_json,
                       corrections_json=excluded.corrections_json,
+                      uploaded_by=COALESCE(file2edi_orders.uploaded_by, excluded.uploaded_by),
                       processed_by=COALESCE(excluded.processed_by, file2edi_orders.processed_by),
                       soldto=excluded.soldto,
                       assigned_to=COALESCE(excluded.assigned_to, file2edi_orders.assigned_to),
@@ -651,6 +656,7 @@ class File2EdiStore:
                         str(o.get("source") or "unknown"),
                         json.dumps(engine) if engine else None,
                         json.dumps(self._corrections_snapshot(review)),
+                        uploaded_by or "operator",
                         o.get("processedBy") or o.get("processed_by"),
                         soldto,
                         o.get("assignedTo") or o.get("assigned_to"),
