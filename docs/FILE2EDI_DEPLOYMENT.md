@@ -29,6 +29,24 @@
 
 All environments require these core variables. Create `.env` from `.env.example`:
 
+### Create the environment file
+
+The repository contains one template only. The real `.env` is local to each machine and is ignored by Git.
+
+```bash
+cp .env.example .env
+```
+
+On Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
+```
+
+Fill in the values for the target environment, especially `PG_DATABASE_URL`,
+`DATABRICKS_HOST`, `DATABRICKS_TOKEN`, `SFTP_*`, and `APP_ADMIN_USERS`.
+Do not commit `.env` or copy production secrets into the repository.
+
 ### Database (Mandatory)
 ```bash
 PG_DATABASE_URL=postgresql+psycopg://edifact:password@postgres:5432/edifact

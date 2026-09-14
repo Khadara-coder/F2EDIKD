@@ -33,7 +33,7 @@ services:
       - path: .env
         required: false
     # Secrets (DATABRICKS_TOKEN, SFTP_PASSWORD, …) stay in env_file only.
-    # Do not set them here as ${VAR:-} — empty host interpolation would wipe .env.vm.
+    # Do not set them here as ${VAR:-} — empty host interpolation would wipe .env values.
     environment:
       MOCK_MODE: "${MOCK_MODE:-false}"
       ENABLE_PROFILE_LOGIN: "${ENABLE_PROFILE_LOGIN:-true}"
