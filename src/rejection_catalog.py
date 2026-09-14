@@ -27,6 +27,14 @@ CODE_ALIASES: dict[str, str] = {
     "INVALID_QUANTITY": "ARTICLE_QUANTITY_INVALID",
     "QUANTITY_INVALID": "ARTICLE_QUANTITY_INVALID",
     "SHIPTO_MISSING": "SHIPTO_NO_STRONG_MATCH",
+    "CUSTOMER_NOT_DEFINED": "SOLDTO_NOT_FOUND",
+    "CONTRACT_BREAK_SOLDTO_MISSING": "SOLDTO_NOT_FOUND",
+    "CONTRACT_BREAK_ADDRESSES_MISSING": "NO_DELIVERY_ADDRESS",
+    "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING": "SHIPTO_CANDIDATES_MISSING",
+    "DELIVERY_ADDRESS_INVALID": "SHIPTO_NO_STRONG_MATCH",
+    "SHIPTO_MASTERDATA_MISMATCH": "SHIPTO_NO_STRONG_MATCH",
+    "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": "SHIPTO_NO_STRONG_MATCH",
+    "SOLDTO_MASTERDATA_UNAVAILABLE": "MASTERDATA_MISSING",
 }
 
 
@@ -61,8 +69,8 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
         "blocking": False, "scope": "ORDER", "requires_user_input": True,
     },
     "PARTNER_UNRESOLVED": {
-        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "WARNING",
+        "blocking": False, "scope": "ORDER", "requires_user_input": True,
     },
     "ORDER_KEY_MISSING": {
         "domain": "ORDER", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
@@ -104,20 +112,8 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
         "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
-    "CONTRACT_BREAK_ADDRESSES_MISSING": {
-        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
-    },
     "CONTRACT_BREAK_ARTICLES_MISSING": {
         "domain": "ARTICLE", "stage": "EXTRACTION", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
-    },
-    "CONTRACT_BREAK_SOLDTO_MISSING": {
-        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
-    },
-    "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING": {
-        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
     "SOLDTO_NOT_FOUND": {
@@ -128,7 +124,7 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
         "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
-    "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": {
+    "SHIPTO_CANDIDATES_MISSING": {
         "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
@@ -137,6 +133,10 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
     "SHIPTO_AMBIGUOUS_MATCH": {
+        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+    },
+    "SHIPTO_SOLDTO_MISMATCH": {
         "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
@@ -180,10 +180,6 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
         "domain": "DUPLICATE", "stage": "DELIVERY", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
-    "DELIVERY_ADDRESS_INVALID": {
-        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
-    },
     "NO_DELIVERY_ADDRESS": {
         "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
@@ -195,10 +191,6 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
     "PO_NUMBER_DUPLICATE": {
         "domain": "DUPLICATE", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
         "blocking": False, "scope": "ORDER", "requires_user_input": True,
-    },
-    "CUSTOMER_NOT_DEFINED": {
-        "domain": "PARTNER", "stage": "MATCHING", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
     "NOT_AN_ORDER": {
         "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
@@ -359,14 +351,6 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "message_fr": "Le document contient un mot-clé contrat/devis - ce n'est pas un bon de commande.",
         "message_en": "The document contains a contract/quotation keyword - this is not a purchase order.",
     },
-    "CONTRACT_BREAK_ADDRESSES_MISSING": {
-        "severity": "BLOCKER",
-        "business_status": "REJECTED",
-        "retry_allowed": False,
-        "manual_review_required": True,
-        "message_fr": "Aucune adresse exploitable n'a été trouvée pour résoudre le SHIP-TO.",
-        "message_en": "No usable address was found to resolve the SHIP-TO.",
-    },
     "CONTRACT_BREAK_ARTICLES_MISSING": {
         "severity": "BLOCKER",
         "business_status": "REJECTED",
@@ -374,22 +358,6 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "manual_review_required": True,
         "message_fr": "Aucune ligne article exploitable n'a été trouvée.",
         "message_en": "No usable order line item was found.",
-    },
-    "CONTRACT_BREAK_SOLDTO_MISSING": {
-        "severity": "BLOCKER",
-        "business_status": "REJECTED",
-        "retry_allowed": False,
-        "manual_review_required": True,
-        "message_fr": "Le SOLD-TO n'a pas pu être déterminé.",
-        "message_en": "The SOLD-TO could not be resolved.",
-    },
-    "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING": {
-        "severity": "BLOCKER",
-        "business_status": "REJECTED",
-        "retry_allowed": False,
-        "manual_review_required": True,
-        "message_fr": "Aucun candidat SHIP-TO n'a été trouvé dans la famille SOLD-TO.",
-        "message_en": "No SHIP-TO candidate was found in the SOLD-TO family.",
     },
     "SOLDTO_NOT_FOUND": {
         "severity": "BUSINESS_REJECT",
@@ -407,13 +375,13 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "message_fr": "Plusieurs SOLD-TO correspondent avec une confiance équivalente.",
         "message_en": "Multiple SOLD-TO candidates matched with equivalent confidence.",
     },
-    "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": {
-        "severity": "BLOCKER",
-        "business_status": "REJECTED",
-        "retry_allowed": False,
+    "SHIPTO_CANDIDATES_MISSING": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
         "manual_review_required": True,
-        "message_fr": "Le SHIP-TO n'a pas de preuve forte code postal ou ville. Une rue seule est insuffisante.",
-        "message_en": "The SHIP-TO has no strong postal-code or city evidence. Street-only is not sufficient.",
+        "message_fr": "Aucun candidat SHIP-TO n'existe dans la famille du SOLD-TO courant.",
+        "message_en": "No SHIP-TO candidate exists in the current SOLD-TO family.",
     },
     "SHIPTO_NO_STRONG_MATCH": {
         "severity": "BLOCKER",
@@ -430,6 +398,14 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "manual_review_required": True,
         "message_fr": "Plusieurs SHIP-TO correspondent avec une preuve forte équivalente.",
         "message_en": "Multiple SHIP-TO candidates matched with equivalent strong evidence.",
+    },
+    "SHIPTO_SOLDTO_MISMATCH": {
+        "severity": "BUSINESS_REJECT",
+        "business_status": "PENDING_USER_INPUT",
+        "retry_allowed": True,
+        "manual_review_required": True,
+        "message_fr": "Le SHIP-TO sélectionné n'appartient pas à la famille du SOLD-TO courant.",
+        "message_en": "The selected SHIP-TO does not belong to the current SOLD-TO family.",
     },
     "EDIFACT_MISSING_BGM": {
         "severity": "BLOCKER",
@@ -516,14 +492,6 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
     # These codes map to the 9 Esker rejection rules checked in          #
     # src/rejection_engine.py check_rejections().                        #
     # ------------------------------------------------------------------ #
-    "DELIVERY_ADDRESS_INVALID": {
-        "severity": "BLOCKER",
-        "business_status": "REJECTED",
-        "retry_allowed": True,
-        "manual_review_required": True,
-        "message_fr": "L'adresse de livraison n'a pas pu être associée aux données maîtres en raison d'une mauvaise détection ou de données client manquantes.",
-        "message_en": "The delivery address could not be matched to master data due to poor detection or missing customer data.",
-    },
     "NO_DELIVERY_ADDRESS": {
         "severity": "BLOCKER",
         "business_status": "REJECTED",
@@ -547,14 +515,6 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "manual_review_required": True,
         "message_fr": "Ce numéro de commande existe déjà dans l'historique SAP.",
         "message_en": "This purchase order number already exists in the SAP sales order history.",
-    },
-    "CUSTOMER_NOT_DEFINED": {
-        "severity": "BUSINESS_REJECT",
-        "business_status": "REJECTED",
-        "retry_allowed": False,
-        "manual_review_required": True,
-        "message_fr": "Aucun client (SOLD-TO) n'a pu être identifié dans les données maîtres.",
-        "message_en": "No customer (SOLD-TO) could be identified in masterdata.",
     },
     "NOT_AN_ORDER": {
         "severity": "BUSINESS_REJECT",
@@ -634,7 +594,9 @@ REJECTION_ACTION_TEXT: dict[str, str] = {
     "SOLDTO_AMBIGUOUS_MATCH": "Merci de choisir le bon SOLD-TO parmi les candidats proposés.",
     "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": "Merci de vérifier l'adresse de livraison et les données partenaires WE/SH.",
     "SHIPTO_NO_STRONG_MATCH": "Merci de vérifier le code postal ou la ville du lieu de livraison.",
+    "SHIPTO_CANDIDATES_MISSING": "Merci de vérifier le SOLD-TO ou d'ajouter le lieu de livraison aux données partenaires.",
     "SHIPTO_AMBIGUOUS_MATCH": "Merci de choisir le bon SHIP-TO parmi les candidats proposés.",
+    "SHIPTO_SOLDTO_MISMATCH": "Merci de choisir un SHIP-TO appartenant au SOLD-TO courant.",
     "EDIFACT_MISSING_BGM": "Merci de renseigner la référence de commande avant génération EDIFACT.",
     "EDIFACT_MISSING_DTM_137": "Merci de corriger la date document avant génération EDIFACT.",
     "EDIFACT_MISSING_NAD_BY": "Merci de corriger le SOLD-TO / acheteur avant génération EDIFACT.",
@@ -834,11 +796,25 @@ REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
         "auto_action_reject": "Clôturer faute de match SHIP-TO",
         "mode": "Manuel",
     },
+    "SHIPTO_CANDIDATES_MISSING": {
+        "button_accept": "SHIP-TO ajouté ou sélectionné",
+        "button_reject": "Aucun lieu de livraison connu",
+        "auto_action_accept": "Appliquer le SHIP-TO choisi",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
+        "mode": "Manuel",
+    },
     "SHIPTO_AMBIGUOUS_MATCH": {
         "button_accept": "J'ai choisi le bon SHIP-TO",
         "button_reject": "Ambiguïté non résolue",
         "auto_action_accept": "Appliquer le SHIP-TO choisi",
         "auto_action_reject": "Mettre en attente de clarification",
+        "mode": "Manuel",
+    },
+    "SHIPTO_SOLDTO_MISMATCH": {
+        "button_accept": "SHIP-TO compatible sélectionné",
+        "button_reject": "Relation client invalide",
+        "auto_action_accept": "Appliquer le SHIP-TO de la famille SOLD-TO",
+        "auto_action_reject": "Bloquer la génération EDIFACT",
         "mode": "Manuel",
     },
     "EDIFACT_MISSING_BGM": {

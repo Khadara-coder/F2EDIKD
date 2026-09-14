@@ -84,6 +84,10 @@ def _check_delivery_address(validated: dict) -> list[dict]:
     confidence = validated.get("Confiance", 0)
     shipto = validated.get("SHIPTO", "")
     soldto = validated.get("SOLDTO", "")
+    has_address_evidence = any(
+        str(validated.get(field) or "").strip()
+        for field in ("Rue", "Adresse", "Code postal", "Ville")
+    )
 
     if not shipto or shipto == "-":
         # SHIPTO vide peut être légitime si SHIPTO = SOLDTO (livraison = facturation)
@@ -91,7 +95,7 @@ def _check_delivery_address(validated: dict) -> list[dict]:
             return []  # adresse valide, SOLDTO utilisé comme SHIPTO
 
         statut = validated.get("Statut", "")
-        if "non identifie" in statut.lower() or not statut:
+        if not has_address_evidence:
             rejections.append({
                 "code": "NO_DELIVERY_ADDRESS",
                 "message": format_rejection_message("NO_DELIVERY_ADDRESS"),
@@ -100,9 +104,9 @@ def _check_delivery_address(validated: dict) -> list[dict]:
             })
         else:
             rejections.append({
-                "code": "DELIVERY_ADDRESS_INVALID",
+                "code": "SHIPTO_NO_STRONG_MATCH",
                 "message": format_rejection_message(
-                    "DELIVERY_ADDRESS_INVALID",
+                    "SHIPTO_NO_STRONG_MATCH",
                     {"statut": statut, "confiance": confidence},
                 ),
                 "severity": "blocking",
@@ -110,9 +114,9 @@ def _check_delivery_address(validated: dict) -> list[dict]:
             })
     elif confidence > 0 and confidence < 50:
         rejections.append({
-            "code": "DELIVERY_ADDRESS_INVALID",
+            "code": "SHIPTO_NO_STRONG_MATCH",
             "message": format_rejection_message(
-                "DELIVERY_ADDRESS_INVALID",
+                "SHIPTO_NO_STRONG_MATCH",
                 {"shipto": shipto, "confiance": confidence},
             ),
             "severity": "blocking",
@@ -184,8 +188,8 @@ def _check_customer(validated: dict) -> list[dict]:
     soldto = validated.get("SOLDTO", "")
     if not soldto or soldto == "-":
         return [{
-            "code": "CUSTOMER_NOT_DEFINED",
-            "message": format_rejection_message("CUSTOMER_NOT_DEFINED"),
+            "code": "SOLDTO_NOT_FOUND",
+            "message": format_rejection_message("SOLDTO_NOT_FOUND"),
             "severity": "blocking",
             "details": {},
         }]

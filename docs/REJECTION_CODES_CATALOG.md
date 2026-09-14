@@ -20,7 +20,9 @@
 | ORDER_DATE_INVALID | ORDER | EXTRACTION | "Date de commande invalide" | "Order date invalid format" | Rejeter + manual fix |
 | ARTICLE_QUANTITY_INVALID | ARTICLE | EXTRACTION | "Quantité non-entière ou ≤ 0" | "Quantity not natural integer or ≤ 0" | Rejeter ligne |
 | SOLDTO_NOT_FOUND | PARTNER | MATCHING | "Client (Sold-to) absent de masterdata" | "Customer (Sold-to) not in masterdata" | Revue + add customer |
-| SHIPTO_NO_STRONG_MATCH | DELIVERY | MATCHING | "Adresse livraison non trouvée" | "Delivery address not found" | Revue + LLM salvage |
+| SHIPTO_CANDIDATES_MISSING | PARTNER | MATCHING | "Aucun SHIP-TO dans la famille du SOLD-TO" | "No SHIP-TO candidate in the SOLD-TO family" | Corriger le client ou le masterdata |
+| SHIPTO_NO_STRONG_MATCH | PARTNER | MATCHING | "Adresse livraison sans correspondance forte" | "Delivery address has no strong match" | Corriger l'adresse |
+| SHIPTO_SOLDTO_MISMATCH | PARTNER | MATCHING | "SHIP-TO incompatible avec le SOLD-TO" | "SHIP-TO does not belong to SOLD-TO" | Sélectionner un partenaire compatible |
 | ARTICLE_NOT_FOUND | ARTICLE | MATCHING | "Article/matière absent de masterdata" | "Article/material not in masterdata" | Rejeter ligne |
 | DISCONTINUED_MATERIAL | ARTICLE | BUSINESS_VALIDATION | "Article discontinué" | "Article discontinued" | Proposer remplacement |
 | ROH_NONCOMMERCIAL | ARTICLE | BUSINESS_VALIDATION | "Article ROH non-commercialisable" | "Article ROH non-commercial" | Rejeter ligne |
@@ -42,8 +44,8 @@
 | RESUBMISSION_DETECTED | DUPLICATE | INGESTION | "Doublon détecté (même PDF + même N° commande)" | "Duplicate detected (same PDF + same order)" | Log + continuer (non-bloquant) |
 | PRICE_MISSING | ARTICLE | EXTRACTION | "Prix unitaire absent pour cette ligne" | "Unit price missing for this line item" | Corriger ou estimer |
 | AMOUNT_MISMATCH | ARTICLE | EXTRACTION | "Montant ligne incohérent (Qty × Prix ≠ Total)" | "Line amount mismatch (Qty × Price ≠ Total)" | Corriger quantité ou prix |
-| NO_DELIVERY_ADDRESS | DELIVERY | EXTRACTION | "Aucune adresse livraison détectée" | "No delivery address detected" | Importer de facturation |
-| SHIPTO_AMBIGUOUS_MATCH | DELIVERY | MATCHING | "Adresse livraison ambiguë (> 1 candidat)" | "Delivery address ambiguous (>1 candidate)" | Choisir dans dropdown |
+| NO_DELIVERY_ADDRESS | PARTNER | MATCHING | "Aucune adresse livraison détectée" | "No delivery address detected" | Corriger le document |
+| SHIPTO_AMBIGUOUS_MATCH | PARTNER | MATCHING | "Adresse livraison ambiguë (> 1 candidat)" | "Delivery address ambiguous (>1 candidate)" | Choisir dans dropdown |
 
 ---
 
@@ -336,6 +338,13 @@ Legacy Code              → Canonical Code
 PO_NUMBER_MISSING       → ORDER_KEY_MISSING
 CUSTOMER_NOT_FOUND      → SOLDTO_NOT_FOUND
 DELIVERY_NOT_FOUND      → SHIPTO_NO_STRONG_MATCH
+CUSTOMER_NOT_DEFINED     → SOLDTO_NOT_FOUND
+CONTRACT_BREAK_SOLDTO_MISSING → SOLDTO_NOT_FOUND
+CONTRACT_BREAK_ADDRESSES_MISSING → NO_DELIVERY_ADDRESS
+CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING → SHIPTO_CANDIDATES_MISSING
+DELIVERY_ADDRESS_INVALID → SHIPTO_NO_STRONG_MATCH
+SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY → SHIPTO_NO_STRONG_MATCH
+SHIPTO_MASTERDATA_MISMATCH → SHIPTO_NO_STRONG_MATCH
 MATERIAL_UNKNOWN        → ARTICLE_NOT_FOUND
 MATERIAL_DISCONTINUED   → DISCONTINUED_MATERIAL
 MATERIAL_NON_COMMERCIAL → ROH_NONCOMMERCIAL

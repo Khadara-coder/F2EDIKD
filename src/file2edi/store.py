@@ -1573,6 +1573,8 @@ class File2EdiStore:
         masterdata: dict,
         shipto_code: str,
         soldto_code: str | None = None,
+        *,
+        allow_other_families: bool = True,
     ) -> dict | None:
         code = str(shipto_code or "").strip()
         if not code:
@@ -1581,6 +1583,8 @@ class File2EdiStore:
             for partner in masterdata.get("partners_by_soldto", {}).get(soldto_code, []) or []:
                 if str(partner.get("id") or "") == code:
                     return partner
+            if not allow_other_families:
+                return None
         for partners in (masterdata.get("partners_by_soldto") or {}).values():
             for partner in partners or []:
                 if str(partner.get("id") or "") == code:
@@ -1594,7 +1598,8 @@ class File2EdiStore:
                WHERE order_id=?
                  AND field_name IN (
                    'DELIVERY_ADDRESS_INVALID', 'NO_DELIVERY_ADDRESS',
-                   'SHIPTO_MASTERDATA_MISMATCH', 'SHIPTO_SOLDTO_MISMATCH'
+                                     'SHIPTO_MASTERDATA_MISMATCH', 'SHIPTO_NO_STRONG_MATCH',
+                                     'SHIPTO_SOLDTO_MISMATCH'
                  )
                  AND status IN ('Ouverte', 'Bloquante')""",
             [order_id],
@@ -1659,7 +1664,8 @@ class File2EdiStore:
         matched_partner: dict | None = None
         if explicit_code and current_code:
             matched_partner = self._find_partner_in_masterdata(
-                masterdata, current_code, soldto_code or None
+                masterdata, current_code, soldto_code or None,
+                allow_other_families=False,
             )
             if not matched_partner:
                 self._upsert_partner_anomaly(
@@ -1689,7 +1695,7 @@ class File2EdiStore:
                 }
             if not matched_partner:
                 self._upsert_partner_anomaly(
-                    conn, order_id, "SHIPTO_MASTERDATA_MISMATCH",
+                    conn, order_id, "SHIPTO_NO_STRONG_MATCH",
                     "L'adresse de livraison ne correspond pas à un Ship-to unique du Sold-to courant.",
                 )
                 return
@@ -1767,7 +1773,8 @@ class File2EdiStore:
                 )
 
         if current_code and not self._find_partner_in_masterdata(
-            masterdata, current_code, soldto_code or None
+            masterdata, current_code, soldto_code or None,
+            allow_other_families=False,
         ):
             self._upsert_partner_anomaly(
                 conn, order_id, "SHIPTO_SOLDTO_MISMATCH",

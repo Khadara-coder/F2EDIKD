@@ -243,8 +243,52 @@ def test_shipto_address_change_without_unique_match_creates_blocking_anomaly(tmp
         {"postalCode": "69000", "city": "LYON", "editSource": "manual"},
     )
 
-    anomaly = next(a for a in updated["anomalies"] if a["fieldName"] == "SHIPTO_MASTERDATA_MISMATCH")
+    anomaly = next(a for a in updated["anomalies"] if a["fieldName"] == "SHIPTO_NO_STRONG_MATCH")
     assert anomaly["status"] == "Bloquante"
+
+
+def test_shipto_from_another_soldto_family_is_blocked(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-cross-family"
+    store.save_order_review(_review(order_id))
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {"15019903": {"id": "15019903", "name": "Client Test"}},
+        "partners_by_soldto": {
+            "15019903": [{"id": "15019904", "name": "Depot A"}],
+            "OTHER": [{"id": "99999999", "name": "Foreign Depot"}],
+        },
+    })
+
+    updated = store.update_partner(
+        f"p-shipto-{order_id}",
+        {"partnerCode": "99999999", "editSource": "manual"},
+    )
+
+    anomaly = next(a for a in updated["anomalies"] if a["fieldName"] == "SHIPTO_SOLDTO_MISMATCH")
+    assert anomaly["status"] == "Bloquante"
+
+
+def test_precise_partner_anomaly_replaces_generic_partner_unresolved():
+    result = {
+        "status": "OK",
+        "filename": "order.pdf",
+        "pdf_hash": "partner-dedupe",
+        "order": {"po_number": "PO-1", "order_date": "2026-09-14"},
+        "customer": {"soldto": "", "shipto": "", "confidence": 0},
+        "lines": {"items": []},
+        "rejection": {
+            "decision": "REJECTED",
+            "details": [
+                {"code": "PARTNER_UNRESOLVED", "severity": "warning"},
+                {"code": "SOLDTO_NOT_FOUND", "severity": "blocking"},
+            ],
+        },
+    }
+
+    review = engine_to_order_review("partner-dedupe", "upl-partner", result)
+    codes = {a["fieldName"] for a in review["anomalies"]}
+    assert "SOLDTO_NOT_FOUND" in codes
+    assert "PARTNER_UNRESOLVED" not in codes
 
 
 def test_soldto_change_propagates_billing_and_revalidates_shipto(tmp_path, monkeypatch):

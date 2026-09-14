@@ -17,12 +17,11 @@ from src import rejection_catalog as rc  # noqa: E402
 # Required codes specified in the production blueprint
 REQUIRED_CODES = {
     "PDF_PARSE_FAILURE", "NOT_A_PDF", "ORDER_KEY_MISSING", "NO_VALID_ARTICLE",
-    "CONTRACT_KEYWORD", "CONTRACT_BREAK_ADDRESSES_MISSING",
-    "CONTRACT_BREAK_ARTICLES_MISSING", "CONTRACT_BREAK_SOLDTO_MISSING",
-    "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING",
+    "CONTRACT_KEYWORD",
+    "CONTRACT_BREAK_ARTICLES_MISSING",
     "SOLDTO_NOT_FOUND", "SOLDTO_AMBIGUOUS_MATCH",
-    "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY", "SHIPTO_NO_STRONG_MATCH",
-    "SHIPTO_AMBIGUOUS_MATCH",
+    "SHIPTO_CANDIDATES_MISSING", "SHIPTO_NO_STRONG_MATCH",
+    "SHIPTO_AMBIGUOUS_MATCH", "SHIPTO_SOLDTO_MISMATCH",
     "EDIFACT_MISSING_BGM", "EDIFACT_MISSING_DTM_137",
     "EDIFACT_MISSING_NAD_BY", "EDIFACT_MISSING_NAD_DP", "EDIFACT_MISSING_LIN",
     "ARTICLE_QUANTITY_INVALID", "UNIT_PRICE_MISSING",
@@ -33,8 +32,8 @@ REQUIRED_CODES = {
     "MASTERDATA_MISSING", "MASTERDATA_SCHEMA_INVALID",
     "MATERIAL_STATUS_INVALID", "RESUBMISSION_DETECTED",
     # Esker runtime codes
-    "DELIVERY_ADDRESS_INVALID", "NO_DELIVERY_ADDRESS", "ARTICLE_NOT_FOUND",
-    "PO_NUMBER_DUPLICATE", "CUSTOMER_NOT_DEFINED", "NOT_AN_ORDER",
+    "NO_DELIVERY_ADDRESS", "ARTICLE_NOT_FOUND",
+    "PO_NUMBER_DUPLICATE", "NOT_AN_ORDER",
     "NO_LINE_ITEMS", "QUANTITY_MISSING", "PRICE_MISSING",
 }
 
@@ -125,6 +124,13 @@ def test_code_aliases_resolve_to_canonical():
     assert rc.normalize_code("ORDER_DATE_MISSING") == "ORDER_DATE_INVALID"
     assert rc.normalize_code("INVALID_QUANTITY") == "ARTICLE_QUANTITY_INVALID"
     assert rc.normalize_code("SHIPTO_MISSING") == "SHIPTO_NO_STRONG_MATCH"
+    assert rc.normalize_code("CUSTOMER_NOT_DEFINED") == "SOLDTO_NOT_FOUND"
+    assert rc.normalize_code("CONTRACT_BREAK_SOLDTO_MISSING") == "SOLDTO_NOT_FOUND"
+    assert rc.normalize_code("CONTRACT_BREAK_ADDRESSES_MISSING") == "NO_DELIVERY_ADDRESS"
+    assert rc.normalize_code("DELIVERY_ADDRESS_INVALID") == "SHIPTO_NO_STRONG_MATCH"
+    assert rc.normalize_code("SHIPTO_MASTERDATA_MISMATCH") == "SHIPTO_NO_STRONG_MATCH"
+    assert rc.normalize_code("SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY") == "SHIPTO_NO_STRONG_MATCH"
+    assert rc.normalize_code("CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING") == "SHIPTO_CANDIDATES_MISSING"
     # Alias must inherit canonical entry + buttons
     entry = rc.get("PO_NUMBER_MISSING")
     assert entry["message_fr"] == rc.get("ORDER_KEY_MISSING")["message_fr"]
@@ -201,6 +207,13 @@ def test_salvage_and_resubmit_are_non_blocking_alerts():
     assert rc.issue_taxonomy("RESUBMISSION_DETECTED")["blocking"] is False
     assert rc.issue_taxonomy("PO_NUMBER_DUPLICATE")["blocking"] is False
     assert rc.issue_taxonomy("ARTICLE_NOT_FOUND")["blocking"] is True
+
+
+def test_partner_unresolved_is_non_blocking_summary():
+    tax = rc.issue_taxonomy("PARTNER_UNRESOLVED")
+    assert tax["domain"] == "PARTNER"
+    assert tax["issue_severity"] == "WARNING"
+    assert tax["blocking"] is False
 
 
 def test_legacy_severity_unchanged_for_consumers():

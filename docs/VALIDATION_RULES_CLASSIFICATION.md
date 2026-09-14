@@ -58,16 +58,13 @@ Ils ne jugent pas seulement le format : ils vérifient qu'une valeur extraite co
 
 | Codes principaux | Nature | Portée | Impact habituel |
 |---|---|---|---|
-| `PARTNER_UNRESOLVED` | référentielle | commande | bloquant/revue |
-| `CUSTOMER_NOT_DEFINED` | référentielle | commande | bloquant |
+| `PARTNER_UNRESOLVED` | synthèse de fallback | commande | revue non bloquante |
 | `SOLDTO_NOT_FOUND` | référentielle | commande | bloquant |
 | `SOLDTO_AMBIGUOUS_MATCH` | matching | commande | bloquant/revue |
-| `CONTRACT_BREAK_SOLDTO_MISSING` | référentielle | commande | bloquant |
-| `CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING` | référentielle | livraison | bloquant |
+| `SHIPTO_CANDIDATES_MISSING` | référentielle | livraison | bloquant/revue |
 | `SHIPTO_NO_STRONG_MATCH` | matching | livraison | bloquant/revue |
 | `SHIPTO_AMBIGUOUS_MATCH` | matching | livraison | bloquant/revue |
-| `SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY` | matching | livraison | bloquant/revue |
-| `DELIVERY_ADDRESS_INVALID` | référentielle | livraison | bloquant |
+| `SHIPTO_SOLDTO_MISMATCH` | relation référentielle | livraison | bloquant/revue |
 | `NO_DELIVERY_ADDRESS` | complétude/référentielle | livraison | bloquant |
 | `ARTICLE_NOT_FOUND` | référentielle | ligne | bloquant/revue |
 | `NO_VALID_ARTICLE` | référentielle | commande | bloquant/revue |

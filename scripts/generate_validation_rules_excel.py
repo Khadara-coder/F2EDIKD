@@ -30,18 +30,18 @@ HEADERS = [
 ]
 
 ENGINE_CODES = {
-    "DELIVERY_ADDRESS_INVALID", "NO_DELIVERY_ADDRESS", "ARTICLE_NOT_FOUND",
+    "NO_DELIVERY_ADDRESS", "SHIPTO_NO_STRONG_MATCH", "ARTICLE_NOT_FOUND",
     "QUANTITY_MISSING", "PRICE_MISSING", "ORDER_KEY_MISSING",
-    "PO_NUMBER_DUPLICATE", "CUSTOMER_NOT_DEFINED", "NOT_AN_ORDER",
+    "PO_NUMBER_DUPLICATE", "SOLDTO_NOT_FOUND", "NOT_AN_ORDER",
     "NO_LINE_ITEMS", "ORDER_CHANGE",
 }
 
 FUNCTIONS = {
-    "DELIVERY_ADDRESS_INVALID": "_check_delivery_address",
+    "SHIPTO_NO_STRONG_MATCH": "_check_delivery_address",
     "NO_DELIVERY_ADDRESS": "_check_delivery_address",
     "ORDER_KEY_MISSING": "_check_po_number",
     "PO_NUMBER_DUPLICATE": "_check_po_duplicate",
-    "CUSTOMER_NOT_DEFINED": "_check_customer",
+    "SOLDTO_NOT_FOUND": "_check_customer",
     "QUANTITY_MISSING": "_check_line_items",
     "PRICE_MISSING": "_check_line_items",
     "ARTICLE_NOT_FOUND": "_check_line_items",
@@ -240,8 +240,14 @@ def main():
     workbook.properties.creator = "File2EDI"
     workbook.properties.created = datetime.now()
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
-    workbook.save(OUTPUT)
-    print(OUTPUT)
+    output_path = OUTPUT
+    try:
+        workbook.save(output_path)
+    except PermissionError:
+        output_path = OUTPUT.with_name(f"{OUTPUT.stem}_updated{OUTPUT.suffix}")
+        workbook.save(output_path)
+        print(f"Avertissement: {OUTPUT.name} est verrouillé; fichier écrit dans {output_path.name}")
+    print(output_path)
     print(f"{len(rows)} lignes de règles générées")
 
 

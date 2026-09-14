@@ -245,7 +245,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
         seen_anomaly_ids.add(aid)
         anomalies.append(entry)
 
-    from src.rejection_catalog import format_rejection_message, normalize_code
+    from src.rejection_catalog import format_rejection_message, issue_taxonomy, normalize_code
 
     for i, d in enumerate(rej.get("details") or []):
         sev = "error" if d.get("severity") == "blocking" else "warning"
@@ -264,6 +264,18 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "status": "Bloquante" if sev == "error" else "Ouverte",
             "createdAt": _now(),
         })
+
+    precise_partner_codes = {
+        normalize_code(str(a.get("fieldName") or ""))
+        for a in anomalies
+        if normalize_code(str(a.get("fieldName") or "")) != "PARTNER_UNRESOLVED"
+        and issue_taxonomy(str(a.get("fieldName") or ""))["domain"] == "PARTNER"
+    }
+    if precise_partner_codes:
+        anomalies = [
+            a for a in anomalies
+            if normalize_code(str(a.get("fieldName") or "")) != "PARTNER_UNRESOLVED"
+        ]
     if invalid_date:
         _add_anomaly({
             "anomalyId": f"an-date-{order_id}",
