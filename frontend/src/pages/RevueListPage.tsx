@@ -434,14 +434,14 @@ export function RevueListPage() {
                     </button>
                   </TableHead>
                   <TableHead>
-                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
-                      Gestionnaire
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("createdAt")}>
+                      Soumis le
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </TableHead>
                   <TableHead>
-                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("createdAt")}>
-                      Date import
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
+                      Gestionnaire
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
                     </button>
                   </TableHead>
@@ -514,6 +514,7 @@ export function RevueListPage() {
                     <TableCell className="max-w-[120px] truncate text-sm text-muted-foreground">
                       {getDisplayName(row.submittedBy) || <span className="text-muted-foreground">-</span>}
                     </TableCell>
+                    <TableCell className="whitespace-nowrap text-sm">{formatDateTime(row.createdAt || row.date, displayTimeZone)}</TableCell>
                     <TableCell className="max-w-[160px] truncate text-sm text-muted-foreground">
                       {rowManagerKey(row) ? (
                         getManagerLabel(row)
@@ -521,7 +522,6 @@ export function RevueListPage() {
                         <span className="italic text-muted-foreground">{UNIDENTIFIED_LABEL}</span>
                       )}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-sm">{formatDateTime(row.createdAt || row.date, displayTimeZone)}</TableCell>
                     <TableCell>
                       <SourceBadge source={row.source} />
                     </TableCell>
