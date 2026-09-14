@@ -393,12 +393,6 @@ export function RevueListPage() {
                 <TableRow>
                   {/* 1. Identification */}
                   <TableHead>
-                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("submittedBy")}>
-                      Soumis par
-                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
-                    </button>
-                  </TableHead>
-                  <TableHead>
                     <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("fileName")}>
                       Fichier
                       <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
@@ -433,6 +427,12 @@ export function RevueListPage() {
                   </TableHead>
                   <TableHead>Envoyé vers SAP par</TableHead>
                   {/* 4. Suivi dossier */}
+                  <TableHead>
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("submittedBy")}>
+                      Soumis par
+                      <ArrowUpDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    </button>
+                  </TableHead>
                   <TableHead>
                     <button type="button" className="inline-flex items-center gap-1 hover:text-foreground" onClick={() => handleSort("processedBy")}>
                       Gestionnaire
