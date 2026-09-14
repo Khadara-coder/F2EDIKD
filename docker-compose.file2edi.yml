@@ -32,8 +32,6 @@ services:
     env_file:
       - path: .env
         required: false
-      - path: .env.vm
-        required: false
     # Secrets (DATABRICKS_TOKEN, SFTP_PASSWORD, …) stay in env_file only.
     # Do not set them here as ${VAR:-} — empty host interpolation would wipe .env.vm.
     environment:
