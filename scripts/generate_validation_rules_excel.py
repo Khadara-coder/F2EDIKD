@@ -31,7 +31,7 @@ HEADERS = [
 
 ENGINE_CODES = {
     "NO_DELIVERY_ADDRESS", "SHIPTO_NO_STRONG_MATCH", "ARTICLE_NOT_FOUND",
-    "QUANTITY_MISSING", "PRICE_MISSING", "ORDER_KEY_MISSING",
+    "QUANTITY_MISSING", "UNIT_PRICE_MISSING", "ORDER_KEY_MISSING",
     "PO_NUMBER_DUPLICATE", "SOLDTO_NOT_FOUND", "NOT_AN_ORDER",
     "NO_LINE_ITEMS", "ORDER_CHANGE",
 }
@@ -43,7 +43,7 @@ FUNCTIONS = {
     "PO_NUMBER_DUPLICATE": "_check_po_duplicate",
     "SOLDTO_NOT_FOUND": "_check_customer",
     "QUANTITY_MISSING": "_check_line_items",
-    "PRICE_MISSING": "_check_line_items",
+    "UNIT_PRICE_MISSING": "_check_line_items",
     "ARTICLE_NOT_FOUND": "_check_line_items",
     "NO_LINE_ITEMS": "_check_line_items",
     "NOT_AN_ORDER": "_check_document_type",

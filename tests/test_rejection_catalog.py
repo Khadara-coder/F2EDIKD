@@ -18,7 +18,6 @@ from src import rejection_catalog as rc  # noqa: E402
 REQUIRED_CODES = {
     "PDF_PARSE_FAILURE", "NOT_A_PDF", "ORDER_KEY_MISSING", "NO_VALID_ARTICLE",
     "CONTRACT_KEYWORD",
-    "CONTRACT_BREAK_ARTICLES_MISSING",
     "SOLDTO_NOT_FOUND", "SOLDTO_AMBIGUOUS_MATCH",
     "SHIPTO_CANDIDATES_MISSING", "SHIPTO_NO_STRONG_MATCH",
     "SHIPTO_AMBIGUOUS_MATCH", "SHIPTO_SOLDTO_MISMATCH",
@@ -34,7 +33,7 @@ REQUIRED_CODES = {
     # Esker runtime codes
     "NO_DELIVERY_ADDRESS", "ARTICLE_NOT_FOUND",
     "PO_NUMBER_DUPLICATE", "NOT_AN_ORDER",
-    "NO_LINE_ITEMS", "QUANTITY_MISSING", "PRICE_MISSING",
+    "NO_LINE_ITEMS", "QUANTITY_MISSING",
 }
 
 
@@ -131,6 +130,8 @@ def test_code_aliases_resolve_to_canonical():
     assert rc.normalize_code("SHIPTO_MASTERDATA_MISMATCH") == "SHIPTO_NO_STRONG_MATCH"
     assert rc.normalize_code("SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY") == "SHIPTO_NO_STRONG_MATCH"
     assert rc.normalize_code("CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING") == "SHIPTO_CANDIDATES_MISSING"
+    assert rc.normalize_code("CONTRACT_BREAK_ARTICLES_MISSING") == "NO_LINE_ITEMS"
+    assert rc.normalize_code("PRICE_MISSING") == "UNIT_PRICE_MISSING"
     # Alias must inherit canonical entry + buttons
     entry = rc.get("PO_NUMBER_MISSING")
     assert entry["message_fr"] == rc.get("ORDER_KEY_MISSING")["message_fr"]

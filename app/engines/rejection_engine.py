@@ -257,8 +257,8 @@ def _check_line_items(lignes: dict, materials: dict = None) -> list[dict]:
 
     if lines_without_price:
         rejections.append({
-            "code": "PRICE_MISSING",
-            "message": format_rejection_message("PRICE_MISSING", {"lines": lines_without_price}),
+            "code": "UNIT_PRICE_MISSING",
+            "message": format_rejection_message("UNIT_PRICE_MISSING", {"lines": lines_without_price}),
             "severity": "blocking",
             "details": {"lines": lines_without_price},
         })

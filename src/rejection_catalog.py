@@ -35,6 +35,8 @@ CODE_ALIASES: dict[str, str] = {
     "SHIPTO_MASTERDATA_MISMATCH": "SHIPTO_NO_STRONG_MATCH",
     "SHIPTO_WEAK_EVIDENCE_IN_SOLDTO_FAMILY": "SHIPTO_NO_STRONG_MATCH",
     "SOLDTO_MASTERDATA_UNAVAILABLE": "MASTERDATA_MISSING",
+    "CONTRACT_BREAK_ARTICLES_MISSING": "NO_LINE_ITEMS",
+    "PRICE_MISSING": "UNIT_PRICE_MISSING",
 }
 
 
@@ -110,10 +112,6 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
     },
     "CONTRACT_KEYWORD": {
         "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
-    },
-    "CONTRACT_BREAK_ARTICLES_MISSING": {
-        "domain": "ARTICLE", "stage": "EXTRACTION", "issue_severity": "ERROR",
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
     "SOLDTO_NOT_FOUND": {
@@ -202,10 +200,6 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
     },
     "QUANTITY_MISSING": {
         "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
-        "blocking": True, "scope": "LINE", "requires_user_input": True,
-    },
-    "PRICE_MISSING": {
-        "domain": "ARTICLE", "stage": "REVIEW", "issue_severity": "ERROR",
         "blocking": True, "scope": "LINE", "requires_user_input": True,
     },
     "DELIVERY_SFTP_FAILED": {
@@ -350,14 +344,6 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "manual_review_required": True,
         "message_fr": "Le document contient un mot-clé contrat/devis - ce n'est pas un bon de commande.",
         "message_en": "The document contains a contract/quotation keyword - this is not a purchase order.",
-    },
-    "CONTRACT_BREAK_ARTICLES_MISSING": {
-        "severity": "BLOCKER",
-        "business_status": "REJECTED",
-        "retry_allowed": False,
-        "manual_review_required": True,
-        "message_fr": "Aucune ligne article exploitable n'a été trouvée.",
-        "message_en": "No usable order line item was found.",
     },
     "SOLDTO_NOT_FOUND": {
         "severity": "BUSINESS_REJECT",
@@ -540,14 +526,6 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "message_fr": "La quantité est manquante sur une ou plusieurs lignes article.",
         "message_en": "Quantity is missing on one or more order lines.",
     },
-    "PRICE_MISSING": {
-        "severity": "BUSINESS_REJECT",
-        "business_status": "PENDING_USER_INPUT",
-        "retry_allowed": True,
-        "manual_review_required": True,
-        "message_fr": "Le prix unitaire est manquant sur une ou plusieurs lignes article.",
-        "message_en": "Unit price is missing on one or more order lines.",
-    },
     "DELIVERY_SFTP_FAILED": {
         "severity": "TECHNICAL",
         "business_status": "DELIVERY_FAILED",
@@ -587,7 +565,6 @@ REJECTION_ACTION_TEXT: dict[str, str] = {
     "NO_VALID_ARTICLE": "Merci de fournir les codes articles Bosch valides ou de corriger les codes client.",
     "CONTRACT_KEYWORD": "Merci de soumettre uniquement des bons de commande, pas des contrats ou devis.",
     "CONTRACT_BREAK_ADDRESSES_MISSING": "Merci de vérifier l'adresse de livraison dans le document.",
-    "CONTRACT_BREAK_ARTICLES_MISSING": "Merci de vérifier que le bon de commande contient des lignes articles.",
     "CONTRACT_BREAK_SOLDTO_MISSING": "Merci de vérifier le client (TVA, nom) dans les données maîtres.",
     "CONTRACT_BREAK_SHIPTO_CANDIDATES_MISSING": "Merci de vérifier l'adresse de livraison et les partenaires WE/SH.",
     "SOLDTO_NOT_FOUND": "Merci de vérifier la TVA / le client SOLD-TO dans les données maîtres.",
@@ -615,7 +592,6 @@ REJECTION_ACTION_TEXT: dict[str, str] = {
     "NOT_AN_ORDER": "Merci de soumettre uniquement des bons de commande (pas des devis, contrats ou proformas).",
     "NO_LINE_ITEMS": "Merci de vérifier que le bon de commande contient au moins une ligne article.",
     "QUANTITY_MISSING": "Merci de vérifier les quantités sur chaque ligne article du bon de commande.",
-    "PRICE_MISSING": "Merci de vérifier les prix unitaires sur chaque ligne article du bon de commande.",
     "DELIVERY_SFTP_FAILED": "Merci de vérifier la configuration SFTP ou de relancer uniquement l'envoi.",
     "DELIVERY_EMAIL_FAILED": "Merci de vérifier la configuration email ou de relancer uniquement l'envoi.",
 }
@@ -745,13 +721,6 @@ REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
         "button_reject": "Adresse introuvable",
         "auto_action_accept": "Relancer la résolution SHIP-TO",
         "auto_action_reject": "Clôturer faute d'adresse",
-        "mode": "Manuel",
-    },
-    "CONTRACT_BREAK_ARTICLES_MISSING": {
-        "button_accept": "Lignes articles corrigées",
-        "button_reject": "Aucune ligne exploitable",
-        "auto_action_accept": "Continuer avec les lignes saisies",
-        "auto_action_reject": "Clôturer faute de lignes",
         "mode": "Manuel",
     },
     "CONTRACT_BREAK_SOLDTO_MISSING": {
@@ -943,13 +912,6 @@ REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
         "auto_action_reject": "Mettre la ligne en attente",
         "mode": "Manuel",
     },
-    "PRICE_MISSING": {
-        "button_accept": "Prix renseigné",
-        "button_reject": "Prix manquant",
-        "auto_action_accept": "Continuer avec le prix saisi",
-        "auto_action_reject": "Mettre la ligne en attente",
-        "mode": "Manuel",
-    },
     "DELIVERY_SFTP_FAILED": {
         "button_accept": "Relancer l'envoi SFTP",
         "button_reject": "Abandonner l'envoi",
@@ -1003,7 +965,7 @@ def format_rejection_message(
             return f"Quantité manquante sur la/les ligne(s) : {', '.join(str(l) for l in lines)}."
         return base
 
-    if code == "PRICE_MISSING":
+    if code == "UNIT_PRICE_MISSING":
         lines = details.get("lines") or []
         if lines:
             return f"Prix unitaire manquant sur la/les ligne(s) : {', '.join(str(l) for l in lines)}."
