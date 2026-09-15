@@ -18,7 +18,15 @@ from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.worksheet.table import Table, TableStyleInfo
 
-from src.rejection_catalog import CODE_ALIASES, ISSUE_TAXONOMY, REJECTION_CATALOG
+from src.rejection_catalog import (
+    CODE_ALIASES,
+    ISSUE_TAXONOMY,
+    REJECTION_CATALOG,
+    action_text,
+    format_rejection_message,
+    issue_taxonomy,
+    review_actions,
+)
 
 HEADERS = [
     "Code canonique", "Alias / anciens codes", "Nom de la règle", "Description",
@@ -28,6 +36,53 @@ HEADERS = [
     "Message anglais", "Fichier / module", "Fonction", "Tests associés",
     "Existe dans le code ?", "Utilisée actuellement ?", "Observations",
 ]
+
+HEADERS_AFFICHAGES = [
+    "Ordre d'affichage", "Groupe / Domaine", "Libellé Groupe UI", "Code Anomalie",
+    "Message affiché (FR)", "Badge Sévérité", "Bloquante ?",
+    "Bouton Accepter / Valider", "Action au clic Accepter",
+    "Bouton Refuser / Rejeter", "Action au clic Refuser",
+    "Mode d'action", "Revue requise ?",
+    "Zone de correction dans l'écran Revue", "Conseil d'action opérateur",
+]
+
+DISPLAY_DOMAIN_ORDER = [
+    ("DOCUMENT", "Document", 1),
+    ("PARTNER", "Partenaire", 2),
+    ("DUPLICATE", "Doublon", 3),
+    ("ARTICLE", "Article", 4),
+    ("ORDER", "Commande", 5),
+    ("EDI", "EDI", 6),
+    ("DELIVERY", "Livraison", 7),
+    ("TECHNICAL", "Technique", 8),
+]
+
+DOMAIN_ORDER_MAP = {d[0]: (d[2], d[1]) for d in DISPLAY_DOMAIN_ORDER}
+
+SEVERITY_DISPLAY = {
+    "CRITICAL": "Critique",
+    "ERROR": "Erreur",
+    "WARNING": "Avertissement",
+    "INFO": "Info",
+}
+
+SEVERITY_SORT = {
+    "CRITICAL": 1,
+    "ERROR": 2,
+    "WARNING": 3,
+    "INFO": 4,
+}
+
+UI_ZONES = {
+    "DOCUMENT": "Panneau Aperçu PDF / Action Retraiter",
+    "PARTNER": "Informations générales (Sold-to / Ship-to)",
+    "DUPLICATE": "Tableau des anomalies / En-tête commande",
+    "ARTICLE": "Tableau Lignes de commande",
+    "ORDER": "Informations générales (N° commande, Dates)",
+    "EDI": "Validation & Génération EDIFACT",
+    "DELIVERY": "Envoi vers SAP / Livraison SFTP",
+    "TECHNICAL": "Données Maîtres / Système",
+}
 
 ENGINE_CODES = {
     "NO_DELIVERY_ADDRESS", "SHIPTO_NO_STRONG_MATCH", "ARTICLE_NOT_FOUND",
@@ -144,7 +199,40 @@ def rule_rows():
     return rows + SPECIAL_ROWS
 
 
-def write_table(ws, title, headers, rows, table_name):
+def display_rows():
+    rows = []
+    for code, entry in REJECTION_CATALOG.items():
+        tax = issue_taxonomy(code)
+        act = review_actions(code)
+        txt = action_text(code, lang="fr")
+        domain = tax["domain"]
+        order_num, domain_label = DOMAIN_ORDER_MAP.get(domain, (99, domain))
+
+        rows.append({
+            "order_num": order_num,
+            "order_display": f"{order_num}. {domain_label}",
+            "domain": domain,
+            "domain_label": domain_label,
+            "code": code,
+            "message_fr": entry["message_fr"],
+            "severity_display": SEVERITY_DISPLAY.get(tax["issue_severity"], tax["issue_severity"]),
+            "severity_sort": SEVERITY_SORT.get(tax["issue_severity"], 99),
+            "blocking": "Oui" if tax["blocking"] else "Non",
+            "button_accept": act["button_accept"],
+            "auto_action_accept": act["auto_action_accept"],
+            "button_reject": act["button_reject"],
+            "auto_action_reject": act["auto_action_reject"],
+            "mode": act["mode"],
+            "review": "Oui" if tax["requires_user_input"] else "Non",
+            "ui_zone": UI_ZONES.get(domain, "Écran Revue"),
+            "action_text": txt,
+        })
+
+    rows.sort(key=lambda r: (r["order_num"], r["severity_sort"], r["code"]))
+    return rows
+
+
+def write_table(ws, title, headers, rows, table_name, widths=None, blocking_col="I"):
     ws.append([title])
     ws.append(headers)
     for row in rows:
@@ -168,16 +256,23 @@ def write_table(ws, title, headers, rows, table_name):
     for row in ws.iter_rows(min_row=3):
         for cell in row:
             cell.alignment = Alignment(wrap_text=True, vertical="top")
-    widths = [28, 24, 28, 48, 16, 24, 28, 14, 12, 14, 20, 16, 22, 30, 42, 48, 48, 34, 30, 34, 18, 20, 44]
-    for index, width in enumerate(widths, start=1):
-        ws.column_dimensions[chr(64 + index)].width = width
-    ws.conditional_formatting.add(f"I3:I{end_row}", CellIsRule(operator="equal", formula=['"Oui"'], fill=PatternFill("solid", fgColor="F4CCCC")))
+    if widths:
+        for index, width in enumerate(widths, start=1):
+            ws.column_dimensions[chr(64 + index)].width = width
+    if blocking_col:
+        ws.conditional_formatting.add(
+            f"{blocking_col}3:{blocking_col}{end_row}",
+            CellIsRule(operator="equal", formula=['"Oui"'], fill=PatternFill("solid", fgColor="F4CCCC")),
+        )
     return end_row
 
 
 def main():
     rows = rule_rows()
+    disp_rows = display_rows()
     workbook = Workbook()
+
+    # 1. Onglet Règles (Catalogue technique & métier complet)
     rules = workbook.active
     rules.title = "Règles"
     values = [[row.get(key, "") for key in (
@@ -185,13 +280,26 @@ def main():
         "blocking", "severity", "review", "retry", "status", "auto", "action", "fr",
         "en", "module", "function", "tests", "exists", "used", "observations",
     )] for row in rows]
-    write_table(rules, "Inventaire des règles de validation File2EDI", HEADERS, values, "ValidationRules")
+    rules_widths = [28, 24, 28, 48, 16, 24, 28, 14, 12, 14, 20, 16, 22, 30, 42, 48, 48, 34, 30, 34, 18, 20, 44]
+    write_table(rules, "Inventaire des règles de validation File2EDI", HEADERS, values, "ValidationRules", widths=rules_widths, blocking_col="I")
 
+    # 2. Onglet Affichages (Anomalies affichées lors du traitement, boutons et actions)
+    affichages = workbook.create_sheet("Affichages")
+    affichages_values = [[row.get(key, "") for key in (
+        "order_display", "domain", "domain_label", "code", "message_fr",
+        "severity_display", "blocking", "button_accept", "auto_action_accept",
+        "button_reject", "auto_action_reject", "mode", "review",
+        "ui_zone", "action_text",
+    )] for row in disp_rows]
+    affichages_widths = [18, 16, 18, 28, 55, 16, 12, 30, 35, 30, 35, 15, 15, 38, 55]
+    write_table(affichages, "Anomalies affichées lors du traitement, boutons et actions de revue", HEADERS_AFFICHAGES, affichages_values, "AnomaliesAffichage", widths=affichages_widths, blocking_col="G")
+
+    # 3. Onglet Synthèse
     summary = workbook.create_sheet("Synthèse")
     summary.append(["Synthèse du catalogue de validations"])
     summary.append(["Métrique", "Valeur"])
     summary_data = [
-        ("Nombre total de lignes", len(rows)),
+        ("Nombre total de règles inventoriées", len(rows)),
         ("Règles canoniques du catalogue", len(REJECTION_CATALOG)),
         ("Critères documentés non canoniques", len(SPECIAL_ROWS)),
         ("Règles bloquantes", sum(row["blocking"] == "Oui" for row in rows)),
@@ -201,15 +309,16 @@ def main():
     for item in summary_data:
         summary.append(list(item))
     summary.append([])
-    summary.append(["Répartition par domaine", "Nombre"])
-    for key, count in sorted(Counter(row["domain"] for row in rows).items()):
-        summary.append([key, count])
+    summary.append(["Répartition par domaine (ordre d'affichage UI)", "Nombre"])
+    for domain_code, domain_label, order_idx in DISPLAY_DOMAIN_ORDER:
+        count = sum(1 for r in disp_rows if r["domain"] == domain_code)
+        summary.append([f"{order_idx}. {domain_label} ({domain_code})", count])
     summary.append([])
     summary.append(["Répartition par sévérité", "Nombre"])
     for key, count in sorted(Counter(row["severity"] for row in rows).items()):
         summary.append([key, count])
     summary.freeze_panes = "A3"
-    summary.column_dimensions["A"].width = 42
+    summary.column_dimensions["A"].width = 46
     summary.column_dimensions["B"].width = 18
     summary["A1"].font = Font(size=14, bold=True, color="FFFFFF")
     summary["A1"].fill = PatternFill("solid", fgColor="1F4E78")
@@ -218,16 +327,19 @@ def main():
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill("solid", fgColor="5B9BD5")
 
+    # 4. Onglet Incohérences
     issues = workbook.create_sheet("Incohérences")
     issue_headers = ["Sujet", "Constat", "Statut", "Action recommandée"]
     issue_rows = [
         ["ARTICLE_NOT_FOUND", "Le moteur renvoie maintenant blocking, conforme à la taxonomie.", "Corrigé", "Conserver le test de régression."],
         ["NO_LINE_ITEMS", "Le moteur renvoie maintenant blocking, car aucun EDIFACT ne peut être généré sans ligne.", "Corrigé", "Conserver le test de régression."],
         ["QUANTITY_INVALID", "Alias normalisé vers ARTICLE_QUANTITY_INVALID.", "Corrigé", "Utiliser le code canonique dans les nouveaux écrans et rapports."],
+        ["PRICE_MISSING", "Alias normalisé vers UNIT_PRICE_MISSING.", "Corrigé", "Utiliser UNIT_PRICE_MISSING partout."],
+        ["Codes PARTNER consolidés", "7 codes canoniques clairs avec gestion de famille et mismatch.", "Corrigé", "Vérification stricte de l'appartenance Ship-to/Sold-to."],
         ["SOLDTO_CONFIDENCE_MIN / SHIPTO_CONFIDENCE_MIN", "Critères présents dans la documentation mais absents du code et du catalogue.", "À clarifier", "Les traiter comme seuils de matching ou les implémenter explicitement."],
         ["Codes catalogue non détectés dans rejection_engine", "Certains codes sont gérés par d'autres modules ou restent à vérifier.", "À vérifier", "Ajouter un test d'intégration par code lorsque le flux sera stabilisé."],
     ]
-    write_table(issues, "Points de cohérence et actions", issue_headers, issue_rows, "ValidationIssues")
+    write_table(issues, "Points de cohérence et actions", issue_headers, issue_rows, "ValidationIssues", widths=[30, 50, 16, 45], blocking_col=None)
 
     thin = Side(style="thin", color="D9E2F3")
     for ws in workbook.worksheets:
