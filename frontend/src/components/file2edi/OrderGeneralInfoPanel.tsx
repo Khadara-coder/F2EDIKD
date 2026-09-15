@@ -33,11 +33,6 @@ function findCustomer(rows: MasterDataCustomerRow[], code: string) {
   return rows.find((r) => String(r.SOLDTO ?? "").trim() === normalized);
 }
 
-function findPartner(rows: MasterDataPartnerRow[], code: string) {
-  const normalized = code.trim();
-  return rows.find((r) => String(r.SHIPTO ?? "").trim() === normalized);
-}
-
 function toDateInput(value: string | null | undefined): string {
   if (!value) return "";
   const d = value.slice(0, 10);
@@ -99,18 +94,10 @@ export function OrderGeneralInfoPanel({
     staleTime: 60_000,
   });
 
-  const { data: shiptoMd } = useQuery({
-    queryKey: ["md-partner", shiptoCode],
-    queryFn: () => api.searchPartners(shiptoCode),
-    enabled: !!shiptoCode,
-    select: (res) => findPartner(res.results, shiptoCode),
-    staleTime: 60_000,
-  });
-
-  const soldtoSapId = cleanDisplay(soldtoMd?.SOLDTO ?? soldtoCode);
-  const soldtoName = cleanDisplay(soldtoMd?.NAME ?? soldto?.partnerName ?? "-");
+  const soldtoSapId = cleanDisplay(soldto?.partnerCode);
+  const soldtoName = cleanDisplay(soldto?.partnerName || "-");
   const clientName = cleanDisplay(
-    shipto?.partnerName || shiptoMd?.NAME || order.clientName || "-",
+    shipto?.partnerName || order.clientName || "-",
   );
 
   const handleSoldtoSelect = async (md: MasterDataCustomerRow) => {
@@ -132,23 +119,10 @@ export function OrderGeneralInfoPanel({
   };
 
   const handleSoldtoCodeSave = async (code: string) => {
-    const res = await api.searchCustomers(code);
-    const md = findCustomer(res.results, code);
-    const payload = {
-      partnerCode: cleanDisplay(md?.SOLDTO ?? code),
-      partnerName: cleanDisplay(md?.NAME ?? soldto?.partnerName),
-      addressLine1: cleanDisplay(md?.STRAS ?? soldto?.addressLine1),
-      postalCode: cleanDisplay(md?.PSTLZ ?? soldto?.postalCode),
-      city: cleanDisplay(md?.ORT01 ?? soldto?.city),
-      country: cleanDisplay(md?.LAND1 ?? soldto?.country),
-    };
-    await onUpdateSoldto(payload, {
-      editSources: {
-        partnerCode: "manual",
-        partnerName: "auto",
-        ...autoSources(ADDRESS_FIELDS),
-      },
-    });
+    await onUpdateSoldto(
+      { partnerCode: cleanDisplay(code) },
+      { editSource: "manual" },
+    );
   };
 
   const handleShiptoSelect = async (md: MasterDataPartnerRow) => {
@@ -170,23 +144,10 @@ export function OrderGeneralInfoPanel({
   };
 
   const handleShiptoCodeSave = async (code: string) => {
-    const res = await api.searchPartners(code);
-    const md = findPartner(res.results, code);
-    const payload = {
-      partnerCode: cleanDisplay(md?.SHIPTO ?? code),
-      partnerName: cleanDisplay(md?.NAME ?? shipto?.partnerName),
-      addressLine1: cleanDisplay(md?.STRAS ?? shipto?.addressLine1),
-      postalCode: cleanDisplay(md?.PSTLZ ?? shipto?.postalCode),
-      city: cleanDisplay(md?.ORT01 ?? shipto?.city),
-      country: cleanDisplay(md?.LAND1 ?? shipto?.country),
-    };
-    await onUpdateShipto(payload, {
-      editSources: {
-        partnerCode: "manual",
-        partnerName: "auto",
-        ...autoSources(ADDRESS_FIELDS),
-      },
-    });
+    await onUpdateShipto(
+      { partnerCode: cleanDisplay(code) },
+      { editSource: "manual" },
+    );
   };
 
   return (

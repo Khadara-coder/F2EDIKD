@@ -247,6 +247,51 @@ def test_shipto_address_change_without_unique_match_creates_blocking_anomaly(tmp
     assert anomaly["status"] == "Bloquante"
 
 
+def test_clearing_soldto_code_clears_address_and_raises_anomaly(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-clear-soldto"
+    store.save_order_review(_review(order_id))
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {"15019903": {"id": "15019903", "name": "Client Test"}},
+        "partners_by_soldto": {"15019903": []},
+    })
+
+    updated = store.update_partner(
+        f"p-soldto-{order_id}",
+        {"partnerCode": "", "editSource": "manual"},
+    )
+
+    soldto = next(p for p in updated["partners"] if p["partnerFunction"] == "soldto")
+    assert soldto["partnerCode"] == ""
+    assert soldto["partnerName"] == ""
+    assert soldto["addressLine1"] == ""
+    assert updated["order"]["clientName"] == ""
+    row = store._conn().execute("SELECT soldto FROM file2edi_orders WHERE order_id=?", [order_id]).fetchone()
+    assert not row["soldto"]
+    assert any(a["fieldName"] == "SOLDTO_NOT_FOUND" and a["status"] == "Bloquante" for a in updated["anomalies"])
+
+
+def test_clearing_shipto_code_clears_address_and_raises_anomaly(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-clear-shipto"
+    store.save_order_review(_review(order_id))
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {"15019903": {"id": "15019903", "name": "Client Test"}},
+        "partners_by_soldto": {"15019903": []},
+    })
+
+    updated = store.update_partner(
+        f"p-shipto-{order_id}",
+        {"partnerCode": "", "editSource": "manual"},
+    )
+
+    shipto = next(p for p in updated["partners"] if p["partnerFunction"] == "shipto")
+    assert shipto["partnerCode"] == ""
+    assert shipto["partnerName"] == ""
+    assert shipto["addressLine1"] == ""
+    assert any(a["fieldName"] == "SHIPTO_NO_STRONG_MATCH" and a["status"] == "Bloquante" for a in updated["anomalies"])
+
+
 def test_shipto_from_another_soldto_family_is_blocked(tmp_path, monkeypatch):
     store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
     order_id = "ord-cross-family"

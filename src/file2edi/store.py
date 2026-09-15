@@ -1477,6 +1477,50 @@ class File2EdiStore:
         if not soldto_row:
             return
         soldto_code = str(soldto_row["partner_code"] or "").strip()
+
+        if not soldto_code:
+            # User explicitly cleared the Sold-to code
+            conn.execute(
+                """UPDATE file2edi_order_partners
+                   SET partner_name='', address_line_1='', postal_code='', city='', country='FR',
+                       edited_fields_json=?, manually_edited=1
+                   WHERE partner_id=?""",
+                [json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}), partner_id],
+            )
+            conn.execute(
+                "UPDATE file2edi_orders SET client_name='', soldto=NULL, updated_at=? WHERE order_id=?",
+                [_now(), order_id],
+            )
+            self._sync_billing_partners_from_soldto(
+                conn,
+                order_id,
+                {
+                    "partnerCode": "",
+                    "partnerName": "",
+                    "addressLine1": "",
+                    "postalCode": "",
+                    "city": "",
+                    "country": "FR",
+                },
+                {key: "auto" for key in ("partnerCode", "partnerName", "addressLine1", "postalCode", "city", "country")},
+                "auto",
+            )
+            self._upsert_partner_anomaly(
+                conn, order_id, "SOLDTO_NOT_FOUND",
+                "Le compte Sold-to est manquant ou ne correspond pas à un client du masterdata.",
+            )
+            shipto = conn.execute(
+                """SELECT partner_id FROM file2edi_order_partners
+                   WHERE order_id=? AND partner_function='shipto'""",
+                [order_id],
+            ).fetchone()
+            if shipto:
+                self._upsert_partner_anomaly(
+                    conn, order_id, "SHIPTO_SOLDTO_MISMATCH",
+                    "Le compte Ship-to ne peut pas être validé sans Sold-to.",
+                )
+            return
+
         customer = (masterdata.get("customers_by_id") or {}).get(soldto_code)
         if not customer:
             from app.engines.shipto_scoring import normalize_text
@@ -1583,6 +1627,18 @@ class File2EdiStore:
             for partner in masterdata.get("partners_by_soldto", {}).get(soldto_code, []) or []:
                 if str(partner.get("id") or "") == code:
                     return partner
+            if str(soldto_code).strip() == code:
+                # Sold-to is its own Ship-to (livraison = facturation)
+                cust = (masterdata.get("customers_by_id") or {}).get(soldto_code)
+                if cust:
+                    return {
+                        "id": cust.get("id") or soldto_code,
+                        "name": cust.get("name") or "",
+                        "street": cust.get("street") or "",
+                        "city": cust.get("city") or "",
+                        "postal": cust.get("postal") or "",
+                        "country": cust.get("country") or "FR",
+                    }
             if not allow_other_families:
                 return None
         for partners in (masterdata.get("partners_by_soldto") or {}).values():
@@ -1662,7 +1718,21 @@ class File2EdiStore:
 
         current_code = str(shipto_row["partner_code"] or "").strip()
         matched_partner: dict | None = None
-        if explicit_code and current_code:
+        if explicit_code and not current_code:
+            # User explicitly cleared the Ship-to code
+            conn.execute(
+                """UPDATE file2edi_order_partners
+                   SET partner_code='', partner_name='', address_line_1='', postal_code='', city='', country='FR',
+                       edited_fields_json=?, manually_edited=1
+                   WHERE partner_id=?""",
+                [json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}), partner_id],
+            )
+            self._upsert_partner_anomaly(
+                conn, order_id, "SHIPTO_NO_STRONG_MATCH",
+                "Le compte Ship-to SAP est manquant.",
+            )
+            return
+        elif explicit_code and current_code:
             matched_partner = self._find_partner_in_masterdata(
                 masterdata, current_code, soldto_code or None,
                 allow_other_families=False,
