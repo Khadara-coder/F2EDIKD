@@ -229,6 +229,25 @@ def test_update_partner_ambiguous_address_keeps_empty_code(
     assert anomaly["status"] == "Bloquante"
 
 
+def test_update_partner_name_only_without_strict_match_keeps_typed_name(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A name-only edit that fails strict matching must not wipe the typed name."""
+    store = File2EdiStore(str(tmp_path / "f2e.db"), str(tmp_path / "intake"))
+    order_id = "ord-name-only"
+    store.save_order_review(_review_with_empty_shipto(order_id))
+    monkeypatch.setattr("app.masterdata.get_master_data", lambda: ISERBA_MD)
+
+    review = store.update_partner(
+        f"p-shipto-{order_id}",
+        {"partnerName": "ISERBA", "editSource": "manual"},
+    )
+    shipto = next(p for p in review["partners"] if p["partnerFunction"] == "shipto")
+    assert shipto["partnerName"] == "ISERBA"
+    assert not (shipto.get("partnerCode") or "").strip()
+    assert review["order"]["clientName"] == "ISERBA"
+
+
 def test_update_partner_manual_valid_code_closes_anomaly(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

@@ -1852,6 +1852,14 @@ class File2EdiStore:
                         "country": strict.get("country") or "FR",
                     }
             if not matched_partner:
+                if not explicit_code and not address_changed and not current_code:
+                    # Name-only edit on a shipto that had no prior code: keep what
+                    # the user just typed instead of wiping it, just flag for review.
+                    self._upsert_partner_anomaly(
+                        conn, order_id, "SHIPTO_NO_STRONG_MATCH",
+                        "Le nom saisi ne correspond à aucun Ship-to du Sold-to sélectionné avec certitude.",
+                    )
+                    return
                 conn.execute(
                     """UPDATE file2edi_order_partners
                        SET partner_code='', partner_name='', address_line_1='', postal_code='', city='', country='FR',
