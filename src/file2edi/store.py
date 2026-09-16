@@ -2747,6 +2747,7 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS rejection_message TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS rejected_by TEXT",
                 "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS rejected_at TEXT",
+                "ALTER TABLE file2edi_orders ADD COLUMN IF NOT EXISTS manually_edited_fields TEXT",
                 # User profile columns
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS email TEXT",
                 "ALTER TABLE file2edi_users ADD COLUMN IF NOT EXISTS sap_id TEXT",

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Check, Pencil, X } from "lucide-react";
+import { Check, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -38,6 +38,7 @@ export function EditableField({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value);
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const inputRef = useFocusWithoutScroll<HTMLInputElement>(editing && !readOnly);
   const errorId = fieldId ? `${fieldId}-error` : undefined;
 
@@ -48,9 +49,12 @@ export function EditableField({
   const handleSave = async () => {
     if (!onSave) return;
     setSaving(true);
+    setError(null);
     try {
       await onSave(draft);
       setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Échec de l'enregistrement");
     } finally {
       setSaving(false);
     }
@@ -58,6 +62,7 @@ export function EditableField({
 
   const handleCancel = () => {
     setDraft(value);
+    setError(null);
     setEditing(false);
   };
 
@@ -92,6 +97,10 @@ export function EditableField({
             type={type}
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") handleCancel();
+              if (e.key === "Enter") void handleSave();
+            }}
             className="h-8 text-sm"
             aria-invalid={invalid || undefined}
             aria-describedby={invalid && errorId ? errorId : undefined}
@@ -106,15 +115,6 @@ export function EditableField({
             aria-label={`Enregistrer ${label}`}
           >
             <Check className="h-4 w-4 text-emerald-600" />
-          </Button>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="h-8 w-8"
-            onClick={handleCancel}
-            aria-label={`Annuler la modification de ${label}`}
-          >
-            <X className="h-4 w-4 text-red-600" />
           </Button>
         </div>
       ) : (
@@ -150,6 +150,11 @@ export function EditableField({
       {invalid && errorMessage && (
         <p id={errorId} className="text-xs text-destructive" role="alert">
           {errorMessage}
+        </p>
+      )}
+      {error && (
+        <p className="text-xs text-red-600" role="alert">
+          {error}
         </p>
       )}
     </div>
