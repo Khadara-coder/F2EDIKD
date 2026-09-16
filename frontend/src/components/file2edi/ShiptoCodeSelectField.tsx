@@ -67,6 +67,7 @@ async function fetchPartnersForSoldtos(soldtoCodes: string[]): Promise<MasterDat
     const res = await api.searchPartners(soldto, 200);
     for (const row of res.results) {
       if (String(row.SOLDTO ?? "").trim() !== soldto) continue;
+      if (String(row.PARVW ?? "").trim().toUpperCase() !== "SH") continue;
       const shipto = String(row.SHIPTO ?? "").trim();
       if (!shipto) continue;
       byShipto.set(shipto, row);
@@ -140,7 +141,7 @@ export function ShiptoCodeSelectField({
       const q = filter.trim() || normalizeCode(value) || (currentShiptoName ?? "").trim();
       if (!q) return [];
       const res = await api.searchPartners(q, 200);
-      return res.results;
+      return res.results.filter((row) => String(row.PARVW ?? "").trim().toUpperCase() === "SH");
     },
     enabled: editing,
     staleTime: 60_000,

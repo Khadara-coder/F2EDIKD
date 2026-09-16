@@ -553,4 +553,5 @@ export interface MasterDataPartnerRow {
   ORT01?: string;
   PSTLZ?: string;
   LAND1?: string;
+  PARVW?: string;
 }
