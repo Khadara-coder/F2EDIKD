@@ -121,12 +121,18 @@ export function ShiptoNameSelectField({
   const vat = soldtoVat ?? soldtoMd?.VAT_NR ?? "";
 
   const { data: options = [], isLoading } = useQuery({
-    queryKey: ["md-partners-by-soldto", soldtoCode, vat],
+    queryKey: ["md-partners-by-soldto", soldtoCode, vat, filter],
     queryFn: async () => {
-      const soldtoCodes = await resolveSoldtoCodes(soldtoCode, vat);
-      return fetchPartnersForSoldtos(soldtoCodes);
+      if (soldtoCode.trim() || normalizeVat(vat)) {
+        const soldtoCodes = await resolveSoldtoCodes(soldtoCode, vat);
+        return fetchPartnersForSoldtos(soldtoCodes);
+      }
+      const q = filter.trim() || currentShiptoCode || value.trim();
+      if (!q) return [];
+      const res = await api.searchPartners(q, 200);
+      return res.results;
     },
-    enabled: editing && (!!soldtoCode.trim() || !!normalizeVat(vat)),
+    enabled: editing,
     staleTime: 60_000,
   });
 

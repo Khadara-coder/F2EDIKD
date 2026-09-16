@@ -292,6 +292,94 @@ def test_clearing_shipto_code_clears_address_and_raises_anomaly(tmp_path, monkey
     assert any(a["fieldName"] == "SHIPTO_NO_STRONG_MATCH" and a["status"] == "Bloquante" for a in updated["anomalies"])
 
 
+def test_shipto_infers_unique_distinct_parent_soldto_when_soldto_empty(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-infer-soldto"
+    review = _review(order_id)
+    # Clear soldto initially
+    review["partners"][0].update({"partnerCode": "", "partnerName": "", "addressLine1": "", "postalCode": "", "city": ""})
+    review["partners"][1].update({"partnerCode": "", "partnerName": "", "addressLine1": "", "postalCode": "", "city": ""})
+    store.save_order_review(review)
+
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {
+            "15015760": {"id": "15015760", "name": "ISERBA", "street": "303 RUE CHAT BOTTE", "postal": "01704", "city": "BEYNOST", "country": "FR"},
+        },
+        "partners_by_soldto": {
+            "15015760": [
+                {"id": "15018062", "name": ".ISERBA (AVI)", "street": "221 RUE LOUIS BRAILLE", "postal": "84310", "city": "MORIERES-LES-AVIGNON", "country": "FR"}
+            ]
+        },
+        "partners_by_shipto": {
+            "15018062": ["15015760"]
+        },
+    })
+
+    updated = store.update_partner(
+        f"p-shipto-{order_id}",
+        {"partnerCode": "15018062", "editSource": "manual"},
+    )
+
+    soldto = next(p for p in updated["partners"] if p["partnerFunction"] == "soldto")
+    shipto = next(p for p in updated["partners"] if p["partnerFunction"] == "shipto")
+
+    # Both Sold-to and Ship-to are populated automatically
+    assert soldto["partnerCode"] == "15015760"
+    assert soldto["partnerName"] == "ISERBA"
+    assert soldto["postalCode"] == "01704"
+    assert shipto["partnerCode"] == "15018062"
+    assert shipto["partnerName"] == ".ISERBA (AVI)"
+    assert shipto["postalCode"] == "84310"
+
+    # No blocking partner anomalies remain
+    partner_blockers = [
+        a for a in updated["anomalies"]
+        if a.get("status") == "Bloquante" and a.get("fieldName") in ("SOLDTO_NOT_FOUND", "SHIPTO_SOLDTO_MISMATCH", "SHIPTO_NO_STRONG_MATCH")
+    ]
+    assert not partner_blockers
+
+
+def test_shipto_does_not_infer_soldto_when_multiple_parents_or_same_code(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-no-infer-soldto"
+    review = _review(order_id)
+    # Clear soldto initially
+    review["partners"][0].update({"partnerCode": "", "partnerName": "", "addressLine1": "", "postalCode": "", "city": ""})
+    review["partners"][1].update({"partnerCode": "", "partnerName": "", "addressLine1": "", "postalCode": "", "city": ""})
+    store.save_order_review(review)
+
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {
+            "15001000": {"id": "15001000", "name": "Client 1", "street": "Street 1", "postal": "75001", "city": "PARIS"},
+            "15002000": {"id": "15002000", "name": "Client 2", "street": "Street 2", "postal": "75002", "city": "PARIS"},
+        },
+        "partners_by_soldto": {
+            "15001000": [{"id": "15009999", "name": "Shared Depot", "street": "Rue X", "postal": "69000", "city": "LYON"}],
+            "15002000": [{"id": "15009999", "name": "Shared Depot", "street": "Rue X", "postal": "69000", "city": "LYON"}],
+        },
+        "partners_by_shipto": {
+            "15009999": ["15001000", "15002000"]
+        },
+    })
+
+    # Setting shipto 15009999 which has 2 parents
+    updated = store.update_partner(
+        f"p-shipto-{order_id}",
+        {"partnerCode": "15009999", "editSource": "manual"},
+    )
+
+    soldto = next(p for p in updated["partners"] if p["partnerFunction"] == "soldto")
+    shipto = next(p for p in updated["partners"] if p["partnerFunction"] == "shipto")
+
+    # Sold-to remains empty
+    assert soldto["partnerCode"] == ""
+    assert soldto["partnerName"] == ""
+    assert shipto["partnerCode"] == "15009999"
+
+    # SOLDTO_NOT_FOUND anomaly is raised
+    assert any(a["fieldName"] == "SOLDTO_NOT_FOUND" and a["status"] == "Bloquante" for a in updated["anomalies"])
+
+
 def test_shipto_from_another_soldto_family_is_blocked(tmp_path, monkeypatch):
     store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
     order_id = "ord-cross-family"

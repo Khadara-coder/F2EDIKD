@@ -143,11 +143,19 @@ def _street_key(street: str) -> str:
     return normalize_text(street or "")
 
 
-def _partners_for_soldto(masterdata: dict, soldto_id: str) -> list[dict]:
-    partners = masterdata.get("partners_by_soldto", {}).get(soldto_id, []) or []
+def _partners_for_soldto(masterdata: dict, soldto_id: str | None = None) -> list[dict]:
+    soldto = str(soldto_id or "").strip()
+    if not soldto:
+        out = []
+        for partners in (masterdata.get("partners_by_soldto") or {}).values():
+            for p in partners or []:
+                if p.get("id"):
+                    out.append(p)
+        return out
+    partners = masterdata.get("partners_by_soldto", {}).get(soldto, []) or []
     return [
         p for p in partners
-        if p.get("id") and str(p.get("id")) != str(soldto_id)
+        if p.get("id") and str(p.get("id")) != str(soldto)
     ]
 
 

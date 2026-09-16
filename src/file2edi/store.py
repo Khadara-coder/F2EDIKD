@@ -1695,6 +1695,7 @@ class File2EdiStore:
     ) -> None:
         """Resolve Ship-to against the current Sold-to after every relevant edit."""
         from app.engines.shipto_scoring import match_shipto_strict
+        from app.masterdata import parent_soldtos_for_shipto
 
         shipto_row = conn.execute(
             """SELECT partner_code, partner_name, address_line_1, postal_code, city, country,
@@ -1706,7 +1707,7 @@ class File2EdiStore:
             return
 
         soldto_row = conn.execute(
-            """SELECT partner_code FROM file2edi_order_partners
+            """SELECT partner_id, partner_code FROM file2edi_order_partners
                WHERE order_id=? AND partner_function='soldto'""",
             [order_id],
         ).fetchone()
@@ -1718,6 +1719,7 @@ class File2EdiStore:
 
         current_code = str(shipto_row["partner_code"] or "").strip()
         matched_partner: dict | None = None
+
         if explicit_code and not current_code:
             # User explicitly cleared the Ship-to code
             conn.execute(
@@ -1732,16 +1734,57 @@ class File2EdiStore:
                 "Le compte Ship-to SAP est manquant.",
             )
             return
-        elif explicit_code and current_code:
+
+        # Infer Sold-to from Ship-to when Sold-to is empty and Ship-to has exactly 1 distinct Sold-to parent
+        if not soldto_code:
+            target_shipto = current_code
+            if not target_shipto and (address_changed or not explicit_code):
+                strict_target = match_shipto_strict(
+                    "",
+                    masterdata,
+                    name=str(shipto_row["partner_name"] or "") or None,
+                    street=str(shipto_row["address_line_1"] or "") or None,
+                    postal=str(shipto_row["postal_code"] or "") or None,
+                    city=str(shipto_row["city"] or "") or None,
+                )
+                if strict_target and strict_target.get("shipto_id"):
+                    target_shipto = str(strict_target["shipto_id"]).strip()
+
+            if target_shipto:
+                parents = parent_soldtos_for_shipto(masterdata, target_shipto)
+                diff_parents = [p for p in parents if p and p != target_shipto]
+                if len(diff_parents) == 1:
+                    inferred_soldto = diff_parents[0]
+                    if soldto_row:
+                        soldto_partner_id = soldto_row["partner_id"]
+                        conn.execute(
+                            "UPDATE file2edi_order_partners SET partner_code=? WHERE partner_id=?",
+                            [inferred_soldto, soldto_partner_id],
+                        )
+                        conn.execute(
+                            "UPDATE file2edi_orders SET soldto=? WHERE order_id=?",
+                            [inferred_soldto, order_id],
+                        )
+                        self._propagate_soldto_change(conn, order_id, soldto_partner_id)
+                        soldto_code = inferred_soldto
+                        current_code = target_shipto
+
+        if explicit_code and current_code:
             matched_partner = self._find_partner_in_masterdata(
                 masterdata, current_code, soldto_code or None,
-                allow_other_families=False,
+                allow_other_families=False if soldto_code else True,
             )
             if not matched_partner:
-                self._upsert_partner_anomaly(
-                    conn, order_id, "SHIPTO_SOLDTO_MISMATCH",
-                    "Le compte Ship-to sélectionné n'appartient pas au Sold-to courant.",
-                )
+                if soldto_code:
+                    self._upsert_partner_anomaly(
+                        conn, order_id, "SHIPTO_SOLDTO_MISMATCH",
+                        "Le compte Ship-to sélectionné n'appartient pas au Sold-to courant.",
+                    )
+                else:
+                    self._upsert_partner_anomaly(
+                        conn, order_id, "SHIPTO_NO_STRONG_MATCH",
+                        "Le compte Ship-to sélectionné est introuvable.",
+                    )
                 return
         elif soldto_code and (address_changed or not current_code):
             strict = match_shipto_strict(
@@ -1775,9 +1818,19 @@ class File2EdiStore:
             )
 
         if not matched_partner:
+            if not soldto_code:
+                self._upsert_partner_anomaly(
+                    conn, order_id, "SOLDTO_NOT_FOUND",
+                    "Le compte Sold-to est manquant ou ne correspond pas à un client du masterdata.",
+                )
             return
 
         self._close_delivery_address_anomalies(conn, order_id)
+        if not soldto_code:
+            self._upsert_partner_anomaly(
+                conn, order_id, "SOLDTO_NOT_FOUND",
+                "Le compte Sold-to est manquant ou ne correspond pas à un client du masterdata.",
+            )
 
         edited_fields: dict[str, str] = {}
         if shipto_row["edited_fields_json"]:

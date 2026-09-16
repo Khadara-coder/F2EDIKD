@@ -18,7 +18,18 @@ from app.text_utils import (
     significant_tokens,
 )
 
-MASTER_DATA_DIR = Path(os.getenv("MASTER_DATA_DIR", "/data/masterdata"))
+def _default_master_data_dir() -> Path:
+    env_dir = os.getenv("MASTER_DATA_DIR") or os.getenv("MASTERDATA_SOURCE_DIR") or os.getenv("MASTERDATA_RUNTIME_DIR")
+    if env_dir and Path(env_dir).exists():
+        return Path(env_dir)
+    app_root = Path(__file__).resolve().parents[1]
+    for rel in ("data/masterdata", "data/masterdata-staging", "/data/masterdata", "/app/data/masterdata"):
+        candidate = app_root / rel if not rel.startswith("/") else Path(rel)
+        if candidate.exists() and (candidate / "10564_Customers.csv").exists():
+            return candidate
+    return Path(env_dir or "/data/masterdata")
+
+MASTER_DATA_DIR = _default_master_data_dir()
 
 master_data_cache: dict[str, Any] | None = None
 master_data_cache_fingerprint: tuple | None = None
