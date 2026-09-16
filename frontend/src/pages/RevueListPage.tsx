@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { LoadingState } from "@/components/ui/loading-state";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Table,
@@ -371,7 +372,7 @@ export function RevueListPage() {
 
         <CardContent className="p-0">
           {ordersList.isLoading ? (
-            <p className="p-6 text-sm text-muted-foreground">Chargement…</p>
+            <LoadingState label="Chargement des commandes…" />
           ) : filteredItems.length === 0 ? (
             <div className="flex flex-col items-center gap-4 p-12 text-center">
               <p className="text-muted-foreground">Aucune commande ne correspond à ces filtres.</p>

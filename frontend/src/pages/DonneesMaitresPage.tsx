@@ -14,6 +14,7 @@ import {
 import { useDisplayTimeZone, useMasterData } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { api } from "@/lib/api";
+import { LoadingState } from "@/components/ui/loading-state";
 import {
   detectMasterDataKindFromFilename,
   masterDataKindLabel,
@@ -383,7 +384,7 @@ export function DonneesMaitresPage() {
                   Filtres
                 </Button>
                 {isFetching && (
-                  <span className="text-xs text-muted-foreground">Chargement…</span>
+                  <LoadingState label="Mise à jour…" className="py-0 text-xs" />
                 )}
                 {showFilters && (tab === "clients" || tab === "shipto") && (
                   <div className="flex w-full items-center gap-2">
