@@ -433,6 +433,7 @@ class File2EdiStore:
         _ensure_column("file2edi_orders", "rejection_message", "rejection_message TEXT")
         _ensure_column("file2edi_orders", "rejected_by", "rejected_by TEXT")
         _ensure_column("file2edi_orders", "rejected_at", "rejected_at TEXT")
+        _ensure_column("file2edi_orders", "manually_edited_fields", "manually_edited_fields TEXT")
 
         _ensure_column("file2edi_pdf_uploads", "file_name", "file_name TEXT")
 
@@ -1007,6 +1008,10 @@ class File2EdiStore:
             "createdAt": row["created_at"],
             "updatedAt": row["updated_at"],
         }
+        try:
+            order["manuallyEditedFields"] = json.loads(row.get("manually_edited_fields") or "[]")
+        except json.JSONDecodeError:
+            order["manuallyEditedFields"] = []
         review_required = order["globalConfidence"] < 90
         sap_export_done = (
             bool(row.get("sap_sent_at"))
@@ -1264,6 +1269,16 @@ class File2EdiStore:
                 sets.append(f"{col}=?")
                 vals.append(payload[k])
         if sets:
+            existing = conn.execute(
+                "SELECT manually_edited_fields FROM file2edi_orders WHERE order_id=?", [order_id],
+            ).fetchone()
+            try:
+                edited_fields = set(json.loads((existing["manually_edited_fields"] if existing else None) or "[]"))
+            except json.JSONDecodeError:
+                edited_fields = set()
+            edited_fields.update(k for k in field_map if k in payload)
+            sets.append("manually_edited_fields=?")
+            vals.append(json.dumps(sorted(edited_fields)))
             vals.append(_now())
             vals.append(order_id)
             conn.execute(
@@ -1515,6 +1530,15 @@ class File2EdiStore:
                 [order_id],
             ).fetchone()
             if shipto:
+                # Ship-to cannot stand without its Sold-to: void it the same way a
+                # Sold-to change that invalidates the Ship-to family does.
+                conn.execute(
+                    """UPDATE file2edi_order_partners
+                       SET partner_code='', partner_name='', address_line_1='', postal_code='', city='', country='FR',
+                           edited_fields_json=?, manually_edited=1
+                       WHERE partner_id=?""",
+                    [json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}), shipto["partner_id"]],
+                )
                 self._upsert_partner_anomaly(
                     conn, order_id, "SHIPTO_SOLDTO_MISMATCH",
                     "Le compte Ship-to ne peut pas être validé sans Sold-to.",
@@ -1729,6 +1753,10 @@ class File2EdiStore:
                    WHERE partner_id=?""",
                 [json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}), partner_id],
             )
+            conn.execute(
+                "UPDATE file2edi_orders SET client_name='', updated_at=? WHERE order_id=?",
+                [_now(), order_id],
+            )
             self._upsert_partner_anomaly(
                 conn, order_id, "SHIPTO_NO_STRONG_MATCH",
                 "Le compte Ship-to SAP est manquant.",
@@ -1775,6 +1803,17 @@ class File2EdiStore:
                 allow_other_families=False if soldto_code else True,
             )
             if not matched_partner:
+                conn.execute(
+                    """UPDATE file2edi_order_partners
+                       SET partner_code='', partner_name='', address_line_1='', postal_code='', city='', country='FR',
+                           edited_fields_json=?, manually_edited=1
+                       WHERE partner_id=?""",
+                    [json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}), partner_id],
+                )
+                conn.execute(
+                    "UPDATE file2edi_orders SET client_name='', updated_at=? WHERE order_id=?",
+                    [_now(), order_id],
+                )
                 if soldto_code:
                     self._upsert_partner_anomaly(
                         conn, order_id, "SHIPTO_SOLDTO_MISMATCH",
@@ -1819,6 +1858,12 @@ class File2EdiStore:
                            edited_fields_json=?, manually_edited=1
                        WHERE partner_id=?""",
                     [json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}), partner_id],
+                )
+                # Void the header fields that depend on the Ship-to, but never the
+                # order/delivery dates or the customer order number.
+                conn.execute(
+                    "UPDATE file2edi_orders SET client_name='', updated_at=? WHERE order_id=?",
+                    [_now(), order_id],
                 )
                 self._upsert_partner_anomaly(
                     conn, order_id, "SHIPTO_NO_STRONG_MATCH",

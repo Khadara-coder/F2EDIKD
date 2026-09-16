@@ -268,7 +268,43 @@ def test_clearing_soldto_code_clears_address_and_raises_anomaly(tmp_path, monkey
     assert updated["order"]["clientName"] == ""
     row = store._conn().execute("SELECT soldto FROM file2edi_orders WHERE order_id=?", [order_id]).fetchone()
     assert not row["soldto"]
+    # Ship-to cannot stand without its Sold-to: it must be voided too.
+    shipto = next(p for p in updated["partners"] if p["partnerFunction"] == "shipto")
+    assert shipto["partnerCode"] == ""
+    assert shipto["partnerName"] == ""
+    assert shipto["addressLine1"] == ""
+    assert any(a["fieldName"] == "SHIPTO_SOLDTO_MISMATCH" and a["status"] == "Bloquante" for a in updated["anomalies"])
     assert any(a["fieldName"] == "SOLDTO_NOT_FOUND" and a["status"] == "Bloquante" for a in updated["anomalies"])
+
+
+def test_soldto_change_voids_mismatched_shipto_but_keeps_order_number_and_dates(tmp_path, monkeypatch):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-soldto-change-voids-shipto"
+    store.save_order_review(_review(order_id))
+    monkeypatch.setattr(store, "_load_masterdata_safe", lambda: {
+        "customers_by_id": {
+            "15019904": {"id": "15019904", "name": "New Customer", "street": "1 RUE C", "postal": "69000", "city": "LYON", "country": "FR"},
+        },
+        "partners_by_soldto": {"15019904": []},
+    })
+
+    updated = store.update_partner(
+        f"p-soldto-{order_id}",
+        {"partnerCode": "15019904", "editSource": "manual"},
+    )
+
+    shipto = next(p for p in updated["partners"] if p["partnerFunction"] == "shipto")
+    assert shipto["partnerCode"] == ""
+    assert shipto["partnerName"] == ""
+    assert shipto["addressLine1"] == ""
+    assert updated["order"]["clientName"] == ""
+    # N° commande client is never part of the "vidage": it must survive the Sold-to change.
+    assert updated["order"]["customerOrderNumber"] == "PO-123"
+    # Dates are never part of the "vidage" either.
+    assert updated["order"]["orderDate"] == "2026-08-04"
+    assert updated["order"]["requestedDeliveryDate"] == "2026-08-05"
+    assert any(a["fieldName"] == "SHIPTO_NO_STRONG_MATCH" and a["status"] == "Bloquante" for a in updated["anomalies"])
+
 
 
 def test_clearing_shipto_code_clears_address_and_raises_anomaly(tmp_path, monkeypatch):
@@ -289,6 +325,7 @@ def test_clearing_shipto_code_clears_address_and_raises_anomaly(tmp_path, monkey
     assert shipto["partnerCode"] == ""
     assert shipto["partnerName"] == ""
     assert shipto["addressLine1"] == ""
+    assert updated["order"]["clientName"] == ""
     assert any(a["fieldName"] == "SHIPTO_NO_STRONG_MATCH" and a["status"] == "Bloquante" for a in updated["anomalies"])
 
 
@@ -399,6 +436,13 @@ def test_shipto_from_another_soldto_family_is_blocked(tmp_path, monkeypatch):
 
     anomaly = next(a for a in updated["anomalies"] if a["fieldName"] == "SHIPTO_SOLDTO_MISMATCH")
     assert anomaly["status"] == "Bloquante"
+    # An explicitly selected Ship-to outside the Sold-to family must be voided,
+    # consistent with every other mismatch/void path.
+    shipto = next(p for p in updated["partners"] if p["partnerFunction"] == "shipto")
+    assert shipto["partnerCode"] == ""
+    assert shipto["partnerName"] == ""
+    assert shipto["addressLine1"] == ""
+    assert updated["order"]["clientName"] == ""
 
 
 def test_precise_partner_anomaly_replaces_generic_partner_unresolved():
@@ -469,6 +513,18 @@ def test_soldto_change_propagates_billing_and_revalidates_shipto(tmp_path, monke
     assert by_function["billto"]["partnerCode"] == "15019904"
     assert by_function["payer"]["partnerCode"] == "15019904"
     assert by_function["shipto"]["partnerCode"] == "15019905"
+
+
+def test_header_edits_are_tracked_as_manually_edited_fields(tmp_path):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    order_id = "ord-header-manual-flags"
+    store.save_order_review(_review(order_id))
+
+    updated = store.update_order_header(order_id, {"customerOrderNumber": "PO-999"})
+    assert updated["order"]["manuallyEditedFields"] == ["customerOrderNumber"]
+
+    updated = store.update_order_header(order_id, {"orderDate": "2026-08-06"})
+    assert sorted(updated["order"]["manuallyEditedFields"]) == ["customerOrderNumber", "orderDate"]
 
 
 def test_order_number_change_refreshes_duplicate_anomaly(tmp_path, monkeypatch):
