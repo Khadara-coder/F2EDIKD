@@ -16,6 +16,7 @@ import { StatusBadge } from "@/components/file2edi/StatusBadge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { LoadingState } from "@/components/ui/loading-state";
 import {
   Select,
   SelectContent,
@@ -154,7 +155,7 @@ export function HistoriquePage() {
       <Card>
         <CardContent className="p-0">
           {isLoading ? (
-            <p className="p-6 text-muted-foreground">Chargement…</p>
+            <LoadingState label="Chargement de l’historique…" />
           ) : (
             <div className="overflow-x-auto">
             <Table>

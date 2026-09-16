@@ -49,6 +49,15 @@
 }
 
 @layer utilities {
+  @keyframes loading-bar {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(300%);
+    }
+  }
+
   .scrollbar-thin-x {
     @apply overflow-x-auto;
     -webkit-overflow-scrolling: touch;

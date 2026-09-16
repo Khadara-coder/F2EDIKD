@@ -11,6 +11,7 @@ import { HistoriquePage } from "@/pages/HistoriquePage";
 import { DonneesMaitresPage } from "@/pages/DonneesMaitresPage";
 import { ParametresPage } from "@/pages/ParametresPage";
 import { LoginPage } from "@/pages/LoginPage";
+import { LoadingState } from "@/components/ui/loading-state";
 import type { AppRole } from "@/types";
 
 const queryClient = new QueryClient({
@@ -26,7 +27,7 @@ function GuardedRoute({ minRole, children }: { minRole: AppRole; children: JSX.E
   const { data: me, isLoading } = useCurrentUser();
 
   if (isLoading) {
-    return <div className="p-6 text-sm text-muted-foreground">Chargement du profil utilisateur...</div>;
+    return <LoadingState label="Chargement du profil utilisateur…" />;
   }
 
   if (!hasAtLeastRole(me?.role, minRole)) {
@@ -58,11 +59,7 @@ function AppContent() {
   const meQuery = useCurrentUser();
 
   if (meQuery.isLoading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-background">
-        <div className="text-sm text-muted-foreground">Chargement de la session utilisateur...</div>
-      </div>
-    );
+    return <LoadingState label="Chargement de la session utilisateur…" fullScreen />;
   }
 
   if (isUnauthorized(meQuery.error) || meQuery.data?.authenticated === false) {
