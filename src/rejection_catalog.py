@@ -84,7 +84,7 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
     },
     "DELIVERY_DATE_INVALID": {
         "domain": "ORDER", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
-        "blocking": True, "scope": "LINE", "requires_user_input": True,
+        "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
     "ORDER_CHANGE": {
         "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
@@ -280,8 +280,8 @@ REJECTION_CATALOG: dict[str, RejectionEntry] = {
         "business_status": "PENDING_USER_INPUT",
         "retry_allowed": True,
         "manual_review_required": True,
-        "message_fr": "Une date de livraison de ligne est manquante ou invalide.",
-        "message_en": "A line delivery date is missing or invalid.",
+        "message_fr": "La date de livraison est manquante ou invalide.",
+        "message_en": "The delivery date is missing or invalid.",
     },
     "ORDER_CHANGE": {
         "severity": "BUSINESS_REJECT",
@@ -552,7 +552,7 @@ REJECTION_ACTION_TEXT: dict[str, str] = {
     "NOT_A_PDF": "Merci de déposer un fichier PDF valide.",
     "ORDER_KEY_MISSING": "Merci de renseigner le numéro de commande client.",
     "ORDER_DATE_INVALID": "Merci de corriger la date de commande (format JJ/MM/AAAA).",
-    "DELIVERY_DATE_INVALID": "Merci de corriger la date de livraison sur la ligne concernée.",
+    "DELIVERY_DATE_INVALID": "Merci de corriger la date de livraison de la commande.",
     "ORDER_CHANGE": "Merci de soumettre un bon de commande initial, pas une modification.",
     "MASTERDATA_MISSING": "Merci de synchroniser les données maîtres (Clients / Articles) puis de relancer.",
     "MASTERDATA_SCHEMA_INVALID": "Merci de vérifier le fichier masterdata et de resynchroniser.",
@@ -629,7 +629,7 @@ REJECTION_REVIEW_ACTIONS: dict[str, ReviewActions] = {
         "button_accept": "Date livraison corrigée",
         "button_reject": "Date livraison invalide",
         "auto_action_accept": "Continuer avec la date saisie",
-        "auto_action_reject": "Mettre la ligne en attente",
+        "auto_action_reject": "Mettre la commande en attente",
         "mode": "Manuel",
     },
     "ORDER_CHANGE": {

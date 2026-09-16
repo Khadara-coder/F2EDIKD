@@ -31,17 +31,6 @@ def _qty_from_description(description: str) -> float:
     return 0.0
 
 
-def _looks_like_valid_date(value: object) -> bool:
-    text = str(value or "").strip()
-    if not text:
-        return True
-    try:
-        from src.edifact_builder import parse_date_to_ccyymmdd
-        return bool(parse_date_to_ccyymmdd(text))
-    except Exception:
-        return bool(re.fullmatch(r"\d{4}-\d{2}-\d{2}", text))
-
-
 def _line_quality_confidence(items: list[dict]) -> int:
     if not items:
         return 0
@@ -286,22 +275,6 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "status": "Ouverte",
             "createdAt": _now(),
         })
-    for ln in parsed_lines:
-        if not _looks_like_valid_date(ln.get("deliveryDate")):
-            _add_anomaly({
-                "anomalyId": f"an-line-date-{order_id}-{ln.get('lineNumber')}",
-                "orderId": order_id,
-                "lineId": ln.get("lineId"),
-                "severity": "warning",
-                "fieldName": "DELIVERY_DATE_INVALID",
-                "message": (
-                    f"Ligne {ln.get('lineNumber')} : "
-                    f"{format_rejection_message('DELIVERY_DATE_INVALID')} "
-                    f"({ln.get('deliveryDate')})"
-                ),
-                "status": "Ouverte",
-                "createdAt": _now(),
-            })
 
     # Materials Statut: disponible OK; no sale = arrêté; Statut MATNR = remplacement; absent = erreur.
     try:
@@ -349,22 +322,6 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
         anomalies = [
             a for a in anomalies
             if normalize_code(str(a.get("fieldName") or "")) != "ARTICLE_NOT_FOUND"
-        ]
-
-    # Per-line DELIVERY_DATE_INVALID already covers invalid dates —
-    # drop order-level entries of the same code (no lineId).
-    has_line_delivery_date = any(
-        normalize_code(str(a.get("fieldName") or "")) == "DELIVERY_DATE_INVALID"
-        and a.get("lineId")
-        for a in anomalies
-    )
-    if has_line_delivery_date:
-        anomalies = [
-            a for a in anomalies
-            if not (
-                normalize_code(str(a.get("fieldName") or "")) == "DELIVERY_DATE_INVALID"
-                and not a.get("lineId")
-            )
         ]
 
     trace_steps = [

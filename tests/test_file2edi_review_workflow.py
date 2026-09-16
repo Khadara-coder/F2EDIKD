@@ -74,7 +74,9 @@ def _review(order_id: str = "ord-workflow") -> dict:
     }
 
 
-def test_engine_review_flags_invalid_line_delivery_date():
+def test_engine_review_ignores_garbled_line_level_delivery_date():
+    """Delivery date is a document-level field; a stray per-line value must not
+    raise a per-line anomaly."""
     result = {
         "status": "OK",
         "filename": "order.pdf",
@@ -96,14 +98,12 @@ def test_engine_review_flags_invalid_line_delivery_date():
 
     review = engine_to_order_review("hash-1", "upl-1", result)
 
-    assert any(
-        anomaly["fieldName"] == "DELIVERY_DATE_INVALID"
-        and "date de livraison" in anomaly["message"].lower()
-        for anomaly in review["anomalies"]
-    )
+    assert not any(anomaly["fieldName"] == "DELIVERY_DATE_INVALID" for anomaly in review["anomalies"])
 
 
-def test_engine_review_drops_order_level_delivery_date_when_line_exists():
+def test_engine_review_keeps_document_level_delivery_date_rejection():
+    """An upstream document-level DELIVERY_DATE_INVALID rejection must surface
+    as-is; it is no longer deduped in favour of a (removed) per-line anomaly."""
     result = {
         "status": "OK",
         "filename": "order.pdf",
@@ -139,8 +139,8 @@ def test_engine_review_drops_order_level_delivery_date_when_line_exists():
         if a.get("fieldName") == "DELIVERY_DATE_INVALID"
     ]
     assert len(delivery) == 1
-    assert delivery[0].get("lineId")
-    assert "Ligne" in delivery[0]["message"]
+    assert not delivery[0].get("lineId")
+    assert delivery[0]["message"] == "La date de livraison est manquante ou invalide."
 
 
 def test_global_confidence_is_capped_by_line_quality():
