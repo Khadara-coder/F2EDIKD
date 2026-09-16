@@ -10,17 +10,20 @@ import { useFocusWithoutScroll } from "@/hooks/useFocusWithoutScroll";
 import { cn } from "@/lib/utils";
 import type { MasterDataCustomerRow, MasterDataPartnerRow, PartnerEditSource } from "@/types";
 
-interface ShiptoNameSelectFieldProps {
+interface ShiptoCodeSelectFieldProps {
   label: string;
   value: string;
   soldtoCode: string;
-  currentShiptoCode?: string;
+  currentShiptoName?: string;
   soldtoVat?: string;
+  fieldId?: string;
+  invalid?: boolean;
+  errorMessage?: string;
   manuallyEdited?: boolean;
   editFlag?: PartnerEditSource;
   className?: string;
   onSelect: (partner: MasterDataPartnerRow) => Promise<void> | void;
-  onClear?: () => Promise<void> | void;
+  onClear: () => Promise<void> | void;
 }
 
 function normalizeVat(vat: string): string {
@@ -69,7 +72,7 @@ async function fetchPartnersForSoldtos(soldtoCodes: string[]): Promise<MasterDat
     }
   }
   return [...byShipto.values()].sort((a, b) =>
-    String(a.ORT01 ?? "").localeCompare(String(b.ORT01 ?? ""), "fr", { sensitivity: "base" }),
+    String(a.SHIPTO ?? "").localeCompare(String(b.SHIPTO ?? ""), "fr", { sensitivity: "base" }),
   );
 }
 
@@ -81,8 +84,8 @@ function partnerMatchesFilter(row: MasterDataPartnerRow, filter: string): boolea
   const q = filter.trim().toLowerCase();
   if (!q) return true;
   const haystack = [
-    row.NAME,
     row.SHIPTO,
+    row.NAME,
     row.ORT01,
     row.PSTLZ,
     row.STRAS,
@@ -93,18 +96,21 @@ function partnerMatchesFilter(row: MasterDataPartnerRow, filter: string): boolea
   return haystack.includes(q);
 }
 
-export function ShiptoNameSelectField({
+export function ShiptoCodeSelectField({
   label,
   value,
   soldtoCode,
-  currentShiptoCode,
+  currentShiptoName,
   soldtoVat,
+  fieldId,
+  invalid,
+  errorMessage,
   manuallyEdited,
   editFlag,
   className,
   onSelect,
   onClear,
-}: ShiptoNameSelectFieldProps) {
+}: ShiptoCodeSelectFieldProps) {
   const [editing, setEditing] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const filterRef = useFocusWithoutScroll<HTMLInputElement>(editing);
@@ -124,13 +130,13 @@ export function ShiptoNameSelectField({
   const vat = soldtoVat ?? soldtoMd?.VAT_NR ?? "";
 
   const { data: options = [], isLoading } = useQuery({
-    queryKey: ["md-partners-by-soldto", soldtoCode, vat, filter],
+    queryKey: ["md-partners-by-soldto-code", soldtoCode, vat, filter],
     queryFn: async () => {
       if (soldtoCode.trim() || normalizeVat(vat)) {
         const soldtoCodes = await resolveSoldtoCodes(soldtoCode, vat);
         return fetchPartnersForSoldtos(soldtoCodes);
       }
-      const q = filter.trim() || currentShiptoCode || value.trim();
+      const q = filter.trim() || normalizeCode(value) || (currentShiptoName ?? "").trim();
       if (!q) return [];
       const res = await api.searchPartners(q, 200);
       return res.results;
@@ -144,7 +150,7 @@ export function ShiptoNameSelectField({
       options
         .filter((row) => partnerMatchesFilter(row, filter))
         .sort((a, b) =>
-          String(a.ORT01 ?? "").localeCompare(String(b.ORT01 ?? ""), "fr", { sensitivity: "base" }),
+          String(a.SHIPTO ?? "").localeCompare(String(b.SHIPTO ?? ""), "fr", { sensitivity: "base" }),
         ),
     [options, filter],
   );
@@ -159,11 +165,11 @@ export function ShiptoNameSelectField({
 
   useEffect(() => {
     if (!editing || !options.length) return;
-    const current = normalizeCode(currentShiptoCode);
+    const current = normalizeCode(value);
     if (!current) return;
     const match = options.find((row) => normalizeCode(row.SHIPTO) === current);
     if (match) setSelected(match);
-  }, [editing, options, currentShiptoCode]);
+  }, [editing, options, value]);
 
   useEffect(() => {
     if (!editing) return;
@@ -173,13 +179,6 @@ export function ShiptoNameSelectField({
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
-
-  const handleOpen = () => {
-    setFilter("");
-    setSelected(null);
-    setError(null);
-    setEditing(true);
-  };
 
   const applySelection = async (row: MasterDataPartnerRow) => {
     setSelected(row);
@@ -196,7 +195,6 @@ export function ShiptoNameSelectField({
   };
 
   const handleClear = async () => {
-    if (!onClear) return;
     setSaving(true);
     setError(null);
     try {
@@ -212,7 +210,7 @@ export function ShiptoNameSelectField({
   const flag = editFlag ?? (manuallyEdited ? "manual" : undefined);
 
   return (
-    <div className={cn("group space-y-1", className)}>
+    <div className={cn("group space-y-1", className)} id={fieldId}>
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         {flag === "manual" && (
@@ -227,26 +225,38 @@ export function ShiptoNameSelectField({
         )}
       </div>
 
-      <div ref={anchorRef} className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-sm font-medium">{value || "-"}</span>
+      <div
+        ref={anchorRef}
+        className={cn(
+          "flex min-w-0 items-center gap-2 rounded px-1 -mx-1",
+          invalid && "border border-red-500 bg-red-50/50",
+        )}
+      >
+        <span className={cn("truncate font-mono text-sm font-semibold", !value && "text-muted-foreground font-normal")}>
+          {value || "-"}
+        </span>
         <button
           type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            handleOpen();
+            setEditing(true);
           }}
           className="shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+          title="Modifier le compte client ship-to SAP"
         >
           <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
       </div>
+      {invalid && errorMessage && (
+        <p className="text-xs text-red-600 font-medium">{errorMessage}</p>
+      )}
 
       <FloatingLookupPanel
         anchorRef={anchorRef}
         open={editing}
         onClose={() => setEditing(false)}
-        minWidth={360}
+        minWidth={380}
       >
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -254,11 +264,11 @@ export function ShiptoNameSelectField({
               ref={filterRef}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filtrer par nom, ville, code ship-to…"
+              placeholder="Rechercher par code ship-to, nom, ville…"
               className="h-8 text-sm flex-1"
               disabled={saving}
             />
-            {onClear && (value || currentShiptoCode) && (
+            {value && (
               <Button
                 type="button"
                 variant="outline"
@@ -273,6 +283,7 @@ export function ShiptoNameSelectField({
               </Button>
             )}
           </div>
+
           <div className="max-h-52 overflow-y-auto rounded-md border bg-background">
             {isLoading ? (
               <p className="p-3 text-sm text-muted-foreground">Chargement des ship-to…</p>
@@ -298,10 +309,11 @@ export function ShiptoNameSelectField({
                           isSelected && "bg-violet-50",
                         )}
                       >
+                        <p className="text-sm font-mono font-bold text-violet-700">{code}</p>
                         <p className="text-sm font-medium">{partnerLabel(row)}</p>
                         <p className="text-xs text-muted-foreground">
-                          {code}
-                          {row.ORT01 ? ` · ${row.ORT01}` : ""}
+                          {row.STRAS ? `${row.STRAS} · ` : ""}
+                          {row.ORT01 ? `${row.ORT01}` : ""}
                           {row.PSTLZ ? ` (${row.PSTLZ})` : ""}
                         </p>
                       </button>
@@ -312,7 +324,7 @@ export function ShiptoNameSelectField({
             )}
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
-          <p className="text-xs text-muted-foreground">Cliquez sur une ligne pour appliquer · Échap pour fermer</p>
+          <p className="text-xs text-muted-foreground">Cliquez sur un lieu de livraison pour l'appliquer · Échap pour fermer</p>
         </div>
       </FloatingLookupPanel>
     </div>

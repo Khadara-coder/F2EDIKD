@@ -1595,7 +1595,7 @@ class File2EdiStore:
             self._rematch_shipto_after_update(
                 conn, order_id, shipto["partner_id"],
                 explicit_code=False,
-                address_changed=True,
+                address_changed=False,
             )
         else:
             self._close_delivery_address_anomalies(conn, order_id)
@@ -1786,30 +1786,43 @@ class File2EdiStore:
                         "Le compte Ship-to sélectionné est introuvable.",
                     )
                 return
-        elif soldto_code and (address_changed or not current_code):
-            strict = match_shipto_strict(
-                soldto_code,
-                masterdata,
-                name=str(shipto_row["partner_name"] or "") or None,
-                street=str(shipto_row["address_line_1"] or "") or None,
-                postal=str(shipto_row["postal_code"] or "") or None,
-                city=str(shipto_row["city"] or "") or None,
-            )
-            if strict and strict.get("shipto_id"):
+        elif soldto_code:
+            is_current_valid = bool(current_code and self._find_partner_in_masterdata(masterdata, current_code, soldto_code, allow_other_families=False))
+            if is_current_valid and not address_changed:
                 matched_partner = self._find_partner_in_masterdata(
-                    masterdata, strict["shipto_id"], soldto_code
-                ) or {
-                    "id": strict["shipto_id"],
-                    "name": strict.get("name") or "",
-                    "street": strict.get("street") or "",
-                    "city": strict.get("city") or "",
-                    "postal": strict.get("postal") or "",
-                    "country": strict.get("country") or "FR",
-                }
+                    masterdata, current_code, soldto_code, allow_other_families=False
+                )
+            else:
+                strict = match_shipto_strict(
+                    soldto_code,
+                    masterdata,
+                    name=str(shipto_row["partner_name"] or "") or None,
+                    street=str(shipto_row["address_line_1"] or "") or None,
+                    postal=str(shipto_row["postal_code"] or "") or None,
+                    city=str(shipto_row["city"] or "") or None,
+                )
+                if strict and strict.get("shipto_id"):
+                    matched_partner = self._find_partner_in_masterdata(
+                        masterdata, strict["shipto_id"], soldto_code
+                    ) or {
+                        "id": strict["shipto_id"],
+                        "name": strict.get("name") or "",
+                        "street": strict.get("street") or "",
+                        "city": strict.get("city") or "",
+                        "postal": strict.get("postal") or "",
+                        "country": strict.get("country") or "FR",
+                    }
             if not matched_partner:
+                conn.execute(
+                    """UPDATE file2edi_order_partners
+                       SET partner_code='', partner_name='', address_line_1='', postal_code='', city='', country='FR',
+                           edited_fields_json=?, manually_edited=1
+                       WHERE partner_id=?""",
+                    [json.dumps({key: "auto" for key in ("partnerName", "addressLine1", "postalCode", "city", "country")}), partner_id],
+                )
                 self._upsert_partner_anomaly(
                     conn, order_id, "SHIPTO_NO_STRONG_MATCH",
-                    "L'adresse de livraison ne correspond pas à un Ship-to unique du Sold-to courant.",
+                    "L'adresse de livraison ne correspond pas à un Ship-to du Sold-to sélectionné.",
                 )
                 return
         elif current_code:

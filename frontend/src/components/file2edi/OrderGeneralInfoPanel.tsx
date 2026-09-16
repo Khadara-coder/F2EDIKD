@@ -1,7 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
 import { api } from "@/lib/api";
 import { EditableField } from "@/components/file2edi/EditableField";
+import { SoldtoCodeSelectField } from "@/components/file2edi/SoldtoCodeSelectField";
 import { SoldtoNameSelectField } from "@/components/file2edi/SoldtoNameSelectField";
+import { ShiptoCodeSelectField } from "@/components/file2edi/ShiptoCodeSelectField";
 import { ShiptoNameSelectField } from "@/components/file2edi/ShiptoNameSelectField";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { MasterDataCustomerRow, MasterDataPartnerRow, Order, OrderPartner, PartnerEditSource, PartnerFieldKey, UpdateOrderHeaderPayload } from "@/types";
@@ -112,15 +114,15 @@ export function OrderGeneralInfoPanel({
     await onUpdateSoldto(payload, {
       editSources: {
         partnerName: "manual",
-        partnerCode: "auto",
+        partnerCode: "manual",
         ...autoSources(ADDRESS_FIELDS),
       },
     });
   };
 
-  const handleSoldtoCodeSave = async (code: string) => {
+  const handleSoldtoClear = async () => {
     await onUpdateSoldto(
-      { partnerCode: cleanDisplay(code) },
+      { partnerCode: "" },
       { editSource: "manual" },
     );
   };
@@ -137,15 +139,15 @@ export function OrderGeneralInfoPanel({
     await onUpdateShipto(payload, {
       editSources: {
         partnerName: "manual",
-        partnerCode: "auto",
+        partnerCode: "manual",
         ...autoSources(ADDRESS_FIELDS),
       },
     });
   };
 
-  const handleShiptoCodeSave = async (code: string) => {
+  const handleShiptoClear = async () => {
     await onUpdateShipto(
-      { partnerCode: cleanDisplay(code) },
+      { partnerCode: "" },
       { editSource: "manual" },
     );
   };
@@ -161,14 +163,16 @@ export function OrderGeneralInfoPanel({
             Sold-to / AG
           </p>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <EditableField
+            <SoldtoCodeSelectField
               label="Compte SAP sold-to"
               value={soldtoSapId}
+              currentSoldtoName={soldtoName !== "-" ? soldtoName : undefined}
               fieldId="field-soldto"
               invalid={Boolean(fieldErrors?.soldto)}
               errorMessage={fieldErrors?.soldto}
               editFlag={soldtoFieldFlag(soldto, "partnerCode")}
-              onSave={handleSoldtoCodeSave}
+              onSelect={handleSoldtoSelect}
+              onClear={handleSoldtoClear}
             />
             <SoldtoNameSelectField
               label="Nom client sold-to"
@@ -176,6 +180,7 @@ export function OrderGeneralInfoPanel({
               currentSoldtoCode={soldtoCode || soldtoSapId}
               editFlag={soldtoFieldFlag(soldto, "partnerName")}
               onSelect={handleSoldtoSelect}
+              onClear={handleSoldtoClear}
             />
           </div>
         </section>
@@ -193,14 +198,18 @@ export function OrderGeneralInfoPanel({
                 onUpdateHeader({ customerOrderNumber: cleanDisplay(v) })
               }
             />
-            <EditableField
+            <ShiptoCodeSelectField
               label="Compte client ship-to SAP"
               value={cleanDisplay(shiptoCode)}
+              soldtoCode={soldtoCode || soldtoSapId}
+              currentShiptoName={clientName !== "-" ? clientName : undefined}
+              soldtoVat={soldtoMd?.VAT_NR}
               fieldId="field-shipto"
               invalid={Boolean(fieldErrors?.shipto)}
               errorMessage={fieldErrors?.shipto}
               editFlag={shiptoFieldFlag(shipto, "partnerCode")}
-              onSave={handleShiptoCodeSave}
+              onSelect={handleShiptoSelect}
+              onClear={handleShiptoClear}
             />
             <ShiptoNameSelectField
               label="Nom du client"
@@ -211,6 +220,7 @@ export function OrderGeneralInfoPanel({
               editFlag={shiptoFieldFlag(shipto, "partnerName")}
               className="sm:col-span-2 lg:col-span-2"
               onSelect={handleShiptoSelect}
+              onClear={handleShiptoClear}
             />
             <EditableField
               label="Date de la commande"

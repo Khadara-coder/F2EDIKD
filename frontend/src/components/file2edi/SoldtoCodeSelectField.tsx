@@ -8,84 +8,40 @@ import { Button } from "@/components/ui/button";
 import { FloatingLookupPanel } from "@/components/file2edi/FloatingLookupPanel";
 import { useFocusWithoutScroll } from "@/hooks/useFocusWithoutScroll";
 import { cn } from "@/lib/utils";
-import type { MasterDataCustomerRow, MasterDataPartnerRow, PartnerEditSource } from "@/types";
+import type { MasterDataCustomerRow, PartnerEditSource } from "@/types";
 
-interface ShiptoNameSelectFieldProps {
+interface SoldtoCodeSelectFieldProps {
   label: string;
   value: string;
-  soldtoCode: string;
-  currentShiptoCode?: string;
-  soldtoVat?: string;
+  currentSoldtoName?: string;
+  fieldId?: string;
+  invalid?: boolean;
+  errorMessage?: string;
   manuallyEdited?: boolean;
   editFlag?: PartnerEditSource;
   className?: string;
-  onSelect: (partner: MasterDataPartnerRow) => Promise<void> | void;
-  onClear?: () => Promise<void> | void;
-}
-
-function normalizeVat(vat: string): string {
-  return vat.replace(/\s+/g, "").toUpperCase();
+  onSelect: (customer: MasterDataCustomerRow) => Promise<void> | void;
+  onClear: () => Promise<void> | void;
 }
 
 function normalizeCode(code: string | undefined): string {
   return String(code ?? "").trim();
 }
 
-function findCustomer(rows: MasterDataCustomerRow[], code: string) {
-  const normalized = code.trim();
-  return rows.find((r) => String(r.SOLDTO ?? "").trim() === normalized);
+function customerLabel(row: MasterDataCustomerRow): string {
+  return String(row.NAME ?? "").trim() || String(row.SOLDTO ?? "").trim();
 }
 
-async function resolveSoldtoCodes(soldtoCode: string, soldtoVat?: string): Promise<string[]> {
-  const codes = new Set<string>();
-  const trimmed = soldtoCode.trim();
-  if (trimmed) codes.add(trimmed);
-
-  const vat = normalizeVat(soldtoVat ?? "");
-  if (vat) {
-    const res = await api.searchCustomers(vat, 200);
-    for (const row of res.results) {
-      if (normalizeVat(String(row.VAT_NR ?? "")) === vat) {
-        const code = String(row.SOLDTO ?? "").trim();
-        if (code) codes.add(code);
-      }
-    }
-  }
-
-  return [...codes];
-}
-
-async function fetchPartnersForSoldtos(soldtoCodes: string[]): Promise<MasterDataPartnerRow[]> {
-  if (!soldtoCodes.length) return [];
-
-  const byShipto = new Map<string, MasterDataPartnerRow>();
-  for (const soldto of soldtoCodes) {
-    const res = await api.searchPartners(soldto, 200);
-    for (const row of res.results) {
-      if (String(row.SOLDTO ?? "").trim() !== soldto) continue;
-      const shipto = String(row.SHIPTO ?? "").trim();
-      if (!shipto) continue;
-      byShipto.set(shipto, row);
-    }
-  }
-  return [...byShipto.values()].sort((a, b) =>
-    String(a.ORT01 ?? "").localeCompare(String(b.ORT01 ?? ""), "fr", { sensitivity: "base" }),
-  );
-}
-
-function partnerLabel(row: MasterDataPartnerRow): string {
-  return String(row.NAME ?? "").trim() || String(row.SHIPTO ?? "").trim();
-}
-
-function partnerMatchesFilter(row: MasterDataPartnerRow, filter: string): boolean {
+function customerMatchesFilter(row: MasterDataCustomerRow, filter: string): boolean {
   const q = filter.trim().toLowerCase();
   if (!q) return true;
   const haystack = [
+    row.SOLDTO,
     row.NAME,
-    row.SHIPTO,
     row.ORT01,
     row.PSTLZ,
     row.STRAS,
+    row.VAT_NR,
     row.LAND1,
   ]
     .map((v) => String(v ?? "").toLowerCase())
@@ -93,58 +49,46 @@ function partnerMatchesFilter(row: MasterDataPartnerRow, filter: string): boolea
   return haystack.includes(q);
 }
 
-export function ShiptoNameSelectField({
+export function SoldtoCodeSelectField({
   label,
   value,
-  soldtoCode,
-  currentShiptoCode,
-  soldtoVat,
+  currentSoldtoName,
+  fieldId,
+  invalid,
+  errorMessage,
   manuallyEdited,
   editFlag,
   className,
   onSelect,
   onClear,
-}: ShiptoNameSelectFieldProps) {
+}: SoldtoCodeSelectFieldProps) {
   const [editing, setEditing] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
   const filterRef = useFocusWithoutScroll<HTMLInputElement>(editing);
   const [filter, setFilter] = useState("");
   const [saving, setSaving] = useState(false);
-  const [selected, setSelected] = useState<MasterDataPartnerRow | null>(null);
+  const [selected, setSelected] = useState<MasterDataCustomerRow | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const { data: soldtoMd } = useQuery({
-    queryKey: ["md-customer", soldtoCode],
-    queryFn: () => api.searchCustomers(soldtoCode),
-    enabled: !!soldtoCode.trim(),
-    select: (res) => findCustomer(res.results, soldtoCode),
-    staleTime: 60_000,
-  });
-
-  const vat = soldtoVat ?? soldtoMd?.VAT_NR ?? "";
+  const searchQuery = filter.trim() || normalizeCode(value) || (currentSoldtoName ?? "").trim();
 
   const { data: options = [], isLoading } = useQuery({
-    queryKey: ["md-partners-by-soldto", soldtoCode, vat, filter],
+    queryKey: ["md-customers-search-code", searchQuery],
     queryFn: async () => {
-      if (soldtoCode.trim() || normalizeVat(vat)) {
-        const soldtoCodes = await resolveSoldtoCodes(soldtoCode, vat);
-        return fetchPartnersForSoldtos(soldtoCodes);
-      }
-      const q = filter.trim() || currentShiptoCode || value.trim();
-      if (!q) return [];
-      const res = await api.searchPartners(q, 200);
+      if (!searchQuery) return [];
+      const res = await api.searchCustomers(searchQuery, 200);
       return res.results;
     },
-    enabled: editing,
+    enabled: editing && !!searchQuery,
     staleTime: 60_000,
   });
 
   const filteredOptions = useMemo(
     () =>
       options
-        .filter((row) => partnerMatchesFilter(row, filter))
+        .filter((row) => customerMatchesFilter(row, filter))
         .sort((a, b) =>
-          String(a.ORT01 ?? "").localeCompare(String(b.ORT01 ?? ""), "fr", { sensitivity: "base" }),
+          String(a.SOLDTO ?? "").localeCompare(String(b.SOLDTO ?? ""), "fr", { sensitivity: "base" }),
         ),
     [options, filter],
   );
@@ -159,11 +103,11 @@ export function ShiptoNameSelectField({
 
   useEffect(() => {
     if (!editing || !options.length) return;
-    const current = normalizeCode(currentShiptoCode);
+    const current = normalizeCode(value);
     if (!current) return;
-    const match = options.find((row) => normalizeCode(row.SHIPTO) === current);
+    const match = options.find((row) => normalizeCode(row.SOLDTO) === current);
     if (match) setSelected(match);
-  }, [editing, options, currentShiptoCode]);
+  }, [editing, options, value]);
 
   useEffect(() => {
     if (!editing) return;
@@ -174,14 +118,7 @@ export function ShiptoNameSelectField({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [editing]);
 
-  const handleOpen = () => {
-    setFilter("");
-    setSelected(null);
-    setError(null);
-    setEditing(true);
-  };
-
-  const applySelection = async (row: MasterDataPartnerRow) => {
+  const applySelection = async (row: MasterDataCustomerRow) => {
     setSelected(row);
     setSaving(true);
     setError(null);
@@ -196,7 +133,6 @@ export function ShiptoNameSelectField({
   };
 
   const handleClear = async () => {
-    if (!onClear) return;
     setSaving(true);
     setError(null);
     try {
@@ -212,7 +148,7 @@ export function ShiptoNameSelectField({
   const flag = editFlag ?? (manuallyEdited ? "manual" : undefined);
 
   return (
-    <div className={cn("group space-y-1", className)}>
+    <div className={cn("group space-y-1", className)} id={fieldId}>
       <div className="flex items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">{label}</span>
         {flag === "manual" && (
@@ -227,26 +163,38 @@ export function ShiptoNameSelectField({
         )}
       </div>
 
-      <div ref={anchorRef} className="flex min-w-0 items-center gap-2">
-        <span className="truncate text-sm font-medium">{value || "-"}</span>
+      <div
+        ref={anchorRef}
+        className={cn(
+          "flex min-w-0 items-center gap-2 rounded px-1 -mx-1",
+          invalid && "border border-red-500 bg-red-50/50",
+        )}
+      >
+        <span className={cn("truncate font-mono text-sm font-semibold", !value && "text-muted-foreground font-normal")}>
+          {value || "-"}
+        </span>
         <button
           type="button"
           onClick={(e) => {
             e.preventDefault();
             e.stopPropagation();
-            handleOpen();
+            setEditing(true);
           }}
           className="shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+          title="Modifier le compte SAP sold-to"
         >
           <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
         </button>
       </div>
+      {invalid && errorMessage && (
+        <p className="text-xs text-red-600 font-medium">{errorMessage}</p>
+      )}
 
       <FloatingLookupPanel
         anchorRef={anchorRef}
         open={editing}
         onClose={() => setEditing(false)}
-        minWidth={360}
+        minWidth={380}
       >
         <div className="space-y-2">
           <div className="flex items-center gap-2">
@@ -254,11 +202,11 @@ export function ShiptoNameSelectField({
               ref={filterRef}
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filtrer par nom, ville, code ship-to…"
+              placeholder="Rechercher par code sold-to, nom, ville, TVA…"
               className="h-8 text-sm flex-1"
               disabled={saving}
             />
-            {onClear && (value || currentShiptoCode) && (
+            {value && (
               <Button
                 type="button"
                 variant="outline"
@@ -266,27 +214,28 @@ export function ShiptoNameSelectField({
                 className="h-8 text-xs text-rose-700 border-rose-300 hover:bg-rose-50 gap-1 px-2 shrink-0"
                 onClick={handleClear}
                 disabled={saving}
-                title="Vider et réinitialiser le compte Ship-to et l'adresse"
+                title="Vider et réinitialiser le compte Sold-to"
               >
                 <Trash2 className="h-3.5 w-3.5" />
                 Vider
               </Button>
             )}
           </div>
+
           <div className="max-h-52 overflow-y-auto rounded-md border bg-background">
             {isLoading ? (
-              <p className="p-3 text-sm text-muted-foreground">Chargement des ship-to…</p>
+              <p className="p-3 text-sm text-muted-foreground">Chargement des clients…</p>
             ) : filteredOptions.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">
                 {options.length === 0
-                  ? "Aucun ship-to trouvé pour ce sold-to."
+                  ? "Aucun client trouvé. Saisissez un filtre."
                   : "Aucun résultat pour ce filtre."}
               </p>
             ) : (
               <ul className="divide-y">
                 {filteredOptions.map((row) => {
-                  const code = normalizeCode(row.SHIPTO);
-                  const isSelected = normalizeCode(selected?.SHIPTO) === code;
+                  const code = normalizeCode(row.SOLDTO);
+                  const isSelected = normalizeCode(selected?.SOLDTO) === code;
                   return (
                     <li key={code}>
                       <button
@@ -298,10 +247,11 @@ export function ShiptoNameSelectField({
                           isSelected && "bg-violet-50",
                         )}
                       >
-                        <p className="text-sm font-medium">{partnerLabel(row)}</p>
+                        <p className="text-sm font-mono font-bold text-violet-700">{code}</p>
+                        <p className="text-sm font-medium">{customerLabel(row)}</p>
                         <p className="text-xs text-muted-foreground">
-                          {code}
-                          {row.ORT01 ? ` · ${row.ORT01}` : ""}
+                          {row.STRAS ? `${row.STRAS} · ` : ""}
+                          {row.ORT01 ? `${row.ORT01}` : ""}
                           {row.PSTLZ ? ` (${row.PSTLZ})` : ""}
                         </p>
                       </button>
@@ -312,7 +262,7 @@ export function ShiptoNameSelectField({
             )}
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
-          <p className="text-xs text-muted-foreground">Cliquez sur une ligne pour appliquer · Échap pour fermer</p>
+          <p className="text-xs text-muted-foreground">Cliquez sur un client pour l'appliquer · Échap pour fermer</p>
         </div>
       </FloatingLookupPanel>
     </div>

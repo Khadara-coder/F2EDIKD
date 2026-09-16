@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import { api } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { FloatingLookupPanel } from "@/components/file2edi/FloatingLookupPanel";
 import { useFocusWithoutScroll } from "@/hooks/useFocusWithoutScroll";
 import { cn } from "@/lib/utils";
@@ -17,6 +18,7 @@ interface SoldtoNameSelectFieldProps {
   editFlag?: PartnerEditSource;
   className?: string;
   onSelect: (customer: MasterDataCustomerRow) => Promise<void> | void;
+  onClear?: () => Promise<void> | void;
 }
 
 function normalizeCode(code: string | undefined): string {
@@ -52,6 +54,7 @@ export function SoldtoNameSelectField({
   editFlag,
   className,
   onSelect,
+  onClear,
 }: SoldtoNameSelectFieldProps) {
   const [editing, setEditing] = useState(false);
   const anchorRef = useRef<HTMLDivElement>(null);
@@ -123,6 +126,20 @@ export function SoldtoNameSelectField({
     }
   };
 
+  const handleClear = async () => {
+    if (!onClear) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onClear();
+      setEditing(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Échec de la suppression");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const flag = editFlag ?? (manuallyEdited ? "manual" : undefined);
 
   return (
@@ -163,14 +180,30 @@ export function SoldtoNameSelectField({
         minWidth={360}
       >
         <div className="space-y-2">
-          <Input
-            ref={filterRef}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value)}
-            placeholder="Filtrer par nom, code sold-to, ville, TVA…"
-            className="h-8 text-sm"
-            disabled={saving}
-          />
+          <div className="flex items-center gap-2">
+            <Input
+              ref={filterRef}
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filtrer par nom, code sold-to, ville, TVA…"
+              className="h-8 text-sm flex-1"
+              disabled={saving}
+            />
+            {onClear && (value || currentSoldtoCode) && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs text-rose-700 border-rose-300 hover:bg-rose-50 gap-1 px-2 shrink-0"
+                onClick={handleClear}
+                disabled={saving}
+                title="Vider et réinitialiser le compte Sold-to"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Vider
+              </Button>
+            )}
+          </div>
           <div className="max-h-52 overflow-y-auto rounded-md border bg-background">
             {isLoading ? (
               <p className="p-3 text-sm text-muted-foreground">Chargement des clients…</p>
