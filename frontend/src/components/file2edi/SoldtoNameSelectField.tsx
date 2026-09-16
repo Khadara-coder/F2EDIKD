@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { FloatingLookupPanel } from "@/components/file2edi/FloatingLookupPanel";
+import { LoadingState } from "@/components/ui/loading-state";
 import { useFocusWithoutScroll } from "@/hooks/useFocusWithoutScroll";
 import { cn } from "@/lib/utils";
 import type { MasterDataCustomerRow, PartnerEditSource } from "@/types";
@@ -206,7 +207,7 @@ export function SoldtoNameSelectField({
           </div>
           <div className="max-h-52 overflow-y-auto rounded-md border bg-background">
             {isLoading ? (
-              <p className="p-3 text-sm text-muted-foreground">Chargement des clients…</p>
+              <LoadingState label="Chargement des clients…" className="py-3" />
             ) : filteredOptions.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">
                 {options.length === 0
