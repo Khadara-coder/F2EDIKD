@@ -27,10 +27,6 @@ interface ShiptoCodeSelectFieldProps {
   onClear: () => Promise<void> | void;
 }
 
-function normalizeVat(vat: string): string {
-  return vat.replace(/\s+/g, "").toUpperCase();
-}
-
 function normalizeCode(code: string | undefined): string {
   return String(code ?? "").trim();
 }
@@ -40,23 +36,9 @@ function findCustomer(rows: MasterDataCustomerRow[], code: string) {
   return rows.find((r) => String(r.SOLDTO ?? "").trim() === normalized);
 }
 
-async function resolveSoldtoCodes(soldtoCode: string, soldtoVat?: string): Promise<string[]> {
-  const codes = new Set<string>();
+function resolveSoldtoCodes(soldtoCode: string): string[] {
   const trimmed = soldtoCode.trim();
-  if (trimmed) codes.add(trimmed);
-
-  const vat = normalizeVat(soldtoVat ?? "");
-  if (vat) {
-    const res = await api.searchCustomers(vat, 200);
-    for (const row of res.results) {
-      if (normalizeVat(String(row.VAT_NR ?? "")) === vat) {
-        const code = String(row.SOLDTO ?? "").trim();
-        if (code) codes.add(code);
-      }
-    }
-  }
-
-  return [...codes];
+  return trimmed ? [trimmed] : [];
 }
 
 async function fetchPartnersForSoldtos(soldtoCodes: string[]): Promise<MasterDataPartnerRow[]> {
@@ -134,8 +116,8 @@ export function ShiptoCodeSelectField({
   const { data: options = [], isLoading } = useQuery({
     queryKey: ["md-partners-by-soldto-code", soldtoCode, vat, filter],
     queryFn: async () => {
-      if (soldtoCode.trim() || normalizeVat(vat)) {
-        const soldtoCodes = await resolveSoldtoCodes(soldtoCode, vat);
+      if (soldtoCode.trim()) {
+        const soldtoCodes = resolveSoldtoCodes(soldtoCode);
         return fetchPartnersForSoldtos(soldtoCodes);
       }
       const q = filter.trim() || normalizeCode(value) || (currentShiptoName ?? "").trim();
