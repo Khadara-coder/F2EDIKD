@@ -165,6 +165,9 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             })
             total += amount
 
+    shipto_code = str(cust.get("shipto") or "").strip()
+    shipto_name = str(det.get("name") or "") if shipto_code else ""
+
     partners = [
         {
             "partnerId": f"p-soldto-{order_id}",
@@ -184,13 +187,14 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "orderId": order_id,
             "partnerFunction": "shipto",
             # Never invent a SAP code: leave empty when shipto is unresolved
-            "partnerCode": str(cust.get("shipto") or ""),
-            # Partners.NAME for SHIPTO (PDF/masterdata name only — not a code fallback)
-            "partnerName": str(det.get("name") or ""),
+            "partnerCode": shipto_code,
+            # No confirmed SAP code → no name/address either (avoid showing
+            # unverified OCR text as if it were a resolved Ship-to).
+            "partnerName": shipto_name,
             # Prefer validated masterdata street (Partners.STRAS) over OCR detection
-            "addressLine1": addr.get("street") or det.get("street") or "",
-            "postalCode": addr.get("postal_code") or det.get("postal_code") or "",
-            "city": addr.get("city") or det.get("city") or "",
+            "addressLine1": (addr.get("street") or det.get("street") or "") if shipto_code else "",
+            "postalCode": (addr.get("postal_code") or det.get("postal_code") or "") if shipto_code else "",
+            "city": (addr.get("city") or det.get("city") or "") if shipto_code else "",
             "country": "FR",
             "confidence": int(cust.get("shipto_confidence") or conf),
         },
@@ -339,7 +343,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
             "orderId": order_id,
             "uploadId": upload_id,
             "fileName": result.get("filename") or "",
-            "clientName": str(cust.get("name") or "-"),
+            "clientName": shipto_name,
             "customerOrderNumber": str(order.get("po_number") or ""),
             "documentReference": str(order.get("document_reference") or order.get("po_number") or ""),
             "orderDate": None if invalid_date else order_date,

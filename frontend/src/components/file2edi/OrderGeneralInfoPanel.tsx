@@ -97,10 +97,9 @@ export function OrderGeneralInfoPanel({
   });
 
   const soldtoSapId = cleanDisplay(soldto?.partnerCode);
-  const soldtoName = cleanDisplay(soldto?.partnerName || "-");
-  const clientName = cleanDisplay(
-    shipto?.partnerName || order.clientName || "-",
-  );
+  const soldtoName = cleanDisplay(soldto?.partnerName);
+  // No confirmed Ship-to SAP account -> no client name either
+  const clientName = shiptoCode ? cleanDisplay(shipto?.partnerName) : "";
 
   const handleSoldtoSelect = async (md: MasterDataCustomerRow) => {
     const payload = {
@@ -202,7 +201,7 @@ export function OrderGeneralInfoPanel({
               label="Compte client ship-to SAP"
               value={cleanDisplay(shiptoCode)}
               soldtoCode={soldtoCode || soldtoSapId}
-              currentShiptoName={clientName !== "-" ? clientName : undefined}
+              currentShiptoName={clientName || undefined}
               soldtoVat={soldtoMd?.VAT_NR}
               fieldId="field-shipto"
               invalid={Boolean(fieldErrors?.shipto)}
