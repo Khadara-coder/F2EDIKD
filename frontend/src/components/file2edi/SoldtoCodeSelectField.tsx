@@ -76,11 +76,10 @@ export function SoldtoCodeSelectField({
   const { data: options = [], isLoading } = useQuery({
     queryKey: ["md-customers-search-code", searchQuery],
     queryFn: async () => {
-      if (!searchQuery) return [];
       const res = await api.searchCustomers(searchQuery, 200);
       return res.results;
     },
-    enabled: editing && !!searchQuery,
+    enabled: editing,
     staleTime: 60_000,
   });
 

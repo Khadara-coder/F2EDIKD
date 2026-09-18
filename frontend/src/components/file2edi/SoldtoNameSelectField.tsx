@@ -70,11 +70,10 @@ export function SoldtoNameSelectField({
   const { data: options = [], isLoading } = useQuery({
     queryKey: ["md-customers-search", searchQuery],
     queryFn: async () => {
-      if (!searchQuery) return [];
       const res = await api.searchCustomers(searchQuery, 200);
       return res.results;
     },
-    enabled: editing && !!searchQuery,
+    enabled: editing,
     staleTime: 60_000,
   });
 

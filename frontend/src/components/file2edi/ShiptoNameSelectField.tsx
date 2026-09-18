@@ -115,7 +115,6 @@ export function ShiptoNameSelectField({
         return fetchPartnersForSoldtos(soldtoCodes);
       }
       const q = filter.trim() || currentShiptoCode || value.trim();
-      if (!q) return [];
       const res = await api.searchPartners(q, 200);
       return res.results.filter((row) => String(row.PARVW ?? "").trim().toUpperCase() === "SH");
     },
