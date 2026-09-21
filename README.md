@@ -288,31 +288,91 @@ GenieCommande/
 
 ## Tests
 
+### Backend (Python — pytest)
+
 ```bash
 python -m pytest tests/ -v
+# ou via Docker (recommandé, dépendances complètes)
+make test
+make test-fast   # exclut les tests golden (plus rapide)
 ```
 
-La suite couvre extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines, auth profil, logs métier.  
-**371 tests** passent (août 2026).
+La suite couvre extraction, matching, EDIFACT builder, SFTP, RBAC, golden fixtures, Phase 1+2 engines, auth profil, logs métier, UX catalog + recontrol (rejection codes → règles UX-01..UX-20).
 
 Smoke API locale (serveur démarré) :
 
 ```bash
 python scripts/smoke_file2edi_api.py
-# Endpoints protégés (optionnel) :
 python scripts/smoke_file2edi_api.py --actor <user> --password <password>
 ```
 
-### Tests navigateur (Playwright)
+### Frontend (Vitest + React Testing Library)
 
-```powershell
-npm install playwright@1.49.1 --no-save
-npx playwright install chromium
-$env:F2EDI_USER='<user>'; $env:F2EDI_PASSWORD='<password>'
-node scripts/browser_smoke.mjs
+Tests unitaires composants (jsdom, aucun backend requis) :
+
+```bash
+cd frontend
+npm install
+npm run test:unit                # single run
+npm run test:unit:watch          # watch mode
+npm run test:unit:coverage       # rapport de couverture
 ```
 
-Vérifie : page login, routes desktop/mobile, sidebar responsive, hamburger menu.
+Cible prioritaire : composants du refactor UX (`AnomaliesTable`, wrapper `api.ts`). Approche : requêtes par rôle / label ARIA, pas de `data-testid`.
+
+### E2E (Playwright)
+
+Deux catégories de specs dans `frontend/e2e/` :
+
+| Type | Fichier | Backend | Usage |
+|------|---------|---------|-------|
+| **Mockés** | `*.spec.ts` | Aucun (mock via `page.route()`) | Flows UX (choix, chaîne generateEdifact, dialog d'erreur) |
+| **Smoke réel** | `*.smoke.spec.ts` | FastAPI + PG en marche | Login + routes protégées, sidebar mobile |
+
+Setup initial :
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium
+```
+
+**Tests mockés** (rapides, sans dépendance) — le webServer Playwright démarre automatiquement `vite preview` sur le port 4173 pour servir `frontend/dist/` :
+
+```bash
+cd frontend
+npm run test:e2e                   # projet chromium-mocked
+npm run test:e2e:ui                # mode interactif Playwright UI
+```
+
+**Smoke contre le backend réel** — nécessite l'API démarrée et des credentials :
+
+```bash
+# terminal 1 (racine du repo)
+docker compose -f docker-compose.dev.yml up -d
+
+# terminal 2
+export F2EDI_USER=<user>
+export F2EDI_PASSWORD=<password>
+export F2EDI_BASE_URL=http://127.0.0.1:8000    # optionnel, défaut identique
+cd frontend
+npm run test:e2e:smoke
+```
+
+Vérifie : page login, 6 routes desktop/mobile, sidebar hamburger.
+
+Rapports :
+
+```bash
+cd frontend
+npx playwright show-report
+```
+
+### Tout lancer
+
+```bash
+make test-all      # pytest (fast) + Vitest + E2E mockés
+```
 
 ```bash
 # Test extraction sur 50 PDFs aléatoires (RAG Purchase Orders)

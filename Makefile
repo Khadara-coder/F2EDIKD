@@ -32,8 +32,12 @@ help:
 	@echo "    make install        Installer les dépendances frontend (npm ci)"
 	@echo ""
 	@echo "  Tests"
-	@echo "    make test           Lancer tous les tests (dans le container dev)"
-	@echo "    make test-fast      Tests rapides hors golden (dans le container dev)"
+	@echo "    make test           Backend pytest complet (dans le container dev)"
+	@echo "    make test-fast      Backend pytest hors golden (dans le container dev)"
+	@echo "    make test-frontend  Vitest unit tests (frontend, jsdom)"
+	@echo "    make test-e2e       Playwright E2E mockés (frontend, sans backend)"
+	@echo "    make test-e2e-smoke Playwright smoke contre le backend réel (F2EDI_USER/PASSWORD requis)"
+	@echo "    make test-all       Backend pytest + frontend Vitest + E2E mockés"
 	@echo ""
 	@echo "  Quality (adv.bosch-homecomfort.com — port 8080)"
 	@echo "    make quality-up     Démarrer le stack quality"
@@ -88,6 +92,18 @@ test:
 test-fast:
 	$(COMPOSE_DEV) run --rm api python -m pytest tests/ -k "not golden" --tb=short -q
 
+test-frontend:
+	cd frontend && npm run test:unit
+
+test-e2e:
+	cd frontend && npm run test:e2e -- --project=chromium-mocked
+
+test-e2e-smoke:
+	cd frontend && npm run test:e2e -- --project=chromium-smoke
+
+test-all: test-fast test-frontend test-e2e
+	@echo "Tests backend + frontend + E2E mockés terminés."
+
 # ── Quality ───────────────────────────────────────────────────────────────────
 
 quality-up:
@@ -140,7 +156,8 @@ sync-branches:
 	$(GIT) push origin main staging dev
 	@echo "Branches staging et dev synchronisées."
 
-.PHONY: help dev dev-stop dev-logs frontend graph graph-update install test test-fast \
+.PHONY: help dev dev-stop dev-logs frontend graph graph-update install \
+        test test-fast test-frontend test-e2e test-e2e-smoke test-all \
         quality-up quality-down quality-build quality-logs quality-status deploy-quality \
         prod-up prod-down prod-build prod-logs prod-status deploy \
         sync-branches _require-main

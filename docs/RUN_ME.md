@@ -97,15 +97,52 @@ docker compose -f docker-compose.file2edi.yml logs file2edi | head -20
 
 ## 🧪 Tests
 
+### Backend Python
+
 ```bash
-# Unit tests
+# Unit tests (racine du repo)
 python -m pytest tests/ -v
+# ou via Docker
+make test              # complet
+make test-fast         # exclut golden
 
 # Test API (serveur en cours)
 python scripts/smoke_file2edi_api.py
 
 # Test extraction (50 PDFs aléatoires)
 python scripts/test_random_pdfs.py --source "RAG Purchase Orders" --n 50 --seed 42
+```
+
+### Frontend (Vitest + Playwright)
+
+```bash
+cd frontend
+npm install
+npx playwright install chromium
+
+# Unit tests composants (rapide, aucun backend)
+npm run test:unit
+npm run test:unit:watch
+npm run test:unit:coverage
+
+# E2E mockés (webServer vite preview auto sur :4173)
+npm run test:e2e
+
+# E2E smoke contre backend réel (nécessite F2EDI_USER/PASSWORD et FastAPI démarré)
+export F2EDI_USER=<user> F2EDI_PASSWORD=<pwd>
+npm run test:e2e:smoke
+
+# Rapport HTML
+npx playwright show-report
+```
+
+Ou en une commande depuis la racine :
+
+```bash
+make test-frontend     # Vitest
+make test-e2e          # Playwright mockés
+make test-e2e-smoke    # Playwright smoke (backend requis)
+make test-all          # pytest-fast + Vitest + E2E mockés
 ```
 
 ---

@@ -18,6 +18,12 @@ env/
 frontend/node_modules/
 *.tsbuildinfo
 
+# Test artifacts (Vitest + Playwright)
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/e2e/.auth/
+
 # Secrets & local config
 .env
 .env.local
