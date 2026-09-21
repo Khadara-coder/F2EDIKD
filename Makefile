@@ -71,6 +71,12 @@ dev-logs:
 frontend:
 	cd frontend && npm run dev
 
+graph:
+	powershell -ExecutionPolicy Bypass -File scripts/graphify_project.ps1
+
+graph-update:
+	powershell -ExecutionPolicy Bypass -File scripts/graphify_project.ps1 -Update
+
 install:
 	cd frontend && npm ci
 
@@ -134,7 +140,7 @@ sync-branches:
 	$(GIT) push origin main staging dev
 	@echo "Branches staging et dev synchronisées."
 
-.PHONY: help dev dev-stop dev-logs frontend install test test-fast \
+.PHONY: help dev dev-stop dev-logs frontend graph graph-update install test test-fast \
         quality-up quality-down quality-build quality-logs quality-status deploy-quality \
         prod-up prod-down prod-build prod-logs prod-status deploy \
         sync-branches _require-main

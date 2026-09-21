@@ -39,6 +39,9 @@ data/logs/
 outbox/
 logs/
 
+# Generated graphify architecture analysis
+reports/graphify-out/
+
 # Large master data (bundled/downloaded at deploy)
 data/masterdata/*.csv
 data/masterdata/*.parquet
