@@ -895,7 +895,7 @@ def create_router() -> APIRouter:
             from .demo_seed import seed_demo_orders, refresh_demo_pdf
             seed_demo_orders(store)
             refresh_demo_pdf(store)
-        review = store.load_order_review(order_id)
+        review = store.load_order_review(order_id, collapse_partner=True)
         if not review:
             try:
                 conv = engine_bridge.load_conversion(order_id)
@@ -1113,8 +1113,6 @@ def create_router() -> APIRouter:
             actor = resolve_actor(req)
         except Exception:
             actor = "operator"
-        if action == "choice" and outcome in {"confirm_new_order_and_recontrol", "confirm_distinct_order_and_recontrol"} and not justification:
-            raise HTTPException(400, "Une justification est obligatoire pour ce choix")
         review = get_store().resolve_anomaly(
             anomaly_id,
             action,
@@ -1122,16 +1120,6 @@ def create_router() -> APIRouter:
             justification=justification,
             actor=actor,
         )
-        recontrol_passed = False
-        if review and action == "choice" and outcome not in {"keep_blocked", "keep_blocked_and_escalate"}:
-            refreshed = get_store().recontrol_anomaly(anomaly_id)
-            if refreshed:
-                review = refreshed
-                anomaly = next(
-                    (a for a in review.get("anomalies", []) if a.get("anomalyId") == anomaly_id),
-                    None,
-                )
-                recontrol_passed = bool(anomaly and anomaly.get("status") == "Corrigée")
         if not review:
             raise HTTPException(404)
         order_id = (review.get("order") or {}).get("orderId")
@@ -1145,7 +1133,7 @@ def create_router() -> APIRouter:
                 "action": action,
                 "outcome": outcome,
                 "hasJustification": bool(justification),
-                "recontrolPassed": recontrol_passed,
+                "recontrolPassed": None,
             },
         )
         return review

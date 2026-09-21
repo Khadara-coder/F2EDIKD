@@ -405,6 +405,10 @@ class File2EdiStore:
         # Legacy Databricks DBs can keep an older schema if the table already
         # existed; add missing columns incrementally to keep reads/writes safe.
         _ensure_column("file2edi_order_partners", "edited_fields_json", "edited_fields_json TEXT")
+        _ensure_column("file2edi_order_anomalies", "ux_choice", "ux_choice TEXT")
+        _ensure_column("file2edi_order_anomalies", "ux_justification", "ux_justification TEXT")
+        _ensure_column("file2edi_order_anomalies", "ux_actor", "ux_actor TEXT")
+        _ensure_column("file2edi_order_anomalies", "ux_action_at", "ux_action_at TEXT")
 
         _ensure_column("file2edi_orders", "upload_id", "upload_id TEXT")
         _ensure_column("file2edi_orders", "file_name", "file_name TEXT")
@@ -911,7 +915,7 @@ class File2EdiStore:
             return 0
 
 
-    def load_order_review(self, order_id: str) -> dict | None:
+    def load_order_review(self, order_id: str, collapse_partner: bool = False) -> dict | None:
         conn = self._conn()
         row = conn.execute("SELECT * FROM file2edi_orders WHERE order_id=?", [order_id]).fetchone()
         if not row:
@@ -940,7 +944,7 @@ class File2EdiStore:
         except Exception:
             comments = []
         conn.close()
-        return self._row_to_review(dict(row), partners, lines, anomalies, comments)
+        return self._row_to_review(dict(row), partners, lines, anomalies, comments, collapse_partner)
 
     def _row_to_review(
         self,
@@ -949,6 +953,7 @@ class File2EdiStore:
         lines: list,
         anomalies: list,
         comments: list | None = None,
+        collapse_partner: bool = False,
     ) -> dict:
         def camel(d: dict, mapping: dict) -> dict:
             return {mapping.get(k, k): v for k, v in d.items()}
@@ -1039,12 +1044,54 @@ class File2EdiStore:
             "order": order,
             "partners": [self._partner_to_api(dict(p)) for p in partners],
             "lines": [camel(dict(l), l_map) for l in lines],
-            "anomalies": [self._anomaly_to_api(dict(a), a_map, order=order) for a in anomalies],
+            "anomalies": self._anomalies_to_api(anomalies, a_map, order=order)
+            if collapse_partner
+            else [self._anomaly_to_api(dict(a), a_map, order=order) for a in anomalies],
             "comments": [camel(dict(c), c_map) for c in (comments or [])],
             "traceability": trace,
             "edifactReady": bool(row.get("edifact_content") or row.get("edifact_filename")),
             "pdfUrl": f"/api/orders/{order['orderId']}/pdf",
         }
+
+    def _anomalies_to_api(self, anomalies: list[dict], mapping: dict, order: dict) -> list[dict]:
+        """Collapse technical partner findings into one ADV-facing Sold-to issue."""
+        from src.rejection_catalog import normalize_code
+
+        partner_codes = {
+            "NO_DELIVERY_ADDRESS", "SHIPTO_CANDIDATES_MISSING", "SHIPTO_NO_STRONG_MATCH",
+            "SHIPTO_AMBIGUOUS_MATCH", "PARTNER_UNRESOLVED", "SOLDTO_NOT_FOUND",
+            "SOLDTO_AMBIGUOUS_MATCH", "SHIPTO_SOLDTO_MISMATCH",
+        }
+        mapped = [self._anomaly_to_api(dict(a), mapping, order=order) for a in anomalies]
+        partner = [a for a in mapped if normalize_code(str(a.get("fieldName") or "")) in partner_codes]
+        if not partner:
+            return mapped
+
+        pending_statuses = {"Bloquante", "Ouverte"}
+        if any(a.get("status") == "Bloquante" for a in partner):
+            status = "Bloquante"
+        elif any(a.get("status") == "Ouverte" for a in partner):
+            status = "Ouverte"
+        else:
+            status = "Corrigée"
+        first = partner[0]
+        aggregate = self._anomaly_to_api(
+            {
+                "anomalyId": first.get("anomalyId"),
+                "orderId": first.get("orderId"),
+                "severity": "error" if status in pending_statuses else "warning",
+                "fieldName": "SOLDTO_NOT_FOUND",
+                "message": "Génie n'a pas pu identifier le Sold-to",
+                "status": status,
+                "createdAt": first.get("createdAt"),
+            },
+            {},
+            order=order,
+        )
+        aggregate["message"] = "Génie n'a pas pu identifier le Sold-to"
+        aggregate["relatedCodes"] = sorted({str(a.get("fieldName") or "") for a in partner})
+        non_partner = [a for a in mapped if a not in partner]
+        return [*non_partner, aggregate]
 
     def _anomaly_to_api(self, anomaly: dict, mapping: dict, order: dict | None = None) -> dict:
         from src.rejection_catalog import (
@@ -2179,22 +2226,35 @@ class File2EdiStore:
             conn.close()
             return None
         status = status_map.get(action, "Corrigée")
+        partner_codes = {
+            "NO_DELIVERY_ADDRESS", "SHIPTO_CANDIDATES_MISSING", "SHIPTO_NO_STRONG_MATCH",
+            "SHIPTO_AMBIGUOUS_MATCH", "PARTNER_UNRESOLVED", "SOLDTO_NOT_FOUND",
+            "SOLDTO_AMBIGUOUS_MATCH", "SHIPTO_SOLDTO_MISMATCH",
+        }
         if action == "choice":
-            from src.rejection_catalog import normalize_code
-            from src.ux_catalog import ux_rule
-
-            code = normalize_code(str(row["field_name"] or ""))
-            ux = ux_rule(code)
             if outcome in {"keep_blocked", "keep_blocked_and_escalate"}:
                 status = "Bloquante"
-            elif ux and ux["requires_recontrol"]:
-                status = "Ouverte"
-        conn.execute(
-            "UPDATE file2edi_order_anomalies "
-            "SET status=?, ux_choice=?, ux_justification=?, ux_actor=?, ux_action_at=? "
-            "WHERE anomaly_id=?",
-            [status, outcome, justification, actor, _now(), anomaly_id],
-        )
+            else:
+                # The ADV decision is sufficient to clear the review gate.
+                # Technical generation and SAP delivery happen only from the
+                # final "Envoyer vers SAP" action.
+                status = "Corrigée"
+        code = str(row["field_name"] or "").strip()
+        if code in partner_codes:
+            placeholders = ",".join("?" for _ in partner_codes)
+            conn.execute(
+                "UPDATE file2edi_order_anomalies "
+                "SET status=?, ux_choice=?, ux_justification=?, ux_actor=?, ux_action_at=? "
+                f"WHERE order_id=? AND field_name IN ({placeholders})",
+                [status, outcome, justification, actor, _now(), row["order_id"], *partner_codes],
+            )
+        else:
+            conn.execute(
+                "UPDATE file2edi_order_anomalies "
+                "SET status=?, ux_choice=?, ux_justification=?, ux_actor=?, ux_action_at=? "
+                "WHERE anomaly_id=?",
+                [status, outcome, justification, actor, _now(), anomaly_id],
+            )
         conn.commit()
         conn.close()
         review = self.load_order_review(row["order_id"])

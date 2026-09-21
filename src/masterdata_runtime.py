@@ -955,8 +955,12 @@ def row_matches_actor(row: dict, actor_keys: set[str]) -> bool:
         "adv_team1_email",
         "adv_team2_email",
         "email",
+        "Email-I.D",
+        "User-I.D",
         "gestionaire_adv",
         "Gestionaire ADV",
+        "Gestionaire-ADV",
+        "Fonction-Partenaire",
     ):
         raw = row_value(row, field)
         if not raw:

@@ -216,6 +216,7 @@ export interface OrderAnomaly {
   uxStatus?: "active" | "draft";
   uxChoice?: string | null;
   uxJustification?: string | null;
+  relatedCodes?: string[];
 }
 
 export interface OrderComment {

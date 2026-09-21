@@ -112,6 +112,7 @@ export function AnomaliesTable({
                 const commentCount = comments.filter((c) => c.anomalyId === a.anomalyId).length;
                 const severityKey = (a.issueSeverity || "").toUpperCase();
                 const severityLabel = SEVERITY_LABELS[severityKey];
+                const displayMessage = a.uxMessage?.trim() || a.message;
                 const statusHint = a.status;
 
                 return (
@@ -132,11 +133,11 @@ export function AnomaliesTable({
                         onSelectAnomaly(selected ? null : a.anomalyId);
                       }
                     }}
-                    aria-label={`${a.message}. Statut ${statusHint}.${selected ? " Sélectionnée." : ""}`}
+                    aria-label={`${displayMessage}. Statut ${statusHint}.${selected ? " Sélectionnée." : ""}`}
                   >
                     <TableCell className="max-w-[520px] whitespace-normal text-sm leading-snug">
                       <div className="flex flex-wrap items-start gap-2">
-                        <p className="min-w-0 flex-1">{a.message}</p>
+                        <p className="min-w-0 flex-1">{displayMessage}</p>
                         {severityLabel && (
                           <span
                             className={cn(
@@ -151,9 +152,6 @@ export function AnomaliesTable({
                           </span>
                         )}
                       </div>
-                      {a.uxMessage && a.uxMessage !== a.message && (
-                        <p className="mt-1 text-xs text-foreground/80">{a.uxMessage}</p>
-                      )}
                       {commentCount > 0 && (
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {commentCount} note{commentCount > 1 ? "s" : ""}

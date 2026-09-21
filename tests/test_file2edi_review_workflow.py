@@ -273,7 +273,7 @@ def test_clearing_soldto_code_clears_address_and_raises_anomaly(tmp_path, monkey
     assert shipto["partnerCode"] == ""
     assert shipto["partnerName"] == ""
     assert shipto["addressLine1"] == ""
-    assert any(a["fieldName"] == "SHIPTO_SOLDTO_MISMATCH" and a["status"] == "Bloquante" for a in updated["anomalies"])
+    assert any(a["fieldName"] == "SOLDTO_NOT_FOUND" and a["status"] == "Bloquante" for a in updated["anomalies"])
     assert any(a["fieldName"] == "SOLDTO_NOT_FOUND" and a["status"] == "Bloquante" for a in updated["anomalies"])
 
 
@@ -466,6 +466,62 @@ def test_precise_partner_anomaly_replaces_generic_partner_unresolved():
     codes = {a["fieldName"] for a in review["anomalies"]}
     assert "SOLDTO_NOT_FOUND" in codes
     assert "PARTNER_UNRESOLVED" not in codes
+
+
+def test_partner_anomalies_are_collapsed_for_adv_and_resolved_together(tmp_path):
+    store = File2EdiStore(str(tmp_path / "file2edi.db"), str(tmp_path / "intake"))
+    review = _review("ord-partner-collapse")
+    review["anomalies"] = [
+        {
+            "anomalyId": "partner-address",
+            "orderId": "ord-partner-collapse",
+            "severity": "error",
+            "fieldName": "NO_DELIVERY_ADDRESS",
+            "message": "adresse technique",
+            "status": "Bloquante",
+            "createdAt": "2026-08-04T09:00:00+00:00",
+        },
+        {
+            "anomalyId": "partner-shipto",
+            "orderId": "ord-partner-collapse",
+            "severity": "error",
+            "fieldName": "SHIPTO_NO_STRONG_MATCH",
+            "message": "ship-to technique",
+            "status": "Bloquante",
+            "createdAt": "2026-08-04T09:00:01+00:00",
+        },
+        {
+            "anomalyId": "partner-soldto",
+            "orderId": "ord-partner-collapse",
+            "severity": "error",
+            "fieldName": "SOLDTO_NOT_FOUND",
+            "message": "sold-to technique",
+            "status": "Bloquante",
+            "createdAt": "2026-08-04T09:00:02+00:00",
+        },
+    ]
+    store.save_order_review(review)
+
+    displayed = store.load_order_review("ord-partner-collapse", collapse_partner=True)
+    assert displayed is not None
+    partner_anomalies = [
+        a for a in displayed["anomalies"]
+        if a.get("uxGroup") == "Partenaire"
+    ]
+    assert len(partner_anomalies) == 1
+    assert partner_anomalies[0]["message"] == "Génie n'a pas pu identifier le Sold-to"
+    assert set(partner_anomalies[0]["relatedCodes"]) == {
+        "NO_DELIVERY_ADDRESS", "SHIPTO_NO_STRONG_MATCH", "SOLDTO_NOT_FOUND",
+    }
+
+    updated = store.resolve_anomaly(
+        partner_anomalies[0]["anomalyId"],
+        "choice",
+        outcome="confirm_and_recontrol",
+        actor="adv1",
+    )
+    assert updated is not None
+    assert all(a["status"] == "Corrigée" for a in updated["anomalies"])
 
 
 def test_soldto_change_propagates_billing_and_revalidates_shipto(tmp_path, monkeypatch):

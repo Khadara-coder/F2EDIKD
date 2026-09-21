@@ -202,15 +202,15 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  searchCustomers: (q: string, limit = 20) =>
-    fetch(`${MD_API_BASE}/customers/search?q=${encodeURIComponent(q)}&limit=${limit}`, {
+  searchCustomers: (q: string, limit = 20, scope: "review" | "managed" = "managed") =>
+    fetch(`${MD_API_BASE}/customers/search?q=${encodeURIComponent(q)}&limit=${limit}&scope=${scope}`, {
       credentials: "include",
     }).then(
       (res) => res.json() as Promise<{ results: MasterDataCustomerRow[] }>,
     ),
 
-  searchPartners: (q: string, limit = 20) =>
-    fetch(`${MD_API_BASE}/partners/search?q=${encodeURIComponent(q)}&limit=${limit}`, {
+  searchPartners: (q: string, limit = 20, scope: "review" | "managed" = "managed") =>
+    fetch(`${MD_API_BASE}/partners/search?q=${encodeURIComponent(q)}&limit=${limit}&scope=${scope}`, {
       credentials: "include",
     }).then(
       (res) => res.json() as Promise<{ results: MasterDataPartnerRow[] }>,

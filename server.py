@@ -4142,12 +4142,20 @@ async def api_send_rejection_email(cid: str, req: Request):
 
 # ── Masterdata search ─────────────────────────────────────────────────────────
 @app.get("/api/masterdata/customers/search")
-def api_md_customers(req: Request, q: str = "", limit: int = 50):
-    return {"results": _csv_search_cached("customers", q, min(limit, 200), req=req)}
+def api_md_customers(req: Request, q: str = "", limit: int = 50, scope: str = ""):
+    if scope.strip().lower() == "review":
+        rows = _mdr.csv_search_cached("customers", q, min(limit, 200), allowed_soldtos=None)
+    else:
+        rows = _csv_search_cached("customers", q, min(limit, 200), req=req)
+    return {"results": rows}
 
 @app.get("/api/masterdata/partners/search")
-def api_md_partners(req: Request, q: str = "", limit: int = 50):
-    return {"results": _csv_search_cached("partners", q, min(limit, 200), req=req)}
+def api_md_partners(req: Request, q: str = "", limit: int = 50, scope: str = ""):
+    if scope.strip().lower() == "review":
+        rows = _mdr.csv_search_cached("partners", q, min(limit, 200), allowed_soldtos=None)
+    else:
+        rows = _csv_search_cached("partners", q, min(limit, 200), req=req)
+    return {"results": rows}
 
 @app.get("/api/masterdata/materials/search")
 def api_md_materials(q: str = "", limit: int = 50):

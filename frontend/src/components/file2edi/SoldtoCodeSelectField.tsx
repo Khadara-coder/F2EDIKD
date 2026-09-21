@@ -76,7 +76,7 @@ export function SoldtoCodeSelectField({
   const { data: options = [], isLoading } = useQuery({
     queryKey: ["md-customers-search-code", searchQuery],
     queryFn: async () => {
-      const res = await api.searchCustomers(searchQuery, 200);
+      const res = await api.searchCustomers(searchQuery, 200, "review");
       return res.results;
     },
     enabled: editing,
@@ -180,7 +180,7 @@ export function SoldtoCodeSelectField({
             e.stopPropagation();
             setEditing(true);
           }}
-          className="shrink-0 rounded p-1 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
+          className="shrink-0 rounded p-1 opacity-70 transition-opacity hover:bg-muted hover:opacity-100 focus:opacity-100"
           title="Modifier le compte SAP sold-to"
         >
           <Pencil className="h-3.5 w-3.5 text-muted-foreground" />

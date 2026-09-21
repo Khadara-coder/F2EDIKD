@@ -46,7 +46,7 @@ async function fetchPartnersForSoldtos(soldtoCodes: string[]): Promise<MasterDat
 
   const byShipto = new Map<string, MasterDataPartnerRow>();
   for (const soldto of soldtoCodes) {
-    const res = await api.searchPartners(soldto, 200);
+    const res = await api.searchPartners(soldto, 200, "review");
     for (const row of res.results) {
       if (String(row.SOLDTO ?? "").trim() !== soldto) continue;
       if (String(row.PARVW ?? "").trim().toUpperCase() !== "SH") continue;
@@ -105,7 +105,7 @@ export function ShiptoCodeSelectField({
 
   const { data: soldtoMd } = useQuery({
     queryKey: ["md-customer", soldtoCode],
-    queryFn: () => api.searchCustomers(soldtoCode),
+    queryFn: () => api.searchCustomers(soldtoCode, 20, "review"),
     enabled: !!soldtoCode.trim(),
     select: (res) => findCustomer(res.results, soldtoCode),
     staleTime: 60_000,
@@ -121,7 +121,7 @@ export function ShiptoCodeSelectField({
         return fetchPartnersForSoldtos(soldtoCodes);
       }
       const q = filter.trim() || normalizeCode(value) || (currentShiptoName ?? "").trim();
-      const res = await api.searchPartners(q, 200);
+      const res = await api.searchPartners(q, 200, "review");
       return res.results.filter((row) => String(row.PARVW ?? "").trim().toUpperCase() === "SH");
     },
     enabled: editing,

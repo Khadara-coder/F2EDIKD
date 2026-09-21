@@ -90,7 +90,7 @@ export function OrderGeneralInfoPanel({
 
   const { data: soldtoMd } = useQuery({
     queryKey: ["md-customer", soldtoCode],
-    queryFn: () => api.searchCustomers(soldtoCode),
+    queryFn: () => api.searchCustomers(soldtoCode, 20, "review"),
     enabled: !!soldtoCode,
     select: (res) => findCustomer(res.results, soldtoCode),
     staleTime: 60_000,
