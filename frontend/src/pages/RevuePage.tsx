@@ -721,14 +721,8 @@ export function RevuePage() {
               selectedAnomalyId={selectedAnomalyId}
               onSelectAnomaly={setSelectedAnomalyId}
               onChoose={(anomalyId, outcome) => {
-                const needsJustification = outcome === "confirm_new_order_and_recontrol"
-                  || outcome === "confirm_distinct_order_and_recontrol";
-                const justification = needsJustification
-                  ? window.prompt("Justification obligatoire")?.trim() || ""
-                  : undefined;
-                if (needsJustification && !justification) return;
                 void (async () => {
-                  await api.resolveAnomaly(anomalyId, "choice", { outcome, justification });
+                  await api.resolveAnomaly(anomalyId, "choice", { outcome });
                   if (outcome === "correct_and_regenerate" || outcome === "regenerate_and_recontrol") {
                     const generated = await api.generateEdifact(orderId);
                     if (!generated.success) throw new Error(generated.errors?.join("\n") || "Génération EDIFACT échouée");

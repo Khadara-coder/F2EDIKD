@@ -1113,8 +1113,6 @@ def create_router() -> APIRouter:
             actor = resolve_actor(req)
         except Exception:
             actor = "operator"
-        if action == "choice" and outcome in {"confirm_new_order_and_recontrol", "confirm_distinct_order_and_recontrol"} and not justification:
-            raise HTTPException(400, "Une justification est obligatoire pour ce choix")
         review = get_store().resolve_anomaly(
             anomaly_id,
             action,
