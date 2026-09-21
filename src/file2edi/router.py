@@ -1107,11 +1107,31 @@ def create_router() -> APIRouter:
     @router.patch("/orders/anomalies/{anomaly_id}")
     async def patch_anomaly(anomaly_id: str, payload: dict, req: Request):
         action = payload.get("action", "corrected")
+        outcome = str(payload.get("outcome") or "").strip() or None
+        justification = str(payload.get("justification") or "").strip() or None
         try:
             actor = resolve_actor(req)
         except Exception:
             actor = "operator"
-        review = get_store().resolve_anomaly(anomaly_id, action)
+        if action == "choice" and outcome in {"confirm_new_order_and_recontrol", "confirm_distinct_order_and_recontrol"} and not justification:
+            raise HTTPException(400, "Une justification est obligatoire pour ce choix")
+        review = get_store().resolve_anomaly(
+            anomaly_id,
+            action,
+            outcome=outcome,
+            justification=justification,
+            actor=actor,
+        )
+        recontrol_passed = False
+        if review and action == "choice" and outcome not in {"keep_blocked", "keep_blocked_and_escalate"}:
+            refreshed = get_store().recontrol_anomaly(anomaly_id)
+            if refreshed:
+                review = refreshed
+                anomaly = next(
+                    (a for a in review.get("anomalies", []) if a.get("anomalyId") == anomaly_id),
+                    None,
+                )
+                recontrol_passed = bool(anomaly and anomaly.get("status") == "Corrigée")
         if not review:
             raise HTTPException(404)
         order_id = (review.get("order") or {}).get("orderId")
@@ -1121,7 +1141,37 @@ def create_router() -> APIRouter:
             entity_type="anomaly",
             entity_id=anomaly_id,
             order_id=order_id,
-            details={"action": action},
+            details={
+                "action": action,
+                "outcome": outcome,
+                "hasJustification": bool(justification),
+                "recontrolPassed": recontrol_passed,
+            },
+        )
+        return review
+
+    @router.post("/orders/anomalies/{anomaly_id}/recontrol")
+    async def recontrol_anomaly(anomaly_id: str, req: Request):
+        try:
+            actor = resolve_actor(req)
+        except Exception:
+            actor = "operator"
+        review = get_store().recontrol_anomaly(anomaly_id)
+        if not review:
+            raise HTTPException(404)
+        anomaly = next(
+            (a for a in review.get("anomalies", []) if a.get("anomalyId") == anomaly_id),
+            None,
+        )
+        passed = bool(anomaly and anomaly.get("status") == "Corrigée")
+        _biz_log(
+            actor=actor,
+            action="anomaly.recontrol",
+            entity_type="anomaly",
+            entity_id=anomaly_id,
+            order_id=(review.get("order") or {}).get("orderId"),
+            result="ok" if passed else "blocked",
+            details={"passed": passed},
         )
         return review
 

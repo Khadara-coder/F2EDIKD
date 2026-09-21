@@ -972,6 +972,8 @@ class File2EdiStore:
             "anomaly_id": "anomalyId", "order_id": "orderId", "line_id": "lineId",
             "severity": "severity", "field_name": "fieldName", "message": "message",
             "status": "status", "created_at": "createdAt",
+            "ux_choice": "uxChoice", "ux_justification": "uxJustification",
+            "ux_actor": "uxActor", "ux_action_at": "uxActionAt",
         }
         c_map = {
             "comment_id": "commentId", "order_id": "orderId", "anomaly_id": "anomalyId",
@@ -1052,6 +1054,7 @@ class File2EdiStore:
             normalize_code,
             review_actions,
         )
+        from src.ux_catalog import ux_rule
 
         mapped = {mapping.get(k, k): v for k, v in anomaly.items()}
         code = normalize_code(str(mapped.get("fieldName") or "").strip())
@@ -1082,6 +1085,18 @@ class File2EdiStore:
             mapped["blocking"] = tax["blocking"]
             mapped["issueScope"] = tax["scope"]
             mapped["requiresUserInput"] = tax["requires_user_input"]
+            ux = ux_rule(code)
+            if ux:
+                mapped["uxId"] = ux["ux_id"]
+                mapped["uxGroup"] = ux["group"]
+                mapped["uxMessage"] = ux["message"]
+                mapped["uxChoices"] = list(ux["choices"])
+                mapped["resolutionMode"] = ux["resolution_mode"]
+                mapped["requiresRecontrol"] = ux["requires_recontrol"]
+                mapped["finalizationRequired"] = ux["finalization_required"]
+                mapped["uxStatus"] = ux["status"]
+                mapped["uxChoice"] = mapped.get("uxChoice")
+                mapped["uxJustification"] = mapped.get("uxJustification")
         return mapped
 
     def _partner_to_api(self, partner: dict) -> dict:
@@ -2147,24 +2162,69 @@ class File2EdiStore:
         conn.close()
         return self.load_order_review(order_id)
 
-    def resolve_anomaly(self, anomaly_id: str, action: str) -> dict | None:
+    def resolve_anomaly(
+        self,
+        anomaly_id: str,
+        action: str,
+        outcome: str | None = None,
+        justification: str | None = None,
+        actor: str = "operator",
+    ) -> dict | None:
         status_map = {"corrected": "Corrigée", "ignored": "Ignorée", "blocking": "Bloquante"}
         conn = self._conn()
         row = conn.execute(
-            "SELECT order_id FROM file2edi_order_anomalies WHERE anomaly_id=?", [anomaly_id]
+            "SELECT order_id, field_name FROM file2edi_order_anomalies WHERE anomaly_id=?", [anomaly_id]
         ).fetchone()
         if not row:
             conn.close()
             return None
+        status = status_map.get(action, "Corrigée")
+        if action == "choice":
+            from src.rejection_catalog import normalize_code
+            from src.ux_catalog import ux_rule
+
+            code = normalize_code(str(row["field_name"] or ""))
+            ux = ux_rule(code)
+            if outcome in {"keep_blocked", "keep_blocked_and_escalate"}:
+                status = "Bloquante"
+            elif ux and ux["requires_recontrol"]:
+                status = "Ouverte"
         conn.execute(
-            "UPDATE file2edi_order_anomalies SET status=? WHERE anomaly_id=?",
-            [status_map.get(action, "Corrigée"), anomaly_id],
+            "UPDATE file2edi_order_anomalies "
+            "SET status=?, ux_choice=?, ux_justification=?, ux_actor=?, ux_action_at=? "
+            "WHERE anomaly_id=?",
+            [status, outcome, justification, actor, _now(), anomaly_id],
         )
         conn.commit()
         conn.close()
         review = self.load_order_review(row["order_id"])
         self._sync_order_graph(review)
         return review
+
+    def recontrol_anomaly(self, anomaly_id: str) -> dict | None:
+        """Recheck an anomaly against the current persisted review data."""
+        from src.ux_recontrol import can_close_after_recontrol
+
+        conn = self._conn()
+        row = conn.execute(
+            "SELECT order_id, field_name, status FROM file2edi_order_anomalies WHERE anomaly_id=?",
+            [anomaly_id],
+        ).fetchone()
+        if not row:
+            conn.close()
+            return None
+        review = self.load_order_review(row["order_id"])
+        if review and can_close_after_recontrol(str(row["field_name"] or ""), review):
+            conn.execute(
+                "UPDATE file2edi_order_anomalies SET status='Corrigée' WHERE anomaly_id=?",
+                [anomaly_id],
+            )
+            conn.commit()
+        conn.close()
+        refreshed = self.load_order_review(row["order_id"])
+        if refreshed:
+            self._sync_order_graph(refreshed)
+        return refreshed
 
     def save_order_snapshot(self, order_id: str, actor: str = "operator") -> dict | None:
         """Persist a review snapshot (refresh corrections + touch updated_at)."""
@@ -2634,7 +2694,11 @@ class PostgresFile2EdiStore(File2EdiStore):
           field_name TEXT,
           message    TEXT NOT NULL,
           status     TEXT DEFAULT 'Ouverte',
-          created_at TEXT NOT NULL
+          created_at TEXT NOT NULL,
+          ux_choice TEXT,
+          ux_justification TEXT,
+          ux_actor TEXT,
+          ux_action_at TEXT
         );
 
         CREATE TABLE IF NOT EXISTS file2edi_order_comments (
@@ -2736,6 +2800,10 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_order_lines ADD COLUMN IF NOT EXISTS warnings TEXT",
                 "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS edited_fields_json TEXT",
                 "ALTER TABLE file2edi_order_partners ADD COLUMN IF NOT EXISTS previous_value TEXT",
+                "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS ux_choice TEXT",
+                "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS ux_justification TEXT",
+                "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS ux_actor TEXT",
+                "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS ux_action_at TEXT",
                 """UPDATE file2edi_orders o
                    SET soldto=p.partner_code
                    FROM file2edi_order_partners p

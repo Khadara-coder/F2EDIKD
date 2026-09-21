@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1
-
 # ── Stage 1: Use pre-built React frontend (dist committed to repo) ────────────
 FROM scratch AS frontend-builder
 COPY frontend/dist /dist

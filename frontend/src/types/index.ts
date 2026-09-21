@@ -203,6 +203,19 @@ export interface OrderAnomaly {
   blocking?: boolean;
   issueScope?: string;
   requiresUserInput?: boolean;
+  uxId?: string;
+  uxGroup?: string;
+  uxMessage?: string | null;
+  uxChoices?: Array<{
+    label: string;
+    outcome: string;
+  }>;
+  resolutionMode?: string;
+  requiresRecontrol?: boolean;
+  finalizationRequired?: boolean;
+  uxStatus?: "active" | "draft";
+  uxChoice?: string | null;
+  uxJustification?: string | null;
 }
 
 export interface OrderComment {

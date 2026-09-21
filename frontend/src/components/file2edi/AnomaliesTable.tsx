@@ -7,7 +7,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { isAnomalyPending } from "@/lib/reviewValidation";
 import { cn } from "@/lib/utils";
 import type { OrderAnomaly, OrderComment } from "@/types";
 import { Fragment, useMemo } from "react";
@@ -17,7 +16,7 @@ interface AnomaliesTableProps {
   comments?: OrderComment[];
   selectedAnomalyId: string | null;
   onSelectAnomaly: (anomalyId: string | null) => void;
-  onResolve: (anomalyId: string, action: "corrected" | "ignored") => void;
+  onChoose: (anomalyId: string, outcome: string) => void;
   disabled?: boolean;
 }
 
@@ -54,11 +53,6 @@ function domainOf(a: OrderAnomaly): string {
   return (a.issueDomain || "TECHNICAL").toUpperCase();
 }
 
-function isRowBlocking(a: OrderAnomaly): boolean {
-  if (typeof a.blocking === "boolean") return a.blocking;
-  return a.severity === "error" || a.severity === "blocking";
-}
-
 function groupAnomalies(anomalies: OrderAnomaly[]): { domain: string; items: OrderAnomaly[] }[] {
   const buckets = new Map<string, OrderAnomaly[]>();
   for (const a of anomalies) {
@@ -83,7 +77,7 @@ export function AnomaliesTable({
   comments = [],
   selectedAnomalyId,
   onSelectAnomaly,
-  onResolve,
+  onChoose,
   disabled,
 }: AnomaliesTableProps) {
   const groups = useMemo(() => groupAnomalies(anomalies), [anomalies]);
@@ -113,22 +107,12 @@ export function AnomaliesTable({
                 </TableCell>
               </TableRow>
               {items.map((a) => {
-                const pending = isAnomalyPending(a);
-                const isValidated = a.status === "Corrigée";
-                const isIgnored = a.status === "Ignorée";
-                const acceptLabel = a.buttonAccept?.trim() || "Corrigé";
-                const rejectLabel = a.buttonReject?.trim() || "Refusé";
                 const selected = selectedAnomalyId === a.anomalyId;
-                const shortMsg = a.message.length > 80 ? `${a.message.slice(0, 80)}…` : a.message;
                 const rowId = `anomaly-row-${a.anomalyId}`;
-                const blocking = isRowBlocking(a);
                 const commentCount = comments.filter((c) => c.anomalyId === a.anomalyId).length;
                 const severityKey = (a.issueSeverity || "").toUpperCase();
                 const severityLabel = SEVERITY_LABELS[severityKey];
-                const statusHint =
-                  isValidated ? acceptLabel
-                  : isIgnored ? rejectLabel
-                  : a.status;
+                const statusHint = a.status;
 
                 return (
                   <TableRow
@@ -140,7 +124,6 @@ export function AnomaliesTable({
                     className={cn(
                       "cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                       selected && "bg-primary/5",
-                      blocking && pending && "border-l-2 border-l-red-500",
                     )}
                     onClick={() => onSelectAnomaly(selected ? null : a.anomalyId)}
                     onKeyDown={(e) => {
@@ -168,6 +151,9 @@ export function AnomaliesTable({
                           </span>
                         )}
                       </div>
+                      {a.uxMessage && a.uxMessage !== a.message && (
+                        <p className="mt-1 text-xs text-foreground/80">{a.uxMessage}</p>
+                      )}
                       {commentCount > 0 && (
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {commentCount} note{commentCount > 1 ? "s" : ""}
@@ -176,26 +162,24 @@ export function AnomaliesTable({
                     </TableCell>
                     <TableCell onClick={(e) => e.stopPropagation()}>
                       <div className="flex flex-wrap gap-2">
-                        <Button
-                          variant={isValidated ? "default" : "outline"}
-                          size="sm"
-                          onClick={() => onResolve(a.anomalyId, "corrected")}
-                          disabled={disabled}
-                          aria-pressed={isValidated}
-                          aria-label={`${acceptLabel} — ${shortMsg}`}
-                        >
-                          {acceptLabel}
-                        </Button>
-                        <Button
-                          variant={isIgnored ? "destructive" : "outline"}
-                          size="sm"
-                          onClick={() => onResolve(a.anomalyId, "ignored")}
-                          disabled={disabled}
-                          aria-pressed={isIgnored}
-                          aria-label={`${rejectLabel} — ${shortMsg}`}
-                        >
-                          {rejectLabel}
-                        </Button>
+                        {a.uxChoices?.map((choice) => (
+                          <Button
+                            key={`${a.anomalyId}-${choice.outcome}`}
+                            type="button"
+                                variant={a.uxChoice === choice.outcome ? "default" : "outline"}
+                            size="sm"
+                                className={cn(
+                                  "border-blue-300",
+                                  a.uxChoice === choice.outcome
+                                    ? "bg-blue-600 text-white hover:bg-blue-700"
+                                    : "text-blue-700 hover:bg-blue-50 hover:text-blue-800",
+                                )}
+                            onClick={() => onChoose(a.anomalyId, choice.outcome)}
+                            disabled={disabled}
+                          >
+                            {choice.label}
+                          </Button>
+                        ))}
                       </div>
                     </TableCell>
                   </TableRow>

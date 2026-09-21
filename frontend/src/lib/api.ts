@@ -245,12 +245,16 @@ export const api = {
 
   resolveAnomaly: (
     anomalyId: string,
-    action: "corrected" | "ignored" | "blocking",
+    action: "corrected" | "ignored" | "blocking" | "choice",
+    payload?: { outcome?: string; justification?: string },
   ) =>
     request(`/orders/anomalies/${anomalyId}`, {
       method: "PATCH",
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...payload }),
     }),
+
+  recontrolAnomaly: (anomalyId: string) =>
+    request(`/orders/anomalies/${anomalyId}/recontrol`, { method: "POST" }),
 
   addOrderComment: (orderId: string, body: string, anomalyId?: string | null) =>
     request<OrderReview>(`/orders/${orderId}/comments`, {

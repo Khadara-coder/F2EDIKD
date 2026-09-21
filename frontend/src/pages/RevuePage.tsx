@@ -499,7 +499,7 @@ export function RevuePage() {
               size="sm"
               className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
               onClick={() => setRejectOpen(true)}
-              disabled={workflowLocked || isRejected}
+              disabled={rejectMutation.isPending}
             >
               <XCircle className="h-4 w-4" /> Rejeter
             </Button>
@@ -719,14 +719,30 @@ export function RevuePage() {
               comments={comments}
               selectedAnomalyId={selectedAnomalyId}
               onSelectAnomaly={setSelectedAnomalyId}
-              onResolve={(anomalyId, action) => {
-                void api.resolveAnomaly(anomalyId, action).then(() => {
-                  announce(
-                    action === "corrected"
-                      ? "Anomalie marquée comme corrigée"
-                      : "Anomalie ignorée",
-                  );
+              onChoose={(anomalyId, outcome) => {
+                const needsJustification = outcome === "confirm_new_order_and_recontrol"
+                  || outcome === "confirm_distinct_order_and_recontrol";
+                const justification = needsJustification
+                  ? window.prompt("Justification obligatoire")?.trim() || ""
+                  : undefined;
+                if (needsJustification && !justification) return;
+                void (async () => {
+                  await api.resolveAnomaly(anomalyId, "choice", { outcome, justification });
+                  if (outcome === "correct_and_regenerate" || outcome === "regenerate_and_recontrol") {
+                    const generated = await api.generateEdifact(orderId);
+                    if (!generated.success) throw new Error(generated.errors?.join("\n") || "Génération EDIFACT échouée");
+                  } else if (outcome === "retry_delivery" || outcome === "confirm_manual_delivery") {
+                    const sent = await api.sendToSap(orderId);
+                    if (!sent.success) throw new Error(sent.message || "Transmission non confirmée");
+                  }
+                  await api.recontrolAnomaly(anomalyId);
+                  announce("Choix exécuté et recontrôle terminé");
                   invalidate();
+                })().catch((error: unknown) => {
+                  setInfoDialog({
+                    title: "Choix non enregistré",
+                    message: error instanceof Error ? error.message : "Erreur inconnue",
+                  });
                 });
               }}
               disabled={workflowLocked}
@@ -776,7 +792,7 @@ export function RevuePage() {
           variant="outline"
           className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
           onClick={() => setRejectOpen(true)}
-          disabled={workflowLocked || isRejected}
+          disabled={rejectMutation.isPending}
         >
           <XCircle className="h-4 w-4" /> Rejeter
         </Button>
