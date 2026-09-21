@@ -435,6 +435,7 @@ export function RevuePage() {
     order.status === "Envoyé SAP"
     || Boolean(order.sapSentAt);
   const isConfirmedSap = Boolean(order.sapVbeln);
+  const rejectLocked = isRejected || isSentToSap || isConfirmedSap;
   const cooldownActive = isSentToSap && cooldownRemaining > 0;
   // Rejeté (moteur ou manuel) reste traitable : corriger, enregistrer, envoyer SAP.
   // Seul un envoi SAP déjà effectué verrouille le dossier (renvoi admin excepté).
@@ -499,7 +500,7 @@ export function RevuePage() {
               size="sm"
               className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
               onClick={() => setRejectOpen(true)}
-              disabled={rejectMutation.isPending}
+              disabled={rejectMutation.isPending || rejectLocked}
             >
               <XCircle className="h-4 w-4" /> Rejeter
             </Button>
@@ -792,7 +793,7 @@ export function RevuePage() {
           variant="outline"
           className="gap-2 border-rose-300 text-rose-700 hover:bg-rose-50"
           onClick={() => setRejectOpen(true)}
-          disabled={rejectMutation.isPending}
+          disabled={rejectMutation.isPending || rejectLocked}
         >
           <XCircle className="h-4 w-4" /> Rejeter
         </Button>
