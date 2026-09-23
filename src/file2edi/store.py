@@ -409,6 +409,9 @@ class File2EdiStore:
         _ensure_column("file2edi_order_anomalies", "ux_justification", "ux_justification TEXT")
         _ensure_column("file2edi_order_anomalies", "ux_actor", "ux_actor TEXT")
         _ensure_column("file2edi_order_anomalies", "ux_action_at", "ux_action_at TEXT")
+        _ensure_column(
+            "file2edi_order_anomalies", "suggested_replacement", "suggested_replacement TEXT"
+        )
 
         _ensure_column("file2edi_orders", "upload_id", "upload_id TEXT")
         _ensure_column("file2edi_orders", "file_name", "file_name TEXT")
@@ -705,8 +708,8 @@ class File2EdiStore:
                 for a in review.get("anomalies", []):
                     conn.execute(
                         """INSERT INTO file2edi_order_anomalies
-                        (anomaly_id,order_id,line_id,severity,field_name,message,status,created_at)
-                        VALUES (?,?,?,?,?,?,?,?)
+                        (anomaly_id,order_id,line_id,severity,field_name,message,status,created_at,suggested_replacement)
+                        VALUES (?,?,?,?,?,?,?,?,?)
                         ON CONFLICT(anomaly_id) DO UPDATE SET
                           order_id=excluded.order_id,
                           line_id=excluded.line_id,
@@ -714,11 +717,13 @@ class File2EdiStore:
                           field_name=excluded.field_name,
                           message=excluded.message,
                           status=excluded.status,
-                          created_at=excluded.created_at""",
+                          created_at=excluded.created_at,
+                          suggested_replacement=excluded.suggested_replacement""",
                         [
                             a["anomalyId"], a["orderId"], a.get("lineId"), a.get("severity"),
                             a.get("fieldName"), a["message"], a.get("status", "Ouverte"),
                             a.get("createdAt", _now()),
+                            a.get("suggestedReplacement"),
                         ],
                     )
                 conn.commit()
@@ -979,6 +984,7 @@ class File2EdiStore:
             "status": "status", "created_at": "createdAt",
             "ux_choice": "uxChoice", "ux_justification": "uxJustification",
             "ux_actor": "uxActor", "ux_action_at": "uxActionAt",
+            "suggested_replacement": "suggestedReplacement",
         }
         c_map = {
             "comment_id": "commentId", "order_id": "orderId", "anomaly_id": "anomalyId",
@@ -1137,7 +1143,23 @@ class File2EdiStore:
                 mapped["uxId"] = ux["ux_id"]
                 mapped["uxGroup"] = ux["group"]
                 mapped["uxMessage"] = ux["message"]
-                mapped["uxChoices"] = list(ux["choices"])
+                choices = list(ux["choices"])
+                # ADV validation truth table row 12 (UX-08): when the masterdata
+                # provides a resolved replacement reference Y, prepend a
+                # contextual "J'ai remplacé la référence par Y" choice so the ADV
+                # can log that the suggested replacement was applied (post-edit).
+                # Distinct outcome from correct_and_recontrol so the biz log can
+                # separate "used the suggestion" from "typed a different value".
+                suggested = str(mapped.get("suggestedReplacement") or "").strip()
+                if code == "MATERIAL_STATUS_INVALID" and suggested:
+                    choices.insert(
+                        0,
+                        {
+                            "label": f"J'ai remplacé la référence par {suggested}",
+                            "outcome": "apply_suggested_replacement_and_recontrol",
+                        },
+                    )
+                mapped["uxChoices"] = choices
                 mapped["resolutionMode"] = ux["resolution_mode"]
                 mapped["requiresRecontrol"] = ux["requires_recontrol"]
                 mapped["finalizationRequired"] = ux["finalization_required"]
@@ -2758,7 +2780,8 @@ class PostgresFile2EdiStore(File2EdiStore):
           ux_choice TEXT,
           ux_justification TEXT,
           ux_actor TEXT,
-          ux_action_at TEXT
+          ux_action_at TEXT,
+          suggested_replacement TEXT
         );
 
         CREATE TABLE IF NOT EXISTS file2edi_order_comments (
@@ -2864,6 +2887,7 @@ class PostgresFile2EdiStore(File2EdiStore):
                 "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS ux_justification TEXT",
                 "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS ux_actor TEXT",
                 "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS ux_action_at TEXT",
+                "ALTER TABLE file2edi_order_anomalies ADD COLUMN IF NOT EXISTS suggested_replacement TEXT",
                 """UPDATE file2edi_orders o
                    SET soldto=p.partner_code
                    FROM file2edi_order_partners p

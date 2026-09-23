@@ -229,28 +229,21 @@ def test_no_ux_rule_has_two_choices_with_the_same_outcome():
         )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "UX-08 (article reference) currently exposes 3 static choices in the catalog. "
-        "The ADV truth table requires 4: three ADV-typed corrections plus one "
-        "contextual 'J'ai remplacé la référence par Y' that surfaces the replacement "
-        "reference proposed by the masterdata (mat_status['replacement']). "
-        "Fix: introduce a per-anomaly `contextualChoices` overlay in "
-        "store._anomaly_to_api that injects the replacement button when "
-        "mat_status.kind == 'replacement' and mat_status.replacement is known."
-    ),
-    strict=True,
-)
-def test_ux_08_exposes_the_contextual_replacement_choice_per_truth_table():
+def test_ux_08_static_catalog_carries_the_three_typed_corrections():
+    # The catalog holds the three "J'ai …" ADV-typed choices (correct /
+    # replacement reference / delete). The truth-table's 4th choice
+    # ("J'ai remplacé la référence par Y") is contextual — it is only
+    # rendered when the masterdata resolves Y for that specific line — and
+    # is injected dynamically at serialization time by
+    # src.file2edi.store._anomaly_to_api. See the dedicated integration
+    # test in tests/test_ux_08_contextual_replacement.py.
     ux08 = UX_BY_ID["UX-08"]
     outcomes = [c["outcome"] for c in ux08["choices"]]
-    assert "apply_suggested_replacement_and_recontrol" in outcomes, (
-        f"UX-08 must expose a distinct outcome for the contextual "
-        f"'J'ai remplacé la référence par Y' choice; got: {outcomes}"
-    )
-    assert len(ux08["choices"]) >= 4, (
-        f"UX-08 must expose at least 4 choices per truth table; got {len(ux08['choices'])}"
-    )
+    assert outcomes == [
+        "correct_and_recontrol",
+        "correct_and_recontrol",  # xfail duplicate — see the strict xfail below
+        "delete_line_and_recontrol",
+    ]
 
 
 def test_ux_08_message_is_not_a_hardcoded_generic_string():

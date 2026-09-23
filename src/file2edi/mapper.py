@@ -282,9 +282,13 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
 
     # Materials Statut: disponible OK; no sale = arrêté; Statut MATNR = remplacement; absent = erreur.
     try:
-        from src.masterdata_runtime import format_material_status_anomaly_message
+        from src.masterdata_runtime import (
+            format_material_status_anomaly_message,
+            material_status_replacement,
+        )
     except Exception:
         format_material_status_anomaly_message = None  # type: ignore[assignment]
+        material_status_replacement = None  # type: ignore[assignment]
     if format_material_status_anomaly_message is not None:
         for ln in parsed_lines:
             art = str(ln.get("boschArticle") or "").strip()
@@ -298,7 +302,16 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 continue
             msg = built["message"]
             severity = built["severity"]
-            _add_anomaly({
+            # When the masterdata provides a resolved replacement reference Y,
+            # attach it to the anomaly so the review UI can offer the
+            # truth-table contextual choice "J'ai remplacé la référence par Y".
+            replacement = None
+            if material_status_replacement is not None:
+                try:
+                    replacement = material_status_replacement(art)
+                except Exception:
+                    replacement = None
+            anomaly = {
                 "anomalyId": f"an-mat-status-{order_id}-{ln.get('lineNumber')}-{art}",
                 "orderId": order_id,
                 "lineId": ln.get("lineId"),
@@ -307,7 +320,10 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 "message": msg,
                 "status": "Bloquante" if severity == "error" else "Ouverte",
                 "createdAt": _now(),
-            })
+            }
+            if replacement:
+                anomaly["suggestedReplacement"] = replacement
+            _add_anomaly(anomaly)
             ln["status"] = "À vérifier"
             existing_comment = str(ln.get("comment") or "").strip()
             ln["comment"] = (
