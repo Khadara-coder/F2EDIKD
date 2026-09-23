@@ -630,4 +630,49 @@ describe("AnomaliesTable — UX matrix", () => {
 
     expect(screen.queryByText(/0 note/i)).not.toBeInTheDocument();
   });
+
+  /**
+   * ADV validation truth table (row 12, UX-08) — documented gap:
+   *
+   * MATERIAL_STATUS_INVALID anomalies come with a per-line dynamic message from
+   * masterdata_runtime.build_material_status_message (e.g. "Ligne 3 : la
+   * référence 7738201234 a été remplacée depuis le 15/09/2026 par 7738209876"),
+   * stored in `anomaly.message`. The catalog additionally sets a static
+   * `uxMessage` ("Génie n'a pas pu valider la référence article sur la ligne
+   * concernée"). The component currently prefers uxMessage → the ADV loses the
+   * specific X/Y/date information required by the truth table.
+   *
+   * `it.fails` inverts the assertion: it PASSES today because the specific
+   * message is NOT shown. When store._anomaly_to_api stops overwriting the
+   * message (or the frontend flips the preference), this test will FAIL,
+   * signalling the fix has landed and the assertion should be normalised.
+   */
+  it.fails(
+    "known bug (UX-08): specific per-line message is hidden by the generic uxMessage from the catalog",
+    () => {
+      render(
+        <AnomaliesTable
+          anomalies={[
+            anomaly({
+              anomalyId: "an-ux08-mat",
+              message: "Ligne 3 : la référence 7738201234 a été remplacée depuis le 15/09/2026 par 7738209876",
+              uxMessage: "Génie n'a pas pu valider la référence article sur la ligne concernée",
+              uxId: "UX-08",
+              uxChoices: [
+                { label: "J'ai remplacé ou corrigé la référence article", outcome: "correct_and_recontrol" },
+              ],
+            }),
+          ]}
+          selectedAnomalyId={null}
+          onSelectAnomaly={onSelect}
+          onChoose={onChoose}
+        />,
+      );
+
+      // Truth-table-conformant behaviour: the specific message wins.
+      expect(
+        screen.getByText(/référence 7738201234 a été remplacée .* par 7738209876/i),
+      ).toBeInTheDocument();
+    },
+  );
 });

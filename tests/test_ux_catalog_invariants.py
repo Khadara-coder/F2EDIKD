@@ -195,7 +195,24 @@ def test_every_code_handled_by_ux_recontrol_has_a_ux_rule():
         assert ux_rule(code) is not None, f"{code} has recontrol logic but no UX-* mapping"
 
 
-# ─── Known defect (documented) ────────────────────────────────────────────
+# ─── Known defects: UX-08 vs ADV validation truth table ───────────────────
+# The ADV validation workbook ("Copie de Table des validations ADV dans
+# Génicommande.xlsx", row 12) specifies four distinct affordances for UX-08:
+#
+#   1. "J'ai remplacé la référence par Y"          (contextual, Y = suggested
+#                                                    replacement from masterdata)
+#   2. "J'ai corrigé la référence article"
+#   3. "J'ai renseigné une autre référence de remplacement"
+#   4. "J'ai supprimé la ligne concernée"
+#
+# Along with a DYNAMIC message that adapts to the material status kind:
+#   - "Génie a détecté que la référence X est remplacée par Y depuis le
+#      jj/mm/aaaa" (kind=replacement)
+#   - "la référence X est arrêtée (plus commercialisée)" (kind=no_sale)
+#   - "référence X absente du référentiel Articles" (kind=missing)
+#
+# The XFAILs below pin the gaps between the current catalog and that spec so
+# a fix flips them to XPASS and drives the migration in lockstep.
 
 @pytest.mark.xfail(
     reason=(
@@ -210,6 +227,59 @@ def test_no_ux_rule_has_two_choices_with_the_same_outcome():
         assert len(set(outcomes)) == len(outcomes), (
             f"{rule['ux_id']} has duplicate outcomes: {outcomes}"
         )
+
+
+@pytest.mark.xfail(
+    reason=(
+        "UX-08 (article reference) currently exposes 3 static choices in the catalog. "
+        "The ADV truth table requires 4: three ADV-typed corrections plus one "
+        "contextual 'J'ai remplacé la référence par Y' that surfaces the replacement "
+        "reference proposed by the masterdata (mat_status['replacement']). "
+        "Fix: introduce a per-anomaly `contextualChoices` overlay in "
+        "store._anomaly_to_api that injects the replacement button when "
+        "mat_status.kind == 'replacement' and mat_status.replacement is known."
+    ),
+    strict=True,
+)
+def test_ux_08_exposes_the_contextual_replacement_choice_per_truth_table():
+    ux08 = UX_BY_ID["UX-08"]
+    outcomes = [c["outcome"] for c in ux08["choices"]]
+    assert "apply_suggested_replacement_and_recontrol" in outcomes, (
+        f"UX-08 must expose a distinct outcome for the contextual "
+        f"'J'ai remplacé la référence par Y' choice; got: {outcomes}"
+    )
+    assert len(ux08["choices"]) >= 4, (
+        f"UX-08 must expose at least 4 choices per truth table; got {len(ux08['choices'])}"
+    )
+
+
+@pytest.mark.xfail(
+    reason=(
+        "UX-08 message is currently a single generic string ('Génie n'a pas pu "
+        "valider la référence article sur la ligne concernée'). The ADV truth "
+        "table requires a dynamic message adapted to the material status kind "
+        "(replacement / no_sale / missing / cycle) with X, Y, and effective date "
+        "interpolated. masterdata_runtime.build_material_status_message() already "
+        "produces this — but store._anomaly_to_api overwrites the specific "
+        "`message` with the generic `uxMessage` from the catalog, and the frontend "
+        "prefers uxMessage. Fix: either set UX-08 message=None in the catalog so "
+        "the dynamic `message` shines through, or expose the dynamic string via a "
+        "distinct field (uxContextualMessage) that the frontend can prefer."
+    ),
+    strict=True,
+)
+def test_ux_08_message_is_not_a_hardcoded_generic_string():
+    ux08 = UX_BY_ID["UX-08"]
+    # The catalog message must be None (letting the dynamic per-line message
+    # take over) OR contain a placeholder pattern like {reference} / {replacement}
+    # that a formatter can substitute.
+    msg = ux08["message"]
+    if msg is None:
+        return  # OK — dynamic message takes over.
+    assert "{" in msg or "%" in msg, (
+        f"UX-08 message should be None or contain a formatting placeholder; "
+        f"got a hardcoded generic string: {msg!r}"
+    )
 
 
 # ─── FR message hygiene ───────────────────────────────────────────────────
