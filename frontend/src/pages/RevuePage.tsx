@@ -753,12 +753,13 @@ export function RevuePage() {
             // 3fr / 1fr: the Journal d'activité is a signal panel, not the main
             // work area. Halved from the previous 50/50 layout so the anomaly
             // actions (main ADV workspace) get the vertical + horizontal room
-            // to render 4-button UX-08 rows without wrapping. lg:items-stretch
-            // lets both cards fill the row height in lockstep.
+            // to render 4-button UX-08 rows without wrapping. Both cards share
+            // the same fixed height (lg:h-[560px]) so the Journal aligns with
+            // the Anomalies card and scrolls internally when overflowing.
             : "grid gap-6 lg:grid-cols-[3fr_1fr] lg:items-stretch"
         }
       >
-        <Card className="flex flex-col">
+        <Card className="flex flex-col lg:h-[560px]">
           <CardHeader>
             <CardTitle className="text-base">Anomalies et commentaires</CardTitle>
             {pendingAnomalyCount > 0 && (
@@ -767,7 +768,7 @@ export function RevuePage() {
               </p>
             )}
           </CardHeader>
-          <CardContent className="flex-1 space-y-3">
+          <CardContent className="flex-1 space-y-3 overflow-y-auto">
             <AnomaliesTable
               anomalies={anomalies}
               comments={comments}
@@ -815,7 +816,7 @@ export function RevuePage() {
         </Card>
 
         {isAdmin && (
-          <Card className="flex flex-col">
+          <Card className="flex flex-col lg:h-[560px]">
             <CardHeader className="flex-row items-center justify-between space-y-0 p-4">
               <CardTitle className="text-base">Journal d'activité</CardTitle>
               <span className="text-xs text-muted-foreground">
