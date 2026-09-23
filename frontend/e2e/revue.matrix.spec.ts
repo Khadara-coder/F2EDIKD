@@ -22,6 +22,10 @@ async function setupBaseline(mockedApi: import("./fixtures").MockedApi, review: 
   await mockedApi.json(/\/users$/, []);
   await mockedApi.json(/\/settings$/, {});
   await mockedApi.json(new RegExp(`/orders/${MOCK_ORDER_ID}/review$`), review);
+  // Catch-all for recontrol side-calls triggered by *_and_recontrol outcomes:
+  // without this, the backend ECONNREFUSED opens an error dialog that blocks
+  // subsequent UI interactions in tests that click multiple buttons.
+  await mockedApi.json(/\/orders\/anomalies\/[^/]+\/recontrol$/, { status: "ok" });
 }
 
 test.describe("Revue — choice matrix E2E", () => {
