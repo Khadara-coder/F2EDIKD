@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { Download, Send, PauseCircle, UserCheck, XCircle, Save, RefreshCw } from "lucide-react";
+import { Clock3, Download, Send, PauseCircle, UserCheck, XCircle, Save, RefreshCw } from "lucide-react";
 import { api } from "@/lib/api";
 import { useOrderReview } from "@/hooks/useFile2Edi";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
@@ -12,7 +12,6 @@ import { PdfPreviewPanel } from "@/components/file2edi/PdfPreviewPanel";
 import { OrderGeneralInfoPanel } from "@/components/file2edi/OrderGeneralInfoPanel";
 import { OrderLinesEditPanel } from "@/components/file2edi/OrderLinesEditPanel";
 import { OrderLinesSummaryTable } from "@/components/file2edi/OrderLinesSummaryTable";
-import { ProgressStepper } from "@/components/file2edi/ProgressStepper";
 import { AnomaliesTable } from "@/components/file2edi/AnomaliesTable";
 import { OrderCommentsPanel } from "@/components/file2edi/OrderCommentsPanel";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,7 +36,7 @@ import {
   focusFirstBlocker,
   type ReviewFieldKey,
 } from "@/lib/reviewValidation";
-import type { GestionnaireUser } from "@/types";
+import type { GestionnaireUser, OrderActivityEvent } from "@/types";
 
 function formatCooldownMmSs(seconds: number): string {
   const total = Math.max(0, Math.floor(seconds));
@@ -67,6 +66,42 @@ function useSapResendCooldown(sapSentAt?: string, cooldownSeconds = 300): number
   return remaining;
 }
 
+const ACTIVITY_LABELS: Record<string, string> = {
+  "upload.extract": "Commande extraite",
+  "upload.extract_direct": "Commande extraite",
+  "order.hold": "Dossier mis en attente",
+  "order.reject": "Dossier rejeté",
+  "order.transfer": "Dossier transféré",
+  "order.reprocess": "Dossier retraité",
+  "order.patch_header": "Informations générales modifiées",
+  "order.patch_partner": "Client ou livraison modifié",
+  "order.patch_line": "Ligne de commande modifiée",
+  "order.add_line": "Ligne de commande ajoutée",
+  "order.add_lines_bulk": "Lignes de commande ajoutées",
+  "order.delete_line": "Ligne de commande supprimée",
+  "anomaly.choice": "Décision appliquée sur une anomalie",
+  "anomaly.recontrol": "Anomalie recontrôlée",
+  "order.save": "Dossier enregistré",
+  "order.generate_edifact": "EDIFACT généré",
+  "order.send_sap": "Commande envoyée vers SAP",
+  "order.send_sftp": "Commande envoyée vers SAP",
+};
+
+function activityLabel(action: string): string {
+  return ACTIVITY_LABELS[action] ?? action.replace(/[._]/g, " ");
+}
+
+function activityDetail(event: OrderActivityEvent): string | null {
+  const details = event.details ?? {};
+  const fields = Array.isArray(details.fields) ? details.fields.filter((field): field is string => typeof field === "string") : [];
+  if (fields.length) return `Champs : ${fields.join(", ")}`;
+  if (typeof details.reason === "string" && details.reason) return details.reason;
+  if (typeof details.to === "string" && details.to) return `Vers ${details.to}`;
+  if (typeof details.outcome === "string" && details.outcome) return details.outcome.replace(/_/g, " ");
+  if (typeof details.count === "number") return `${details.count} élément${details.count > 1 ? "s" : ""}`;
+  return null;
+}
+
 export function RevuePage() {
   const { orderId } = useParams();
   if (!orderId) {
@@ -75,6 +110,12 @@ export function RevuePage() {
   const queryClient = useQueryClient();
   const meQuery = useCurrentUser();
   const { data, isLoading, isError, error, refetch } = useOrderReview(orderId);
+  const activityQuery = useQuery({
+    queryKey: ["order", orderId, "activity"],
+    queryFn: () => api.getOrderActivity(orderId, 100),
+    enabled: meQuery.data?.role === "admin",
+    staleTime: 10_000,
+  });
   const cooldownSeconds = data?.order?.sapResendCooldown?.cooldownSeconds ?? 300;
   const cooldownRemaining = useSapResendCooldown(data?.order?.sapSentAt, cooldownSeconds);
   const [infoDialog, setInfoDialog] = useState<{ title: string; message: string } | null>(null);
@@ -97,6 +138,7 @@ export function RevuePage() {
 
   const invalidate = () => {
     void queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
+    void queryClient.invalidateQueries({ queryKey: ["order", orderId, "activity"] });
     void queryClient.invalidateQueries({ queryKey: ["orders"] });
     void queryClient.invalidateQueries({ queryKey: ["dashboard"] });
   };
@@ -259,7 +301,7 @@ export function RevuePage() {
     );
   }
 
-  const { order, partners, lines, anomalies, comments = [], traceability } = data;
+  const { order, partners, lines, anomalies, comments = [] } = data;
   const soldto = partners.find((p) => p.partnerFunction === "soldto");
   const shipto = partners.find((p) => p.partnerFunction === "shipto");
   const invalidDate = !order.orderDate;
@@ -721,10 +763,19 @@ export function RevuePage() {
               selectedAnomalyId={selectedAnomalyId}
               onSelectAnomaly={setSelectedAnomalyId}
               onChoose={(anomalyId, outcome) => {
-                void api.resolveAnomaly(anomalyId, "choice", { outcome }).then(() => {
-                  announce("Choix enregistré");
-                  void queryClient.invalidateQueries({ queryKey: ["order", orderId, "review"] });
-                }).catch((error: unknown) => {
+                void (async () => {
+                  await api.resolveAnomaly(anomalyId, "choice", { outcome });
+                  if (outcome === "correct_and_regenerate" || outcome === "regenerate_and_recontrol") {
+                    const generated = await api.generateEdifact(orderId);
+                    if (!generated.success) throw new Error(generated.errors?.join("\n") || "Génération EDIFACT échouée");
+                  } else if (outcome === "retry_delivery" || outcome === "confirm_manual_delivery") {
+                    const sent = await api.sendToSap(orderId);
+                    if (!sent.success) throw new Error(sent.message || "Transmission non confirmée");
+                  }
+                  await api.recontrolAnomaly(anomalyId);
+                  announce("Choix exécuté et recontrôle terminé");
+                  invalidate();
+                })().catch((error: unknown) => {
                   setInfoDialog({
                     title: "Choix non enregistré",
                     message: error instanceof Error ? error.message : "Erreur inconnue",
@@ -752,13 +803,40 @@ export function RevuePage() {
           </CardContent>
         </Card>
 
-        {!isAdv && (
+        {isAdmin && (
           <Card>
-            <CardHeader>
-              <CardTitle className="text-base">Traçabilité</CardTitle>
+            <CardHeader className="flex-row items-center justify-between space-y-0 p-4">
+              <CardTitle className="text-base">Journal d'activité</CardTitle>
+              <span className="text-xs text-muted-foreground">
+                {activityQuery.data?.count ?? 0} action{(activityQuery.data?.count ?? 0) > 1 ? "s" : ""}
+              </span>
             </CardHeader>
-            <CardContent>
-              <ProgressStepper steps={traceability} />
+            <CardContent className="max-h-72 overflow-y-auto p-0">
+              {activityQuery.isLoading ? (
+                <LoadingState label="Chargement du journal…" className="py-4" />
+              ) : activityQuery.isError ? (
+                <p className="px-4 py-3 text-sm text-destructive">Impossible de charger le journal d'activité.</p>
+              ) : activityQuery.data?.items.length ? (
+                <ul className="divide-y">
+                  {activityQuery.data.items.map((event) => {
+                    const detail = activityDetail(event);
+                    return (
+                      <li key={event.eventId} className="flex gap-2 px-4 py-2.5">
+                        <Clock3 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium leading-5">{activityLabel(event.action)}</p>
+                          {detail && <p className="truncate text-xs text-muted-foreground" title={detail}>{detail}</p>}
+                          <p className="text-xs text-muted-foreground">
+                            {event.actor || "Système"} · {formatDateTime(event.createdAt)}
+                          </p>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="px-4 py-3 text-sm text-muted-foreground">Aucune action enregistrée pour ce dossier.</p>
+              )}
             </CardContent>
           </Card>
         )}

@@ -283,6 +283,19 @@ export interface OrderReview {
   edifactReady: boolean;
 }
 
+export interface OrderActivityEvent {
+  eventId: string;
+  createdAt: string;
+  actor: string;
+  action: string;
+  entityType?: string | null;
+  entityId?: string | null;
+  orderId?: string | null;
+  result: string;
+  durationMs?: number | null;
+  details?: Record<string, unknown>;
+}
+
 export interface ExtractionPreview {
   uploadId: string;
   orderId: string;

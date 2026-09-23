@@ -2512,6 +2512,7 @@ class File2EdiStore:
         search: str = "",
         actor: str | None = None,
         action: str | None = None,
+        order_id: str | None = None,
     ) -> list[dict]:
         limit = max(1, min(1000, int(limit or 200)))
         clauses: list[str] = []
@@ -2522,6 +2523,9 @@ class File2EdiStore:
         if action:
             clauses.append("action=?")
             params.append(action)
+        if order_id:
+            clauses.append("order_id=?")
+            params.append(order_id)
         needle = str(search or "").strip()
         if needle:
             like = f"%{needle}%"

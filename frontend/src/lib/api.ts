@@ -12,6 +12,7 @@ import type {
   MasterDataPartnerRow,
   MasterDataResponse,
   OrderReview,
+  OrderActivityEvent,
   PartnerEditSource,
   PartnerFieldKey,
   ReviewQueueItem,
@@ -261,6 +262,11 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ body, anomalyId: anomalyId || undefined }),
     }),
+
+  getOrderActivity: (orderId: string, limit = 25) =>
+    request<{ items: OrderActivityEvent[]; count: number }>(
+      `/orders/${orderId}/activity?limit=${limit}`,
+    ),
 
   generateEdifact: (orderId: string) =>
     request<GenerateEdifactResult>(`/orders/${orderId}/generate-edifact`, {

@@ -911,6 +911,17 @@ def create_router() -> APIRouter:
             raise HTTPException(404, "Commande introuvable")
         return _with_sap_resend_cooldown(review)
 
+    @router.get("/orders/{order_id}/activity")
+    def get_order_activity(order_id: str, req: Request, limit: int = 25):
+        ensure_admin(req)
+        if not get_store().load_order_review(order_id):
+            raise HTTPException(404, "Commande introuvable")
+        items = get_store().list_business_events(
+            order_id=order_id,
+            limit=max(1, min(100, int(limit or 25))),
+        )
+        return {"items": items, "count": len(items)}
+
     def _serve_order_pdf(order_id: str):
         store = get_store()
         path = store.get_pdf_path_for_order(order_id)
