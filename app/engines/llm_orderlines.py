@@ -21,7 +21,7 @@ import logging
 import re
 from typing import Optional
 from app.engines.llm_gateway import chat_completion
-from app.engines.delivery_date import extract_delivery_info
+from app.engines.delivery_date import extract_delivery_info, normalize_delivery_date_with_fallback
 from app.engines.special_instructions import extract_special_instructions, extract_warnings
 
 logger = logging.getLogger(__name__)
@@ -219,7 +219,8 @@ def _cohere_line(line: dict) -> dict | None:
     
     # Extract delivery info and special instructions from description
     delivery_info = extract_delivery_info(description)
-    delivery_date_extracted = line.get("date_livraison") or delivery_info.get("delivery_date")
+    delivery_date_raw = line.get("date_livraison") or delivery_info.get("delivery_date")
+    delivery_date_extracted = normalize_delivery_date_with_fallback(delivery_date_raw)
     special_instructions = extract_special_instructions(description)
     warnings = extract_warnings(description)
 
@@ -366,6 +367,41 @@ def _split_text_for_llm(text: str, max_chars: int = LLM_TEXT_CHUNK_CHARS) -> lis
     return chunks
 
 
+def _extract_vref_map(text: str) -> dict[str, str]:
+    """Build a substitution map {internal_code: bosch_ref} from ANDRETY-style V/réf lines.
+
+    Format in ANDRETY PDFs (and similar suppliers):
+        1  PRODUCT DESIGNATION  <internal_code>  <qty>  P.  Au plus tôt  <price>  <total>
+        V/réf: <bosch_reference>
+
+    The internal_code is a 6-9 digit number embedded in the order line.
+    The bosch_reference (after 'V/réf:') is the actual ELM/Bosch MATNR.
+    """
+    vref_map: dict[str, str] = {}
+    lines = text.splitlines()
+    for i, line in enumerate(lines):
+        m = re.search(r"[Vv]/[Rr][ée][Ff]\s*[:=]\s*(\S+)", line)
+        if not m:
+            continue
+        bosch_ref = re.sub(r"[\s\-]", "", m.group(1))
+        if not re.fullmatch(r"[A-Z0-9]{5,13}", bosch_ref, re.IGNORECASE):
+            continue
+        # Look at the preceding non-empty line for the internal code (6-9 pure-digit token
+        # that is NOT a price and NOT a quantity — typically a 7-digit catalog number).
+        for j in range(i - 1, max(i - 3, -1), -1):
+            prev = lines[j].strip()
+            if not prev:
+                continue
+            # Find all pure-digit tokens of 6-9 digits (skip decimals like 662,29 or 101.00)
+            candidates = re.findall(r"(?<!\d)(\d{6,9})(?!\d|[,.])", prev)
+            if candidates:
+                # Take the last match — it's the internal catalog code position in the line
+                internal = candidates[-1]
+                vref_map[internal] = bosch_ref
+            break
+    return vref_map
+
+
 def _line_key(line: dict) -> tuple:
     return (
         str(line.get("code_article") or "").strip(),
@@ -379,9 +415,15 @@ def llm_extract_orderlines(text: str) -> list[dict]:
     """Extract order lines from the full PDF text using the LLM.
 
     Long documents are processed in successive chunks so later pages are not dropped.
+    For suppliers like ANDRETY whose PDFs list an internal catalog code on the main
+    line and the real Bosch reference on a 'V/réf:' follow-up line, a pre-pass builds
+    a substitution map that patches extracted article codes before deduplication.
     """
     if not text or len(text) < 50:
         return []
+
+    # Build V/réf substitution map before LLM call (text-level, no LLM cost)
+    vref_map = _extract_vref_map(text)
 
     merged: list[dict] = []
     seen: set[tuple] = set()
@@ -392,6 +434,10 @@ def llm_extract_orderlines(text: str) -> list[dict]:
         if not parsed or not isinstance(parsed, list):
             continue
         for line in _finalize_llm_lines(parsed):
+            # Apply V/réf substitution: replace internal codes with Bosch refs
+            art = str(line.get("code_article") or "").strip()
+            if art in vref_map:
+                line = {**line, "code_article": vref_map[art]}
             key = _line_key(line)
             if not key[0] or key in seen:
                 continue
@@ -401,5 +447,7 @@ def llm_extract_orderlines(text: str) -> list[dict]:
     for index, line in enumerate(merged, start=1):
         line["numero_ligne"] = index * 10
 
+    if vref_map:
+        logger.info("LLM orderlines: applied %d V/réf substitutions", len(vref_map))
     logger.info("LLM orderlines: %s lines extracted from full document", len(merged))
     return merged

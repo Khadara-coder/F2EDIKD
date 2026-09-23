@@ -9,7 +9,7 @@ from app.amounts import extract_document_totals, rank_amounts_by_context
 from app.document import build_cross_validation, build_debug_summary
 from app.engines.customer_order import CustomerOrderNumberEngine
 from app.engines.delivery_address import DeliveryAddressEngine
-from app.engines.delivery_date import extract_delivery_info
+from app.engines.delivery_date import extract_delivery_info, normalize_delivery_date_with_fallback
 from app.engines.order_lines import OrderLinesEngine
 from app.engines.shipto_matching import ShipToMatchingEngine
 from app.engines.special_instructions import extract_special_instructions, extract_warnings
@@ -132,14 +132,16 @@ def _sanitize_order_lines(order_lines: list[dict]) -> list[dict]:
         price = _to_float(line.get("prix_unitaire_ht") if "prix_unitaire_ht" in line else line.get("unit_price"))
         total = _to_float(line.get("montant_ligne_ht") if "montant_ligne_ht" in line else line.get("amount"))
         description = compact_text(line.get("description") or line.get("designation") or "")
-        delivery_date = line.get("date_livraison") or line.get("delivery_date")
+        delivery_date_raw = line.get("date_livraison") or line.get("delivery_date")
         customer_reference = compact_text(line.get("customer_reference") or line.get("ref_client") or "")
         payment_terms = compact_text(line.get("payment_terms") or "")
-        
+
         # Extract delivery info and special instructions from description context
         delivery_info = extract_delivery_info(description)
-        if not delivery_date and delivery_info.get("delivery_date"):
-            delivery_date = delivery_info["delivery_date"]
+        if not delivery_date_raw and delivery_info.get("delivery_date"):
+            delivery_date_raw = delivery_info["delivery_date"]
+        # Always normalize to ISO; fall back to today when format is unrecognizable
+        delivery_date = normalize_delivery_date_with_fallback(delivery_date_raw)
         
         special_instructions = extract_special_instructions(description)
         warnings = extract_warnings(description)
@@ -795,6 +797,8 @@ def extract_structured_fields(
     )
     if final_order_date and final_delivery_date and final_delivery_date < final_order_date:
         final_delivery_date = final_order_date
+    if not final_delivery_date:
+        final_delivery_date = date.today().isoformat()
 
     totals, total_lignes_ht = _finalize_document_totals(totals, order_lines)
 
