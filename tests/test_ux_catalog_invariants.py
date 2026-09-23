@@ -253,39 +253,38 @@ def test_ux_08_exposes_the_contextual_replacement_choice_per_truth_table():
     )
 
 
-@pytest.mark.xfail(
-    reason=(
-        "UX-08 message is currently a single generic string ('Génie n'a pas pu "
-        "valider la référence article sur la ligne concernée'). The ADV truth "
-        "table requires a dynamic message adapted to the material status kind "
-        "(replacement / no_sale / missing / cycle) with X, Y, and effective date "
-        "interpolated. masterdata_runtime.build_material_status_message() already "
-        "produces this — but store._anomaly_to_api overwrites the specific "
-        "`message` with the generic `uxMessage` from the catalog, and the frontend "
-        "prefers uxMessage. Fix: either set UX-08 message=None in the catalog so "
-        "the dynamic `message` shines through, or expose the dynamic string via a "
-        "distinct field (uxContextualMessage) that the frontend can prefer."
-    ),
-    strict=True,
-)
 def test_ux_08_message_is_not_a_hardcoded_generic_string():
+    # UX-08 message is None on purpose so the per-line dynamic string from
+    # src.masterdata_runtime.build_material_status_message (e.g.
+    # "Ligne 3 : la référence X a été remplacée depuis le jj/mm/aaaa par Y")
+    # surfaces to the ADV verbatim instead of being overwritten by a generic
+    # framing. If a future change re-introduces a static string here, allow
+    # it only when it contains a formatting placeholder ({…} or %…) so a
+    # formatter can substitute the runtime values.
     ux08 = UX_BY_ID["UX-08"]
-    # The catalog message must be None (letting the dynamic per-line message
-    # take over) OR contain a placeholder pattern like {reference} / {replacement}
-    # that a formatter can substitute.
     msg = ux08["message"]
     if msg is None:
-        return  # OK — dynamic message takes over.
+        return
     assert "{" in msg or "%" in msg, (
-        f"UX-08 message should be None or contain a formatting placeholder; "
+        f"UX-08 message must be None or contain a formatting placeholder; "
         f"got a hardcoded generic string: {msg!r}"
     )
 
 
 # ─── FR message hygiene ───────────────────────────────────────────────────
 
+# UX rules whose message is intentionally None because a per-line dynamic
+# message is built at rejection time (currently by src.masterdata_runtime).
+# The frontend falls back to anomaly.message when uxMessage is null.
+_DYNAMIC_MESSAGE_RULES = {"UX-08"}
+
+
 def test_active_rules_with_choices_carry_a_user_facing_message():
     for rule in UX_RULES:
+        if rule["ux_id"] in _DYNAMIC_MESSAGE_RULES:
+            # Message is None on purpose — anomaly.message from the rejection
+            # engine carries the specific text.
+            continue
         if rule["status"] == "active" and rule["choices"]:
             assert rule["message"], f"{rule['ux_id']} exposes choices but no message"
 

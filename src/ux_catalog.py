@@ -97,7 +97,12 @@ UX_RULES: tuple[UXRule, ...] = (
     {
         "ux_id": "UX-08", "group": "Article",
         "codes": ("MATERIAL_STATUS_INVALID", "ARTICLE_NOT_FOUND", "NO_VALID_ARTICLE"),
-        "message": "Génie n'a pas pu valider la référence article sur la ligne concernée",
+        # message=None so the per-line dynamic string produced by
+        # src.masterdata_runtime.build_material_status_message (e.g. "Ligne 3 :
+        # la référence X a été remplacée depuis le jj/mm/aaaa par Y") is not
+        # overwritten by a generic framing when store._anomaly_to_api runs.
+        # See docs/… ADV validation truth table row 12 (UX-08).
+        "message": None,
         "choices": (
             _choice("J'ai remplacé ou corrigé la référence article", "correct_and_recontrol"),
             _choice("J'ai renseigné une référence de remplacement", "correct_and_recontrol"),
