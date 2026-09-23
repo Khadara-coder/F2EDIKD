@@ -632,6 +632,71 @@ describe("AnomaliesTable — UX matrix", () => {
   });
 
   /**
+   * Dual-display invariant: the row shows `message` (the specific text from
+   * rejection_catalog.format_rejection_message — dynamic per-line details for
+   * MATERIAL_STATUS_INVALID, PO_NUMBER_DUPLICATE, QUANTITY_MISSING, etc.) as
+   * the primary line, and `uxMessage` (the general framing from ux_catalog)
+   * as a subtitle when both exist and differ. Ensures no message-level
+   * information is silently dropped for any rule.
+   */
+  it("dual-display: shows message as primary and uxMessage as secondary when both are set and different", () => {
+    render(
+      <AnomaliesTable
+        anomalies={[
+          anomaly({
+            anomalyId: "an-ux13",
+            message: "Ce numéro de commande PO-42 existe déjà dans l'historique SAP.",
+            uxMessage: "Génie a identifié un numéro de commande déjà présent dans l'historique SAP",
+            uxId: "UX-13",
+            uxChoices: [{ label: "J'ai vérifié : c'est une nouvelle commande", outcome: "confirm_new_order_and_recontrol" }],
+          }),
+        ]}
+        selectedAnomalyId={null}
+        onSelectAnomaly={onSelect}
+        onChoose={onChoose}
+      />,
+    );
+
+    // Both are visible → primary specific text + secondary framing.
+    expect(screen.getByText(/PO-42 existe déjà dans l'historique SAP/i)).toBeInTheDocument();
+    expect(screen.getByText(/Génie a identifié un numéro de commande déjà présent/i)).toBeInTheDocument();
+  });
+
+  it("dual-display: falls back to uxMessage when message is empty", () => {
+    render(
+      <AnomaliesTable
+        anomalies={[
+          anomaly({
+            anomalyId: "an-fallback",
+            message: "",
+            uxMessage: "Génie n'a pas pu identifier le sold-to",
+            uxChoices: [{ label: "J'ai corrigé le Sold-to", outcome: "correct_and_recontrol" }],
+          }),
+        ]}
+        selectedAnomalyId={null}
+        onSelectAnomaly={onSelect}
+        onChoose={onChoose}
+      />,
+    );
+
+    expect(screen.getByText(/Génie n'a pas pu identifier le sold-to/i)).toBeInTheDocument();
+  });
+
+  it("dual-display: renders no secondary line when uxMessage equals message (no duplicate)", () => {
+    render(
+      <AnomaliesTable
+        anomalies={[
+          anomaly({ anomalyId: "an-eq", message: "Identique", uxMessage: "Identique" }),
+        ]}
+        selectedAnomalyId={null}
+        onSelectAnomaly={onSelect}
+        onChoose={onChoose}
+      />,
+    );
+    expect(screen.getAllByText("Identique")).toHaveLength(1);
+  });
+
+  /**
    * ADV validation truth table (row 12, UX-08): when uxMessage is null (as it is
    * for MATERIAL_STATUS_INVALID after the src/ux_catalog.py fix), the specific
    * per-line message produced by src.masterdata_runtime.build_material_status_message

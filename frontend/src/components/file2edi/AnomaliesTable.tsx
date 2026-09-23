@@ -112,7 +112,22 @@ export function AnomaliesTable({
                 const commentCount = comments.filter((c) => c.anomalyId === a.anomalyId).length;
                 const severityKey = (a.issueSeverity || "").toUpperCase();
                 const severityLabel = SEVERITY_LABELS[severityKey];
-                const displayMessage = a.uxMessage?.trim() || a.message;
+                // Dual-display: rejection_catalog.format_rejection_message produces
+                // per-line dynamic text ("Ligne 3 : la référence X remplacée par Y…",
+                // "Quantité manquante sur la/les ligne(s) : 3, 5", "PO-42 existe
+                // déjà dans l'historique SAP") stored in `a.message`; the catalog's
+                // uxMessage is the general framing. The primary line is the
+                // specific text, the secondary line is the framing when it adds
+                // something distinct. Handles: message empty → fall back to
+                // uxMessage; uxMessage empty (UX-08) → only primary; identical →
+                // no duplicate.
+                const rawMessage = a.message?.trim() ?? "";
+                const rawUxMessage = a.uxMessage?.trim() ?? "";
+                const displayMessage = rawMessage || rawUxMessage;
+                const secondaryMessage =
+                  rawUxMessage && rawUxMessage !== rawMessage && rawUxMessage !== displayMessage
+                    ? rawUxMessage
+                    : null;
                 const statusHint = a.status;
 
                 return (
@@ -152,6 +167,11 @@ export function AnomaliesTable({
                           </span>
                         )}
                       </div>
+                      {secondaryMessage && (
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {secondaryMessage}
+                        </p>
+                      )}
                       {commentCount > 0 && (
                         <p className="mt-0.5 text-xs text-muted-foreground">
                           {commentCount} note{commentCount > 1 ? "s" : ""}
