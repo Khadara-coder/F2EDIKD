@@ -509,7 +509,7 @@ def test_partner_anomalies_are_collapsed_for_adv_and_resolved_together(tmp_path)
         if a.get("uxGroup") == "Partenaire"
     ]
     assert len(partner_anomalies) == 1
-    assert partner_anomalies[0]["message"] == "Génie n'a pas pu identifier le Sold-to"
+    assert partner_anomalies[0]["message"] == "Génie n'a pas pu identifier le sold-to"
     assert set(partner_anomalies[0]["relatedCodes"]) == {
         "NO_DELIVERY_ADDRESS", "SHIPTO_NO_STRONG_MATCH", "SOLDTO_NOT_FOUND",
     }

@@ -1069,6 +1069,7 @@ class File2EdiStore:
             "SOLDTO_AMBIGUOUS_MATCH", "SHIPTO_SOLDTO_MISMATCH",
         }
         mapped = [self._anomaly_to_api(dict(a), mapping, order=order) for a in anomalies]
+        mapped = self._dedup_same_message_anomalies(mapped)
         partner = [a for a in mapped if normalize_code(str(a.get("fieldName") or "")) in partner_codes]
         if not partner:
             return self._merge_identical_line_anomalies(mapped)
@@ -1108,7 +1109,7 @@ class File2EdiStore:
                 "orderId": first.get("orderId"),
                 "severity": "error" if status in pending_statuses else "warning",
                 "fieldName": "SOLDTO_NOT_FOUND",
-                "message": "Génie n'a pas pu identifier le Sold-to",
+                "message": "Génie n'a pas pu identifier le sold-to",
                 "status": status,
                 "createdAt": first.get("createdAt"),
                 "uxChoice": aggregate_ux_choice,
@@ -1119,10 +1120,34 @@ class File2EdiStore:
             {},
             order=order,
         )
-        aggregate["message"] = "Génie n'a pas pu identifier le Sold-to"
+        aggregate["message"] = "Génie n'a pas pu identifier le sold-to"
         aggregate["relatedCodes"] = sorted({str(a.get("fieldName") or "") for a in partner})
         non_partner = [a for a in mapped if a not in partner]
         return self._merge_identical_line_anomalies([*non_partner, aggregate])
+
+    @staticmethod
+    def _dedup_same_message_anomalies(mapped: list[dict]) -> list[dict]:
+        """Drop anomaly rows where the same fieldName + message (case-insensitive)
+        appears more than once, keeping the row with the longest message.
+
+        This prevents the dual-display from showing the same sentence twice
+        when a dynamic DB message and the static catalog uxMessage differ only
+        in capitalisation or minor wording.
+        """
+        seen: dict[tuple, int] = {}  # (fieldName, message_lower) → index in `result`
+        result: list[dict] = []
+        for a in mapped:
+            code = str(a.get("fieldName") or "").strip()
+            msg = str(a.get("message") or "").strip()
+            key = (code, msg.lower())
+            if key in seen:
+                existing = result[seen[key]]
+                if len(msg) > len(str(existing.get("message") or "")):
+                    result[seen[key]] = a
+            else:
+                seen[key] = len(result)
+                result.append(a)
+        return result
 
     @staticmethod
     def _merge_identical_line_anomalies(mapped: list[dict]) -> list[dict]:

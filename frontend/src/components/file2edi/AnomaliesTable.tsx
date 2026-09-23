@@ -125,7 +125,9 @@ export function AnomaliesTable({
                 const rawUxMessage = a.uxMessage?.trim() ?? "";
                 const displayMessage = rawMessage || rawUxMessage;
                 const secondaryMessage =
-                  rawUxMessage && rawUxMessage !== rawMessage && rawUxMessage !== displayMessage
+                  rawUxMessage &&
+                  rawUxMessage.toLowerCase() !== rawMessage.toLowerCase() &&
+                  rawUxMessage !== displayMessage
                     ? rawUxMessage
                     : null;
                 const statusHint = a.status;
