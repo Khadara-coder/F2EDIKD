@@ -21,8 +21,11 @@ export function isAnomalyPending(anomaly: OrderAnomaly): boolean {
   return PENDING_ANOMALY_STATUSES.has(anomaly.status);
 }
 
+/** Counts anomalies that still need to be resolved before SAP send is allowed.
+ *  Non-blocking anomalies (blocking=false, e.g. article warnings) are excluded:
+ *  the ADV's UX choice is the record; only truly blocking issues gate the send. */
 export function countPendingAnomalies(anomalies: OrderAnomaly[]): number {
-  return anomalies.filter(isAnomalyPending).length;
+  return anomalies.filter(a => isAnomalyPending(a) && a.blocking !== false).length;
 }
 
 export function collectReviewBlockersDetailed(
@@ -35,7 +38,7 @@ export function collectReviewBlockersDetailed(
   const soldto = partners.find((p) => p.partnerFunction === "soldto");
   const shipto = partners.find((p) => p.partnerFunction === "shipto");
 
-  const pendingAnomalies = anomalies.filter(isAnomalyPending);
+  const pendingAnomalies = anomalies.filter(a => isAnomalyPending(a) && a.blocking !== false);
   if (pendingAnomalies.length > 0) {
     errors.push({
       field: "anomalies",
