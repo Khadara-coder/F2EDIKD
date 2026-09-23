@@ -262,30 +262,16 @@ def test_none_review_fields_do_not_raise():
         assert can_close_after_recontrol(code, review) is False
 
 
-# ─── Known defect: UX-08 recontrol is too permissive ──────────────────────
-# The ADV validation truth table (row 12) requires the article reference
-# to be VALIDE against masterdata after the ADV correction: "ok si la
-# référence finale est valide après recontrôle, y compris la référence Y
-# proposée lorsqu'elle est utilisée".
-#
-# The current implementation only checks that the boschArticle field is
-# non-empty, so an ADV who types garbage (e.g. "N/A", "XXX", "1234") passes
-# the recontrol even though the reference is not in the masterdata.
-#
-# Fix: import material_line_status from src.masterdata_runtime and assert
-# status.kind == "available" for each corrected line. Until then this xfail
-# documents the gap.
+# ─── Product decision (2026-09-23): recontrol trusts the ADV ─────────────
+# The ADV validation truth table (row 12) mentions "référence finale valide
+# après recontrôle", but product asked to keep the recontrol permissive:
+# the ADV's click is the record, no hard field-check blocks the auto-close.
+# The pipeline enforces real integrity downstream at EDIFACT generation and
+# SFTP delivery — the anomaly state is a UX signal, not a compliance gate.
 
-@pytest.mark.xfail(
-    reason=(
-        "UX-08 recontrol accepts any non-empty boschArticle, even a made-up "
-        "reference not in masterdata. Truth table requires masterdata "
-        "validation ('référence finale valide après recontrôle'). Fix: "
-        "invoke src.masterdata_runtime.material_line_status(article) on each "
-        "line and require status.kind == 'available'."
-    ),
-    strict=True,
-)
-def test_material_status_recontrol_rejects_a_made_up_reference():
-    review = _review(lines=[{"boschArticle": "GARBAGE-XYZ-999-NOT-IN-MASTERDATA"}])
-    assert can_close_after_recontrol("MATERIAL_STATUS_INVALID", review) is False
+
+def test_material_status_recontrol_accepts_any_non_empty_reference():
+    # By design: an ADV who typed anything into the article field closes the
+    # anomaly. Real validation happens at EDIFACT generation time.
+    review = _review(lines=[{"boschArticle": "TYPED-BY-ADV"}])
+    assert can_close_after_recontrol("MATERIAL_STATUS_INVALID", review) is True

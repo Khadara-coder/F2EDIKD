@@ -243,18 +243,18 @@ describe("AnomaliesTable — UX matrix", () => {
     },
   );
 
-  it("UX-08 known data issue: two choices share the same outcome 'correct_and_recontrol'", () => {
-    // This test documents a defect in src/ux_catalog.py (UX-08): the first two
-    // choices — "J'ai remplacé ou corrigé la référence article" and
-    // "J'ai renseigné une référence de remplacement" — both map to
-    // "correct_and_recontrol". As long as this duplication exists, selecting
-    // one visually highlights BOTH buttons because AnomaliesTable checks
-    // `a.uxChoice === choice.outcome` per button. Fix the catalog so each
-    // choice carries a distinct outcome, then flip this test to assert the
-    // opposite (exactly ONE highlight).
+  it("UX-08: each of the three static choices has a distinct outcome, so only one button highlights at a time", () => {
+    // ADV validation truth table row 12 lists three semantically distinct
+    // ADV-typed corrections (see src/ux_catalog.py UX-08 for the rationale):
+    //   - Case A "J'ai corrigé la référence article"                     → typo / OCR fix
+    //   - Case B "J'ai remplacé par une autre référence de remplacement"  → deliberate override of masterdata's Y
+    //   - Case C "J'ai supprimé la ligne concernée"                       → line dropped
+    // Distinct outcomes ensure the visual "pressed" state maps 1:1 with the
+    // ADV's actual choice (no more two buttons in dark blue at once, no more
+    // React duplicate-key warning).
     const CHOICES_UX_08 = [
-      { label: "J'ai remplacé ou corrigé la référence article", outcome: "correct_and_recontrol" },
-      { label: "J'ai renseigné une référence de remplacement", outcome: "correct_and_recontrol" },
+      { label: "J'ai corrigé la référence article", outcome: "correct_and_recontrol" },
+      { label: "J'ai remplacé par une autre référence de remplacement", outcome: "override_replacement_and_recontrol" },
       { label: "J'ai supprimé la ligne concernée", outcome: "delete_line_and_recontrol" },
     ];
 
@@ -275,13 +275,13 @@ describe("AnomaliesTable — UX matrix", () => {
       />,
     );
 
-    const first = screen.getByRole("button", { name: "J'ai remplacé ou corrigé la référence article" });
-    const second = screen.getByRole("button", { name: "J'ai renseigné une référence de remplacement" });
+    const first = screen.getByRole("button", { name: "J'ai corrigé la référence article" });
+    const second = screen.getByRole("button", { name: "J'ai remplacé par une autre référence de remplacement" });
     const third = screen.getByRole("button", { name: "J'ai supprimé la ligne concernée" });
 
-    // Both share the outcome → both appear "pressed"
+    // uxChoice = "correct_and_recontrol" → only Case A is pressed.
     expect(first.className).toContain("bg-blue-600");
-    expect(second.className).toContain("bg-blue-600");
+    expect(second.className).not.toContain("bg-blue-600");
     expect(third.className).not.toContain("bg-blue-600");
   });
 

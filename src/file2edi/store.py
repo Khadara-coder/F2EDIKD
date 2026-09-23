@@ -1081,6 +1081,27 @@ class File2EdiStore:
         else:
             status = "Corrigée"
         first = partner[0]
+        # Propagate the last ux_choice/justification/actor set on any of the
+        # underlying partner anomalies. Backend `resolve_anomaly` writes the
+        # same values on every partner row for the order when a partner-code
+        # anomaly is patched, so picking whichever is non-empty is safe and
+        # gives the aggregate the pressed-state feedback the ADV expects.
+        aggregate_ux_choice = next(
+            (a.get("uxChoice") for a in partner if a.get("uxChoice")),
+            None,
+        )
+        aggregate_ux_justification = next(
+            (a.get("uxJustification") for a in partner if a.get("uxJustification")),
+            None,
+        )
+        aggregate_ux_actor = next(
+            (a.get("uxActor") for a in partner if a.get("uxActor")),
+            None,
+        )
+        aggregate_ux_action_at = next(
+            (a.get("uxActionAt") for a in partner if a.get("uxActionAt")),
+            None,
+        )
         aggregate = self._anomaly_to_api(
             {
                 "anomalyId": first.get("anomalyId"),
@@ -1090,6 +1111,10 @@ class File2EdiStore:
                 "message": "Génie n'a pas pu identifier le Sold-to",
                 "status": status,
                 "createdAt": first.get("createdAt"),
+                "uxChoice": aggregate_ux_choice,
+                "uxJustification": aggregate_ux_justification,
+                "uxActor": aggregate_ux_actor,
+                "uxActionAt": aggregate_ux_action_at,
             },
             {},
             order=order,
@@ -2284,7 +2309,14 @@ class File2EdiStore:
         return review
 
     def recontrol_anomaly(self, anomaly_id: str) -> dict | None:
-        """Recheck an anomaly against the current persisted review data."""
+        """Recheck an anomaly against the current persisted review data.
+
+        By design (product decision 2026-09-23) the recontrol trusts the ADV's
+        click: the choice is the record. No hard field validation blocks the
+        auto-close — that would create a bad "nothing happens" UX. Real
+        integrity remains enforced at higher layers (EDIFACT generation,
+        SFTP delivery); the anomaly state here is best-effort visual signal.
+        """
         from src.ux_recontrol import can_close_after_recontrol
 
         conn = self._conn()

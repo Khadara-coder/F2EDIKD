@@ -103,9 +103,27 @@ UX_RULES: tuple[UXRule, ...] = (
         # overwritten by a generic framing when store._anomaly_to_api runs.
         # See docs/… ADV validation truth table row 12 (UX-08).
         "message": None,
+        # Truth table row 12 lists FOUR distinct affordances. The contextual
+        # "J'ai remplacé la référence par Y" is not here — it is injected by
+        # store._anomaly_to_api when the masterdata resolves Y for that
+        # specific line, with outcome "apply_suggested_replacement_and_recontrol".
+        # The three static choices below cover the non-contextual paths and
+        # carry semantically distinct outcomes so the biz log can distinguish
+        # "the ADV fixed a typo" vs "the ADV overrode the suggested Y" vs
+        # "the ADV dropped the line entirely".
         "choices": (
-            _choice("J'ai remplacé ou corrigé la référence article", "correct_and_recontrol"),
-            _choice("J'ai renseigné une référence de remplacement", "correct_and_recontrol"),
+            # Case A — the article read from the PDF was wrong (OCR miss,
+            # customer typo, wrong catalog entry). The ADV entered the correct
+            # reference; nothing to do with masterdata's replacement suggestion.
+            _choice("J'ai corrigé la référence article", "correct_and_recontrol"),
+            # Case B — the ADV knows a different valid replacement than the Y
+            # proposed by masterdata (e.g. newer variant, customer-specific
+            # alternative) and typed it in explicitly.
+            _choice(
+                "J'ai remplacé par une autre référence de remplacement",
+                "override_replacement_and_recontrol",
+            ),
+            # Case C — the line cannot be honoured; the ADV removed it.
             _choice("J'ai supprimé la ligne concernée", "delete_line_and_recontrol"),
         ),
         "resolution_mode": "ADV + RECONTROL", "requires_recontrol": True, "finalization_required": True, "status": "active",

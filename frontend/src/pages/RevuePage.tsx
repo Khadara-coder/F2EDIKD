@@ -746,8 +746,19 @@ export function RevuePage() {
         </CardContent>
       </Card>
 
-      <div className={isAdv ? "space-y-6" : "grid gap-6 lg:grid-cols-2"}>
-        <Card>
+      <div
+        className={
+          isAdv
+            ? "space-y-6"
+            // 3fr / 1fr: the Journal d'activité is a signal panel, not the main
+            // work area. Halved from the previous 50/50 layout so the anomaly
+            // actions (main ADV workspace) get the vertical + horizontal room
+            // to render 4-button UX-08 rows without wrapping. lg:items-stretch
+            // lets both cards fill the row height in lockstep.
+            : "grid gap-6 lg:grid-cols-[3fr_1fr] lg:items-stretch"
+        }
+      >
+        <Card className="flex flex-col">
           <CardHeader>
             <CardTitle className="text-base">Anomalies et commentaires</CardTitle>
             {pendingAnomalyCount > 0 && (
@@ -756,7 +767,7 @@ export function RevuePage() {
               </p>
             )}
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="flex-1 space-y-3">
             <AnomaliesTable
               anomalies={anomalies}
               comments={comments}
@@ -804,14 +815,14 @@ export function RevuePage() {
         </Card>
 
         {isAdmin && (
-          <Card>
+          <Card className="flex flex-col">
             <CardHeader className="flex-row items-center justify-between space-y-0 p-4">
               <CardTitle className="text-base">Journal d'activité</CardTitle>
               <span className="text-xs text-muted-foreground">
                 {activityQuery.data?.count ?? 0} action{(activityQuery.data?.count ?? 0) > 1 ? "s" : ""}
               </span>
             </CardHeader>
-            <CardContent className="max-h-72 overflow-y-auto p-0">
+            <CardContent className="flex-1 overflow-y-auto p-0">
               {activityQuery.isLoading ? (
                 <LoadingState label="Chargement du journal…" className="py-4" />
               ) : activityQuery.isError ? (

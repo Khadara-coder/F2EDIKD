@@ -143,6 +143,11 @@ export function AnomaliesTable({
                     )}
                     onClick={() => onSelectAnomaly(selected ? null : a.anomalyId)}
                     onKeyDown={(e) => {
+                      // Only handle keys targeting the row itself — do not
+                      // swallow Enter/Space when they were dispatched to a
+                      // focused inner button (choice buttons must remain
+                      // keyboard-activatable for a11y).
+                      if (e.target !== e.currentTarget) return;
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         onSelectAnomaly(selected ? null : a.anomalyId);

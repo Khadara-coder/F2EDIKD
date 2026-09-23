@@ -214,13 +214,6 @@ def test_every_code_handled_by_ux_recontrol_has_a_ux_rule():
 # The XFAILs below pin the gaps between the current catalog and that spec so
 # a fix flips them to XPASS and drives the migration in lockstep.
 
-@pytest.mark.xfail(
-    reason=(
-        "UX-08 currently has two choices sharing the outcome 'correct_and_recontrol'; "
-        "when they get distinct outcomes, this test flips XPASS and can be inverted."
-    ),
-    strict=True,
-)
 def test_no_ux_rule_has_two_choices_with_the_same_outcome():
     for rule in UX_RULES:
         outcomes = [c["outcome"] for c in rule["choices"]]
@@ -230,19 +223,19 @@ def test_no_ux_rule_has_two_choices_with_the_same_outcome():
 
 
 def test_ux_08_static_catalog_carries_the_three_typed_corrections():
-    # The catalog holds the three "J'ai …" ADV-typed choices (correct /
-    # replacement reference / delete). The truth-table's 4th choice
-    # ("J'ai remplacé la référence par Y") is contextual — it is only
-    # rendered when the masterdata resolves Y for that specific line — and
-    # is injected dynamically at serialization time by
-    # src.file2edi.store._anomaly_to_api. See the dedicated integration
-    # test in tests/test_ux_08_contextual_replacement.py.
+    # The catalog holds the three static "J'ai …" choices that correspond
+    # to non-contextual ADV paths (fix a typo / override with a different
+    # replacement / delete the line). The truth-table's 4th choice —
+    # "J'ai remplacé la référence par Y" — is contextual and injected
+    # dynamically by src.file2edi.store._anomaly_to_api when the
+    # masterdata resolves Y for that specific line. See
+    # tests/test_ux_08_contextual_replacement.py for the injection test.
     ux08 = UX_BY_ID["UX-08"]
     outcomes = [c["outcome"] for c in ux08["choices"]]
     assert outcomes == [
-        "correct_and_recontrol",
-        "correct_and_recontrol",  # xfail duplicate — see the strict xfail below
-        "delete_line_and_recontrol",
+        "correct_and_recontrol",              # Case A: ADV fixed a typo/OCR error
+        "override_replacement_and_recontrol", # Case B: ADV chose a different Y
+        "delete_line_and_recontrol",          # Case C: line dropped
     ]
 
 

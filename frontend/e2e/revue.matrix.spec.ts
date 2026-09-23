@@ -163,16 +163,13 @@ test.describe("Revue — choice matrix E2E", () => {
     await expect(row2.getByRole("button", { name: "Choix B" })).toHaveClass(/bg-blue-600/);
   });
 
-  test("keyboard accessibility: choice buttons are focusable via Tab (documented UX issue: parent row intercepts Enter)", async ({
+  test("keyboard: pressing Enter on a focused choice button fires the outcome (row does not intercept)", async ({
     page,
     mockedApi,
   }) => {
-    // Currently the row's onKeyDown handler catches Enter/Space and toggles
-    // selection BEFORE the focused choice button's synthesized click fires.
-    // This test documents the actual behaviour so a11y improvement work is
-    // tracked: focus is reachable, but the row eats the keystroke.
-    // Fix: make the row's keyboard handler ignore events originating from
-    // an inner interactive element (e.g. `if (e.target !== e.currentTarget) return`).
+    // The row's onKeyDown ignores events targeted at inner interactive
+    // elements (`if (e.target !== e.currentTarget) return`), so a focused
+    // choice button receives Enter normally and dispatches its click.
     const anomaly = mockAnomaly({
       anomalyId: "kb-target",
       message: "Test keyboard",
@@ -197,22 +194,14 @@ test.describe("Revue — choice matrix E2E", () => {
 
     const btn = page.getByRole("button", { name: "Bouton Enter" });
     await btn.scrollIntoViewIfNeeded();
-
-    // The button IS focusable (a11y minimum).
-    await btn.focus();
-    await expect(btn).toBeFocused();
-
-    // Documented misbehaviour: pressing Enter selects the row instead of
-    // firing the button's click → no PATCH goes out.
     await btn.press("Enter");
-    const row = page.getByRole("row", { name: /Test keyboard/i });
-    await expect(row).toHaveAttribute("aria-selected", "true");
-    expect(patched).toBe(false);
 
-    // Mouse click still works — proves the button is functional, only the
-    // keyboard path is bugged.
-    await btn.click();
     await expect.poll(() => patched, { timeout: 5_000 }).toBe(true);
+
+    // The row selection must NOT toggle when the keystroke was directed at
+    // an inner interactive element.
+    const row = page.getByRole("row", { name: /Test keyboard/i });
+    await expect(row).toHaveAttribute("aria-selected", "false");
   });
 
   test("domain grouping is preserved in the DOM order (Document → Partenaire → Article)", async ({
