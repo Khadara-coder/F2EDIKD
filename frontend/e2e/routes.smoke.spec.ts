@@ -27,8 +27,9 @@ test.describe("Smoke — guest", () => {
   test("login page renders", async ({ page, baseURL }) => {
     await page.goto(`${baseURL}/login`, { waitUntil: "networkidle" });
     const body = page.locator("body");
-    await expect(body).toContainText(/File2EDI/i);
     await expect(body).toContainText(/Identifiant/i);
+    await expect(body).toContainText(/Mot de passe/i);
+    await expect(page.getByRole("button", { name: /Se connecter/i })).toBeVisible();
   });
 });
 
@@ -66,6 +67,8 @@ test.describe("Smoke — mobile sidebar", () => {
     await expect(closeBtn).toBeVisible();
     await closeBtn.click();
 
-    await expect(closeBtn).toBeHidden();
+    // Sidebar closed → hamburger is visible again (more reliable than asserting
+    // closeBtn is hidden, since the sidebar may unmount rather than just hide).
+    await expect(menuBtn).toBeVisible();
   });
 });

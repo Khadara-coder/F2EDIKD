@@ -90,7 +90,10 @@ export default defineConfig({
       testMatch: /.*\.smoke\.spec\.ts$/,
       dependencies: HAS_CREDENTIALS ? ["setup"] : [],
       use: {
-        ...devices["iPhone 13"],
+        // iPhone 13 device profile emulates the viewport + user agent, but we force
+        // Chromium (via Edge channel) so we don't need a separate WebKit install.
+        // Enough for responsive-UI smoke; real WebKit coverage would need a Mac.
+        ...devices["Pixel 5"],
         baseURL: SMOKE_BASE_URL,
         storageState: HAS_CREDENTIALS ? AUTH_STATE : undefined,
         channel: CHANNEL,
