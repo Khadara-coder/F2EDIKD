@@ -19,6 +19,11 @@ const SMOKE_BASE_URL = process.env.F2EDI_BASE_URL ?? "http://127.0.0.1:8000";
 const HAS_CREDENTIALS = Boolean(process.env.F2EDI_USER && process.env.F2EDI_PASSWORD);
 const AUTH_STATE = "e2e/.auth/user.json";
 
+// Use the locally installed Microsoft Edge (Chromium-based, ships with Windows 11)
+// instead of downloading the Playwright-bundled Chromium. Set PW_USE_BUNDLED=1 to
+// opt back into the bundled browser (e.g. when running in a Linux CI runner).
+const CHANNEL = process.env.PW_USE_BUNDLED ? undefined : "msedge";
+
 export default defineConfig({
   testDir: "./e2e",
   timeout: 30_000,
@@ -33,7 +38,9 @@ export default defineConfig({
   use: {
     trace: "on-first-retry",
     screenshot: "only-on-failure",
-    video: "retain-on-failure",
+    // Video capture requires the Playwright ffmpeg binary (downloaded from a
+    // Microsoft CDN); opt-in via PW_VIDEO=1 when the CDN is reachable.
+    video: process.env.PW_VIDEO ? "retain-on-failure" : "off",
     actionTimeout: 10_000,
     navigationTimeout: 15_000,
   },
@@ -41,7 +48,7 @@ export default defineConfig({
   // Serve the versioned frontend/dist via Vite preview for mocked specs.
   // Smoke specs override baseURL to point to the real FastAPI server which serves the same dist.
   webServer: {
-    command: "npm run preview -- --port 4173 --strictPort",
+    command: "npm run preview -- --host 127.0.0.1 --port 4173 --strictPort",
     url: MOCK_BASE_URL,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
@@ -53,7 +60,7 @@ export default defineConfig({
     {
       name: "setup",
       testMatch: /auth\.setup\.ts$/,
-      use: { baseURL: SMOKE_BASE_URL },
+      use: { baseURL: SMOKE_BASE_URL, channel: CHANNEL },
     },
     {
       name: "chromium-mocked",
@@ -63,6 +70,7 @@ export default defineConfig({
         ...devices["Desktop Chrome"],
         viewport: { width: 1280, height: 800 },
         baseURL: MOCK_BASE_URL,
+        channel: CHANNEL,
       },
     },
     {
@@ -74,6 +82,7 @@ export default defineConfig({
         viewport: { width: 1280, height: 800 },
         baseURL: SMOKE_BASE_URL,
         storageState: HAS_CREDENTIALS ? AUTH_STATE : undefined,
+        channel: CHANNEL,
       },
     },
     {
@@ -84,6 +93,7 @@ export default defineConfig({
         ...devices["iPhone 13"],
         baseURL: SMOKE_BASE_URL,
         storageState: HAS_CREDENTIALS ? AUTH_STATE : undefined,
+        channel: CHANNEL,
       },
     },
   ],

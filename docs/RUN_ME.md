@@ -118,7 +118,12 @@ python scripts/test_random_pdfs.py --source "RAG Purchase Orders" --n 50 --seed 
 ```bash
 cd frontend
 npm install
-npx playwright install chromium
+# Playwright utilise Microsoft Edge par défaut (déjà installé sur Windows) —
+# aucun téléchargement depuis cdn.playwright.dev requis.
+# Pour utiliser le Chromium bundlé Playwright à la place (Linux CI, etc.) :
+#   $env:PW_USE_BUNDLED = "1"; npx playwright install chromium
+# Pour activer la capture vidéo (nécessite ffmpeg téléchargé depuis un CDN MS) :
+#   $env:PW_VIDEO = "1"
 
 # Unit tests composants (rapide, aucun backend)
 npm run test:unit
