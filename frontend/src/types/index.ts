@@ -217,6 +217,13 @@ export interface OrderAnomaly {
   uxChoice?: string | null;
   uxJustification?: string | null;
   relatedCodes?: string[];
+  // When several per-line anomalies share the same body (e.g. lines 2, 3, 4
+  // all reporting the same replaced reference), the backend collapses them
+  // into a single displayed row and exposes the underlying anomaly IDs so
+  // the frontend can fan the ADV's choice out to every one of them.
+  mergedAnomalyIds?: string[];
+  mergedLineNumbers?: number[];
+  suggestedReplacement?: string | null;
 }
 
 export interface OrderComment {

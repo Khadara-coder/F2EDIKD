@@ -775,8 +775,18 @@ export function RevuePage() {
               selectedAnomalyId={selectedAnomalyId}
               onSelectAnomaly={setSelectedAnomalyId}
               onChoose={(anomalyId, outcome) => {
+                // A merged UX-08 row aggregates several per-line anomalies
+                // that share the same body (e.g. "Lignes 2, 3, 4 : …"). The
+                // ADV's single click must apply to every underlying anomaly.
+                const clickedAnomaly = anomalies.find((a) => a.anomalyId === anomalyId);
+                const targetIds =
+                  clickedAnomaly?.mergedAnomalyIds && clickedAnomaly.mergedAnomalyIds.length > 0
+                    ? clickedAnomaly.mergedAnomalyIds
+                    : [anomalyId];
                 void (async () => {
-                  await api.resolveAnomaly(anomalyId, "choice", { outcome });
+                  for (const id of targetIds) {
+                    await api.resolveAnomaly(id, "choice", { outcome });
+                  }
                   if (outcome === "correct_and_regenerate" || outcome === "regenerate_and_recontrol") {
                     const generated = await api.generateEdifact(orderId);
                     if (!generated.success) throw new Error(generated.errors?.join("\n") || "Génération EDIFACT échouée");
@@ -784,8 +794,14 @@ export function RevuePage() {
                     const sent = await api.sendToSap(orderId);
                     if (!sent.success) throw new Error(sent.message || "Transmission non confirmée");
                   }
-                  await api.recontrolAnomaly(anomalyId);
-                  announce("Choix exécuté et recontrôle terminé");
+                  for (const id of targetIds) {
+                    await api.recontrolAnomaly(id);
+                  }
+                  announce(
+                    targetIds.length > 1
+                      ? `Choix exécuté et recontrôle terminé sur ${targetIds.length} lignes`
+                      : "Choix exécuté et recontrôle terminé",
+                  );
                   invalidate();
                 })().catch((error: unknown) => {
                   setInfoDialog({

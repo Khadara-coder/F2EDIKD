@@ -1071,7 +1071,7 @@ class File2EdiStore:
         mapped = [self._anomaly_to_api(dict(a), mapping, order=order) for a in anomalies]
         partner = [a for a in mapped if normalize_code(str(a.get("fieldName") or "")) in partner_codes]
         if not partner:
-            return mapped
+            return self._merge_identical_line_anomalies(mapped)
 
         pending_statuses = {"Bloquante", "Ouverte"}
         if any(a.get("status") == "Bloquante" for a in partner):
@@ -1122,7 +1122,73 @@ class File2EdiStore:
         aggregate["message"] = "Génie n'a pas pu identifier le Sold-to"
         aggregate["relatedCodes"] = sorted({str(a.get("fieldName") or "") for a in partner})
         non_partner = [a for a in mapped if a not in partner]
-        return [*non_partner, aggregate]
+        return self._merge_identical_line_anomalies([*non_partner, aggregate])
+
+    @staticmethod
+    def _merge_identical_line_anomalies(mapped: list[dict]) -> list[dict]:
+        """Collapse per-line anomalies whose message differs only in "Ligne N :".
+
+        Example: three MATERIAL_STATUS_INVALID rows carrying the same
+        replacement info for lines 2, 3, 4 collapse into a single row
+        titled "Lignes 2, 3, 4 : la référence X a été remplacée par Y".
+        The merged row exposes ``mergedAnomalyIds`` so the frontend can
+        fan the ADV's choice out to every underlying anomaly with a single
+        click.
+        """
+        import re
+        from src.rejection_catalog import normalize_code
+
+        line_prefix_re = re.compile(r"^Ligne\s+(\d+)\s*:\s*(.*)$", re.DOTALL)
+        groups: dict[tuple, list[tuple[int, dict]]] = {}
+        order_preserving_keys: list[tuple] = []
+        others: list[dict] = []
+
+        for a in mapped:
+            message = str(a.get("message") or "")
+            match = line_prefix_re.match(message)
+            if not match:
+                others.append(a)
+                continue
+            code = normalize_code(str(a.get("fieldName") or ""))
+            line_num = int(match.group(1))
+            body = match.group(2).strip()
+            key = (code, body, str(a.get("suggestedReplacement") or ""))
+            if key not in groups:
+                groups[key] = []
+                order_preserving_keys.append(key)
+            groups[key].append((line_num, a))
+
+        merged: list[dict] = []
+        for key in order_preserving_keys:
+            items = sorted(groups[key], key=lambda pair: pair[0])
+            if len(items) == 1:
+                merged.append(items[0][1])
+                continue
+            line_nums = [n for n, _ in items]
+            _, body, _ = key
+            first = dict(items[0][1])
+            first["message"] = f"Lignes {', '.join(str(n) for n in line_nums)} : {body}"
+            first["mergedAnomalyIds"] = [a.get("anomalyId") for _, a in items]
+            first["mergedLineNumbers"] = line_nums
+            # Status aggregates worst-case across the group.
+            statuses = [a.get("status") for _, a in items]
+            if "Bloquante" in statuses:
+                first["status"] = "Bloquante"
+            elif "Ouverte" in statuses:
+                first["status"] = "Ouverte"
+            elif all(s == "Corrigée" for s in statuses):
+                first["status"] = "Corrigée"
+            # Propagate any ux_choice already set on siblings so the UI
+            # shows the pressed state after a click on the merged row.
+            existing_choice = next(
+                (a.get("uxChoice") for _, a in items if a.get("uxChoice")),
+                None,
+            )
+            if existing_choice:
+                first["uxChoice"] = existing_choice
+            merged.append(first)
+
+        return others + merged
 
     def _anomaly_to_api(self, anomaly: dict, mapping: dict, order: dict | None = None) -> dict:
         from src.rejection_catalog import (

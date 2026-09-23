@@ -207,7 +207,12 @@ def test_salvage_and_resubmit_are_non_blocking_alerts():
     assert rc.issue_taxonomy("EXTRACTION_LLM_SALVAGE")["blocking"] is False
     assert rc.issue_taxonomy("RESUBMISSION_DETECTED")["blocking"] is False
     assert rc.issue_taxonomy("PO_NUMBER_DUPLICATE")["blocking"] is False
-    assert rc.issue_taxonomy("ARTICLE_NOT_FOUND")["blocking"] is True
+    # UX-08 codes turned non-blocking on 2026-09-23 per product decision:
+    # "aucun des choix concernant les références article n'est bloquant pour envoi".
+    # The ADV click is the record; downstream EDIFACT / SFTP layers enforce real integrity.
+    assert rc.issue_taxonomy("ARTICLE_NOT_FOUND")["blocking"] is False
+    assert rc.issue_taxonomy("MATERIAL_STATUS_INVALID")["blocking"] is False
+    assert rc.issue_taxonomy("NO_VALID_ARTICLE")["blocking"] is False
 
 
 def test_partner_unresolved_is_non_blocking_summary():

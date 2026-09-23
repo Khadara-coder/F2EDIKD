@@ -99,16 +99,23 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
     "MATERIAL_STATUS_INVALID": {
-        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
-        "blocking": True, "scope": "LINE", "requires_user_input": True,
+        # Product decision 2026-09-23: none of the UX-08 choices should block
+        # SAP send — the ADV click is the record, real integrity is enforced
+        # downstream at EDIFACT generation. Anomaly surfaces as a warning
+        # (visible in the review UI) but does not gate the "Envoyer vers SAP"
+        # button.
+        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
+        "blocking": False, "scope": "LINE", "requires_user_input": True,
     },
     "RESUBMISSION_DETECTED": {
         "domain": "DUPLICATE", "stage": "INGESTION", "issue_severity": "INFO",
         "blocking": False, "scope": "ORDER", "requires_user_input": False,
     },
     "NO_VALID_ARTICLE": {
-        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+        # See MATERIAL_STATUS_INVALID: UX-08 codes are non-blocking per
+        # product decision 2026-09-23.
+        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
+        "blocking": False, "scope": "ORDER", "requires_user_input": True,
     },
     "CONTRACT_KEYWORD": {
         "domain": "DOCUMENT", "stage": "CLASSIFICATION", "issue_severity": "ERROR",
@@ -183,8 +190,10 @@ ISSUE_TAXONOMY: dict[str, IssueTaxonomy] = {
         "blocking": True, "scope": "ORDER", "requires_user_input": True,
     },
     "ARTICLE_NOT_FOUND": {
-        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "ERROR",
-        "blocking": True, "scope": "ORDER", "requires_user_input": True,
+        # See MATERIAL_STATUS_INVALID: UX-08 codes are non-blocking per
+        # product decision 2026-09-23.
+        "domain": "ARTICLE", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
+        "blocking": False, "scope": "ORDER", "requires_user_input": True,
     },
     "PO_NUMBER_DUPLICATE": {
         "domain": "DUPLICATE", "stage": "BUSINESS_VALIDATION", "issue_severity": "WARNING",
