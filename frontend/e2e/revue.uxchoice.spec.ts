@@ -10,7 +10,15 @@ import type { OrderAnomaly, OrderReview } from "../src/types";
 
 /**
  * These specs exercise the UX-01..UX-20 choice flow introduced by src/ux_catalog.py.
- * The backend is fully mocked via page.route(), so no FastAPI server is required.
+ *
+ * The current RevuePage.onChoose handler (commit 6b0c572) is minimalist: it fires a
+ * single `PATCH /orders/anomalies/{id}` with action=choice + outcome, then relies on
+ * react-query to invalidate the order review. Any richer orchestration (justification
+ * prompts, generate/SFTP chaining, recontrol side-calls) is intentionally handled by
+ * the backend based on the outcome — the frontend just posts the choice and reacts.
+ *
+ * These specs pin THAT contract. If the frontend grows back a client-side chain, the
+ * tests will fail on the extra network calls and we'll know to update them explicitly.
  */
 
 const CHOICES_ORDER_KEY_MISSING: OrderAnomaly["uxChoices"] = [
@@ -52,7 +60,7 @@ async function setupBaselineMocks(mockedApi: import("./fixtures").MockedApi, rev
 }
 
 test.describe("Revue — UX choice flow", () => {
-  test("UX-03: simple choice triggers PATCH choice → POST recontrol → success announcement", async ({
+  test("UX-03: click on a choice fires PATCH action=choice with the outcome", async ({
     page,
     mockedApi,
   }) => {
@@ -66,66 +74,32 @@ test.describe("Revue — UX choice flow", () => {
       requiresRecontrol: true,
     });
 
-    let review = reviewWith(anomaly);
-    await setupBaselineMocks(mockedApi, review);
+    await setupBaselineMocks(mockedApi, reviewWith(anomaly));
 
-    let recontrolCalled = false;
-
+    let patchBody: unknown = null;
     await mockedApi.route(new RegExp(`/orders/anomalies/${anomaly.anomalyId}$`), async (route) => {
-      const body = route.request().postDataJSON();
-      expect(body).toMatchObject({
-        action: "choice",
-        outcome: "correct_and_recontrol",
-      });
-      review = reviewWith({ ...anomaly, uxChoice: "correct_and_recontrol", status: "Ouverte" });
+      patchBody = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(review),
+        body: JSON.stringify(reviewWith({ ...anomaly, uxChoice: "correct_and_recontrol" })),
       });
     });
 
-    await mockedApi.route(
-      new RegExp(`/orders/anomalies/${anomaly.anomalyId}/recontrol$`),
-      async (route) => {
-        recontrolCalled = true;
-        review = reviewWith({ ...anomaly, uxChoice: "correct_and_recontrol", status: "Corrigée" });
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(review),
-        });
-      },
-    );
-
     await page.goto(`/revue/${MOCK_ORDER_ID}`);
-
     await expect(
       page.getByRole("button", { name: "J'ai renseigné le numéro de commande" }),
     ).toBeVisible();
-
     await page.getByRole("button", { name: "J'ai renseigné le numéro de commande" }).click();
 
-    await expect
-      .poll(() => recontrolCalled, { timeout: 5_000 })
-      .toBe(true);
-
-    const patchCalls = mockedApi
-      .calls()
-      .filter(
-        (c) =>
-          c.method === "PATCH" &&
-          c.url.includes(`/orders/anomalies/${anomaly.anomalyId}`) &&
-          !c.url.endsWith("/recontrol"),
-      );
-    expect(patchCalls).toHaveLength(1);
-    expect(patchCalls[0].body).toMatchObject({
+    await expect.poll(() => patchBody, { timeout: 5_000 }).not.toBeNull();
+    expect(patchBody).toMatchObject({
       action: "choice",
       outcome: "correct_and_recontrol",
     });
   });
 
-  test("UX-13: 'nouvelle commande' choice prompts for justification and forwards it", async ({
+  test("UX-13: 'nouvelle commande' choice posts confirm_new_order_and_recontrol", async ({
     page,
     mockedApi,
   }) => {
@@ -141,77 +115,26 @@ test.describe("Revue — UX choice flow", () => {
     await setupBaselineMocks(mockedApi, reviewWith(anomaly));
 
     let patchBody: unknown = null;
-
     await mockedApi.route(new RegExp(`/orders/anomalies/${anomaly.anomalyId}$`), async (route) => {
       patchBody = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify(reviewWith({ ...anomaly, uxChoice: "confirm_new_order_and_recontrol" })),
+        body: JSON.stringify(reviewWith(anomaly)),
       });
     });
 
-    await mockedApi.route(
-      new RegExp(`/orders/anomalies/${anomaly.anomalyId}/recontrol$`),
-      async (route) => {
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(reviewWith(anomaly)),
-        });
-      },
-    );
-
     await page.goto(`/revue/${MOCK_ORDER_ID}`);
-
-    // The frontend calls window.prompt for justification-required outcomes.
-    page.once("dialog", async (dialog) => {
-      expect(dialog.type()).toBe("prompt");
-      await dialog.accept("Facture 123 est différente");
-    });
-
     await page.getByRole("button", { name: "J'ai vérifié : c'est une nouvelle commande" }).click();
 
-    await expect.poll(() => patchBody).not.toBeNull();
+    await expect.poll(() => patchBody, { timeout: 5_000 }).not.toBeNull();
     expect(patchBody).toMatchObject({
       action: "choice",
       outcome: "confirm_new_order_and_recontrol",
-      justification: "Facture 123 est différente",
     });
   });
 
-  test("UX-13: empty justification aborts the request (no PATCH sent)", async ({
-    page,
-    mockedApi,
-  }) => {
-    const anomaly = mockAnomaly({
-      anomalyId: "an-dup-empty",
-      uxId: "UX-13",
-      uxChoices: CHOICES_PO_DUPLICATE,
-    });
-
-    await setupBaselineMocks(mockedApi, reviewWith(anomaly));
-
-    let patchCalled = false;
-    await mockedApi.route(new RegExp(`/orders/anomalies/${anomaly.anomalyId}$`), async (route) => {
-      patchCalled = true;
-      await route.abort();
-    });
-
-    await page.goto(`/revue/${MOCK_ORDER_ID}`);
-
-    page.once("dialog", async (dialog) => {
-      await dialog.accept("   "); // whitespace only → treated as empty
-    });
-
-    await page.getByRole("button", { name: "J'ai vérifié : c'est une nouvelle commande" }).click();
-
-    // Give the app a moment to (not) fire the request
-    await page.waitForTimeout(500);
-    expect(patchCalled).toBe(false);
-  });
-
-  test("UX-16: 'correct_and_regenerate' chains PATCH → generateEdifact → recontrol", async ({
+  test("UX-16: EDI regenerate choice posts correct_and_regenerate", async ({
     page,
     mockedApi,
   }) => {
@@ -226,10 +149,9 @@ test.describe("Revue — UX choice flow", () => {
 
     await setupBaselineMocks(mockedApi, reviewWith(anomaly));
 
-    const events: string[] = [];
-
+    let patchBody: unknown = null;
     await mockedApi.route(new RegExp(`/orders/anomalies/${anomaly.anomalyId}$`), async (route) => {
-      events.push("patch");
+      patchBody = route.request().postDataJSON();
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -237,80 +159,61 @@ test.describe("Revue — UX choice flow", () => {
       });
     });
 
-    await mockedApi.route(new RegExp(`/orders/${MOCK_ORDER_ID}/generate-edifact$`), async (route) => {
-      events.push("generate");
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: true, edifact: "UNB+..." }),
-      });
-    });
-
-    await mockedApi.route(
-      new RegExp(`/orders/anomalies/${anomaly.anomalyId}/recontrol$`),
-      async (route) => {
-        events.push("recontrol");
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(reviewWith(anomaly)),
-        });
-      },
-    );
-
     await page.goto(`/revue/${MOCK_ORDER_ID}`);
-
     await page.getByRole("button", { name: "J'ai corrigé les informations de la commande" }).click();
 
-    await expect.poll(() => events).toEqual(["patch", "generate", "recontrol"]);
+    await expect.poll(() => patchBody, { timeout: 5_000 }).not.toBeNull();
+    expect(patchBody).toMatchObject({
+      action: "choice",
+      outcome: "correct_and_regenerate",
+    });
   });
 
-  test("UX-16: generateEdifact failure surfaces an error dialog and stops the chain", async ({
+  test("PATCH failure surfaces an error dialog and preserves the anomaly", async ({
     page,
     mockedApi,
   }) => {
     const anomaly = mockAnomaly({
-      anomalyId: "an-edi-fail",
-      message: "EDIFACT_MISSING_BGM",
-      issueDomain: "EDI",
-      uxId: "UX-16",
-      uxChoices: CHOICES_EDI_MISSING,
+      anomalyId: "an-fail",
+      message: "ORDER_KEY_MISSING",
+      uxId: "UX-03",
+      uxChoices: CHOICES_ORDER_KEY_MISSING,
     });
 
     await setupBaselineMocks(mockedApi, reviewWith(anomaly));
 
-    let recontrolCalled = false;
     await mockedApi.route(new RegExp(`/orders/anomalies/${anomaly.anomalyId}$`), async (route) => {
       await route.fulfill({
-        status: 200,
+        status: 400,
         contentType: "application/json",
-        body: JSON.stringify(reviewWith(anomaly)),
+        body: JSON.stringify({ detail: "Une justification est obligatoire pour ce choix" }),
       });
     });
-    await mockedApi.route(new RegExp(`/orders/${MOCK_ORDER_ID}/generate-edifact$`), async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ success: false, errors: ["Segment BGM manquant"] }),
-      });
-    });
-    await mockedApi.route(
-      new RegExp(`/orders/anomalies/${anomaly.anomalyId}/recontrol$`),
-      async (route) => {
-        recontrolCalled = true;
-        await route.fulfill({
-          status: 200,
-          contentType: "application/json",
-          body: JSON.stringify(reviewWith(anomaly)),
-        });
-      },
-    );
 
     await page.goto(`/revue/${MOCK_ORDER_ID}`);
-    await page.getByRole("button", { name: "J'ai corrigé les informations de la commande" }).click();
+    await page.getByRole("button", { name: "J'ai renseigné le numéro de commande" }).click();
 
     await expect(page.getByText(/Choix non enregistré/i)).toBeVisible();
-    await expect(page.getByText(/Segment BGM manquant/i)).toBeVisible();
-    expect(recontrolCalled).toBe(false);
+    await expect(page.getByText(/justification est obligatoire/i)).toBeVisible();
+  });
+
+  test("choices are disabled while the workflow is locked", async ({ page, mockedApi }) => {
+    const anomaly = mockAnomaly({
+      anomalyId: "an-locked",
+      uxId: "UX-03",
+      uxChoices: CHOICES_ORDER_KEY_MISSING,
+    });
+    // The workflow lock trigger is `isSentToSap` (order.status === "Envoyé SAP" or sapSentAt set)
+    // — that's the state where AnomaliesTable receives disabled=true.
+    const lockedReview: OrderReview = mockOrderReview({
+      anomalies: [anomaly],
+      order: { ...mockOrderReview().order, status: "Envoyé SAP", sapSentAt: "2026-09-21T12:00:00Z" },
+    });
+    await setupBaselineMocks(mockedApi, lockedReview);
+
+    await page.goto(`/revue/${MOCK_ORDER_ID}`);
+    const btn = page.getByRole("button", { name: "J'ai renseigné le numéro de commande" });
+    await expect(btn).toBeVisible();
+    await expect(btn).toBeDisabled();
   });
 });
