@@ -245,7 +245,7 @@ export function OrderGeneralInfoPanel({
           <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
             Adresse de livraison
           </p>
-          <div className="grid grid-cols-[3fr_1.5fr_3fr_0.8fr] gap-x-4 items-start">
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
             <EditableField
               label="Rue"
               value={cleanDisplay(shipto?.addressLine1)}
@@ -267,14 +267,14 @@ export function OrderGeneralInfoPanel({
             <EditableField
               label="Ville"
               value={cleanDisplay(shipto?.city)}
-              className="min-w-0"
+              className="min-w-0 sm:col-span-2 lg:col-span-2"
               editFlag={shiptoFieldFlag(shipto, "city")}
               onSave={(v) => onUpdateShipto({ city: cleanDisplay(v) }, { editSource: "manual" })}
             />
             <EditableField
               label="Pays"
               value={cleanDisplay(shipto?.country)}
-              className="min-w-0"
+              className="min-w-0 lg:col-span-2"
               editFlag={shiptoFieldFlag(shipto, "country")}
               onSave={(v) =>
                 onUpdateShipto({ country: cleanDisplay(v) }, { editSource: "manual" })

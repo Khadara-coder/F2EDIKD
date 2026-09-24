@@ -2187,6 +2187,135 @@ class File2EdiStore:
                 "Le compte Ship-to ne correspond pas au Sold-to courant.",
             )
 
+    def _recontrol_line(self, conn: sqlite3.Connection, order_id: str, line_id: str) -> None:
+        """Recheck a manually added/edited line against masterdata + basic rules.
+
+        Refreshes MATERIAL_STATUS_INVALID / LINE_QUANTITY_INVALID / LINE_PRICE_INVALID
+        for this line, updates the MAKTX designation when found, and flips the line
+        status to "À vérifier" when any anomaly remains (else "Corrigé manuellement").
+        """
+        try:
+            from src.masterdata_runtime import (
+                format_material_status_anomaly_message,
+                material_designation,
+                material_line_status,
+                material_status_replacement,
+            )
+        except Exception:
+            format_material_status_anomaly_message = None  # type: ignore[assignment]
+            material_designation = None  # type: ignore[assignment]
+            material_line_status = None  # type: ignore[assignment]
+            material_status_replacement = None  # type: ignore[assignment]
+
+        row = conn.execute(
+            "SELECT line_number, bosch_article, quantity, unit_price "
+            "FROM file2edi_order_lines WHERE line_id=?",
+            [line_id],
+        ).fetchone()
+        if not row:
+            return
+        line_number = row["line_number"]
+        art = str(row["bosch_article"] or "").strip()
+        qty = float(row["quantity"] or 0)
+        price = float(row["unit_price"] or 0)
+
+        conn.execute(
+            "DELETE FROM file2edi_order_anomalies "
+            "WHERE line_id=? AND field_name IN "
+            "('MATERIAL_STATUS_INVALID','LINE_QUANTITY_INVALID','LINE_PRICE_INVALID')",
+            [line_id],
+        )
+
+        has_error = False
+        has_warning = False
+
+        if art and "?" not in art and format_material_status_anomaly_message is not None:
+            try:
+                mat_status = material_line_status(art) if material_line_status else None
+            except Exception:
+                mat_status = None
+            built = None
+            if mat_status is not None:
+                try:
+                    built = format_material_status_anomaly_message(
+                        line_number=line_number, matnr=art, mat_status=mat_status,
+                    )
+                except Exception:
+                    built = None
+            if built:
+                severity = built["severity"]
+                msg = built["message"]
+                anom_status = "Bloquante" if severity == "error" else "Ouverte"
+                if severity == "error":
+                    has_error = True
+                else:
+                    has_warning = True
+                replacement = None
+                if material_status_replacement is not None:
+                    try:
+                        replacement = material_status_replacement(art)
+                    except Exception:
+                        replacement = None
+                anomaly_id = f"an-mat-status-{order_id}-{line_number}-{art}"
+                conn.execute(
+                    """INSERT INTO file2edi_order_anomalies
+                       (anomaly_id, order_id, line_id, severity, field_name, message,
+                        status, created_at, suggested_replacement)
+                       VALUES (?, ?, ?, ?, 'MATERIAL_STATUS_INVALID', ?, ?, ?, ?)
+                       ON CONFLICT(anomaly_id) DO UPDATE SET
+                         line_id=excluded.line_id,
+                         severity=excluded.severity,
+                         message=excluded.message,
+                         status=excluded.status,
+                         created_at=excluded.created_at,
+                         suggested_replacement=excluded.suggested_replacement""",
+                    [anomaly_id, order_id, line_id, severity, msg,
+                     anom_status, _now(), replacement],
+                )
+
+            if material_designation is not None:
+                try:
+                    maktx = material_designation(art)
+                except Exception:
+                    maktx = None
+                if maktx:
+                    conn.execute(
+                        "UPDATE file2edi_order_lines SET designation=? WHERE line_id=?",
+                        [maktx, line_id],
+                    )
+
+        if qty <= 0:
+            conn.execute(
+                """INSERT INTO file2edi_order_anomalies
+                   (anomaly_id, order_id, line_id, severity, field_name, message, status, created_at)
+                   VALUES (?, ?, ?, 'error', 'LINE_QUANTITY_INVALID', ?, 'Bloquante', ?)
+                   ON CONFLICT(anomaly_id) DO UPDATE SET
+                     severity=excluded.severity, message=excluded.message,
+                     status=excluded.status, created_at=excluded.created_at""",
+                [f"an-qty-{order_id}-{line_number}", order_id, line_id,
+                 f"Ligne {line_number} : quantité invalide ({qty}).", _now()],
+            )
+            has_error = True
+
+        if price < 0:
+            conn.execute(
+                """INSERT INTO file2edi_order_anomalies
+                   (anomaly_id, order_id, line_id, severity, field_name, message, status, created_at)
+                   VALUES (?, ?, ?, 'error', 'LINE_PRICE_INVALID', ?, 'Bloquante', ?)
+                   ON CONFLICT(anomaly_id) DO UPDATE SET
+                     severity=excluded.severity, message=excluded.message,
+                     status=excluded.status, created_at=excluded.created_at""",
+                [f"an-price-{order_id}-{line_number}", order_id, line_id,
+                 f"Ligne {line_number} : prix unitaire négatif ({price}).", _now()],
+            )
+            has_error = True
+
+        new_status = "À vérifier" if (has_error or has_warning) else "Corrigé manuellement"
+        conn.execute(
+            "UPDATE file2edi_order_lines SET status=? WHERE line_id=?",
+            [new_status, line_id],
+        )
+
     def update_line(self, line_id: str, payload: dict) -> dict | None:
         conn = self._conn()
         row = conn.execute("SELECT order_id, quantity, unit_price FROM file2edi_order_lines WHERE line_id=?", [line_id]).fetchone()
@@ -2215,6 +2344,7 @@ class File2EdiStore:
         vals.append(amount)
         vals.append(line_id)
         conn.execute(f"UPDATE file2edi_order_lines SET {', '.join(sets)} WHERE line_id=?", vals)
+        self._recontrol_line(conn, order_id, line_id)
         self._recalc_order_total(conn, order_id)
         self._invalidate_generated_edifact(conn, order_id)
         self._refresh_corrections_json(conn, order_id)
@@ -2259,6 +2389,7 @@ class File2EdiStore:
                 payload.get("specialInstructions"), payload.get("warnings"),
             ],
         )
+        self._recontrol_line(conn, order_id, line_id)
         self._recalc_order_total(conn, order_id)
         self._invalidate_generated_edifact(conn, order_id)
         self._refresh_corrections_json(conn, order_id)
@@ -2283,6 +2414,7 @@ class File2EdiStore:
             [order_id],
         ).fetchone()
         line_num = int(row["next_num"]) if row else 1
+        new_line_ids: list[str] = []
         for payload in lines:
             line_id = f"ln-{uuid.uuid4().hex[:8]}"
             qty = float(payload.get("quantity", 1))
@@ -2302,7 +2434,10 @@ class File2EdiStore:
                     payload.get("specialInstructions"), payload.get("warnings"),
                 ],
             )
+            new_line_ids.append(line_id)
             line_num += 1
+        for lid in new_line_ids:
+            self._recontrol_line(conn, order_id, lid)
         self._recalc_order_total(conn, order_id)
         self._invalidate_generated_edifact(conn, order_id)
         self._refresh_corrections_json(conn, order_id)
