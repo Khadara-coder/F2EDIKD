@@ -470,6 +470,11 @@ export interface AppSettings {
     authHeader: string;
     timeoutSeconds: number;
   };
+  masterdataDatabricksJobConfig: {
+    enabled: boolean;
+    host: string;
+    jobId: string;
+  };
   aiProvider: "databricks" | "openai" | "ollama" | "custom";
   databricksConfig: {
     host: string;

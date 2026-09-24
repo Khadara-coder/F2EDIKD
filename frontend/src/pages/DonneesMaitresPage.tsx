@@ -185,19 +185,24 @@ export function DonneesMaitresPage() {
   };
 
   const syncMutation = useMutation({
-    mutationFn: () => api.syncMasterData(),
+    mutationFn: () => api.triggerMasterdataDatabricksJob(),
     onMutate: () => setSyncMessage(null),
     onSuccess: (res) => {
-      setSyncMessage(res.message || "Synchronisation terminée");
-      invalidateMasterData();
-      // n8n continues in background (import + reload-cache); refresh UI shortly after.
-      if (res.async) {
-        window.setTimeout(() => invalidateMasterData(), 8000);
-        window.setTimeout(() => invalidateMasterData(), 20000);
-      }
+      setSyncMessage(res.message || "Job Databricks déclenché");
+      // Databricks job runs asynchronously; refresh sync history a few times so
+      // the pushed data + events show up as they land.
+      void queryClient.invalidateQueries({ queryKey: ["masterdata-sync-history"] });
+      window.setTimeout(() => {
+        invalidateMasterData();
+        void queryClient.invalidateQueries({ queryKey: ["masterdata-sync-history"] });
+      }, 15000);
+      window.setTimeout(() => {
+        invalidateMasterData();
+        void queryClient.invalidateQueries({ queryKey: ["masterdata-sync-history"] });
+      }, 45000);
     },
     onError: (err) => {
-      setSyncMessage(err instanceof Error ? err.message : "Échec de la synchronisation");
+      setSyncMessage(err instanceof Error ? err.message : "Échec du déclenchement Databricks");
     },
   });
 
@@ -323,7 +328,7 @@ export function DonneesMaitresPage() {
                   className="gap-2"
                   disabled={syncMutation.isPending}
                   onClick={() => syncMutation.mutate()}
-                  title="Déclencher le workflow n8n (GitHub → masterdata → reload-cache)"
+                  title="Déclencher le job Databricks configuré (Paramètres → Masterdata)"
                 >
                   <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
                   {syncMutation.isPending ? "Synchronisation…" : "Synchroniser"}

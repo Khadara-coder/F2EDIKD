@@ -96,10 +96,15 @@ _APP_SETTINGS_DEFAULT: dict[str, Any] = {
         "notifyOnDuplicate": False,
     },
     "masterdataN8nConfig": {
-        "enabled": True,
+        "enabled": False,
         "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
         "authHeader": "x-api-key",
         "timeoutSeconds": 120,
+    },
+    "masterdataDatabricksJobConfig": {
+        "enabled": False,
+        "host": "",
+        "jobId": "",
     },
 }
 
@@ -313,6 +318,18 @@ def _sanitize_settings_payload(payload: dict[str, Any]) -> dict[str, Any]:
             md_n8n["timeoutSeconds"] = max(5, min(600, timeout))
         if md_n8n:
             out["masterdataN8nConfig"] = md_n8n
+
+    raw_md_dbx = payload.get("masterdataDatabricksJobConfig")
+    if isinstance(raw_md_dbx, dict):
+        md_dbx: dict[str, Any] = {}
+        if "enabled" in raw_md_dbx:
+            md_dbx["enabled"] = _as_bool(raw_md_dbx.get("enabled"))
+        if "host" in raw_md_dbx:
+            md_dbx["host"] = str(raw_md_dbx.get("host") or "").strip()
+        if "jobId" in raw_md_dbx:
+            md_dbx["jobId"] = str(raw_md_dbx.get("jobId") or "").strip()
+        if md_dbx:
+            out["masterdataDatabricksJobConfig"] = md_dbx
 
     # Admin-managed secrets / RBAC persisted in the same settings blob.
     if "api_keys" in payload:

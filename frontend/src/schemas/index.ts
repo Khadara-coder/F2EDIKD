@@ -81,6 +81,11 @@ export const appSettingsSchema = z.object({
     authHeader: z.string(),
     timeoutSeconds: z.number().int().min(5).max(600),
   }),
+  masterdataDatabricksJobConfig: z.object({
+    enabled: z.boolean(),
+    host: z.string(),
+    jobId: z.string(),
+  }),
   aiProvider: z.enum(["databricks", "openai", "ollama", "custom"]).default("databricks"),
   databricksConfig: z.object({
     host: z.string(),

@@ -218,6 +218,7 @@ export function ParametresPage() {
       timezone: DEFAULT_APP_SETTINGS.timezone,
       connectorConfig: DEFAULT_APP_SETTINGS.connectorConfig,
       masterdataN8nConfig: DEFAULT_APP_SETTINGS.masterdataN8nConfig,
+      masterdataDatabricksJobConfig: DEFAULT_APP_SETTINGS.masterdataDatabricksJobConfig,
       aiProvider: DEFAULT_APP_SETTINGS.aiProvider,
       databricksConfig: DEFAULT_APP_SETTINGS.databricksConfig,
       openaiConfig: DEFAULT_APP_SETTINGS.openaiConfig,
@@ -244,6 +245,7 @@ export function ParametresPage() {
         timezone: s.timezone,
         connectorConfig: s.connectorConfig,
         masterdataN8nConfig: s.masterdataN8nConfig,
+        masterdataDatabricksJobConfig: s.masterdataDatabricksJobConfig,
         aiProvider: s.aiProvider,
         databricksConfig: s.databricksConfig,
         openaiConfig: s.openaiConfig,
@@ -749,12 +751,58 @@ export function ParametresPage() {
           )}
 
           {activeSection === "donnees" && (
+            <>
+            <Card className="mb-6">
+              <CardHeader>
+                <CardTitle className="text-base">Sync Masterdata via job Databricks</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Le bouton <strong>Synchroniser</strong> (Données maîtres) déclenche le job Databricks
+                  configuré ci-dessous. Ce job exécute le notebook qui pousse les CSV vers File2EDI via{" "}
+                  <code>POST /api/masterdata/push-all</code>. Auth Databricks : variable d&apos;env{" "}
+                  <code>DATABRICKS_TOKEN</code> (ou <code>DATABRICKS_CONFIG_PROFILE</code>).
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between gap-4">
+                  <div>
+                    <Label className="text-sm font-medium">Activer le déclenchement Databricks</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Quand activé, le bouton Synchroniser lance le job ci-dessous.
+                    </p>
+                  </div>
+                  <Switch
+                    checked={form.watch("masterdataDatabricksJobConfig.enabled")}
+                    onCheckedChange={(v) => form.setValue("masterdataDatabricksJobConfig.enabled", v)}
+                  />
+                </div>
+
+                <div className="grid gap-4 md:grid-cols-2">
+                  <EditableField
+                    label="Databricks workspace URL"
+                    value={form.watch("masterdataDatabricksJobConfig.host")}
+                    onChange={(v) => form.setValue("masterdataDatabricksJobConfig.host", v)}
+                  />
+                  <EditableField
+                    label="Job ID"
+                    value={form.watch("masterdataDatabricksJobConfig.jobId")}
+                    onChange={(v) => form.setValue("masterdataDatabricksJobConfig.jobId", v)}
+                  />
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Le job doit exécuter le notebook{" "}
+                  <code>push_masterdata.py</code> (celui qui poste vers{" "}
+                  <code>/api/masterdata/push-all</code>). Le <code>job_id</code> se trouve dans l&apos;URL
+                  du job Databricks : <code>/jobs/&lt;job_id&gt;</code>.
+                </p>
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader>
-                <CardTitle className="text-base">Sync Masterdata via n8n</CardTitle>
+                <CardTitle className="text-base">Sync Masterdata via n8n (legacy)</CardTitle>
                 <p className="text-xs text-muted-foreground">
-                  Le bouton Synchroniser (Données maîtres) déclenche ce webhook n8n. Le workflow tire GitHub puis
-                  recharge le cache File2EDI. L&apos;autre méthode est l&apos;import CSV/Parquet par un admin.
+                  Ancien flow GitHub → n8n → import. Désactivé par défaut ; le nouveau flow passe par
+                  Databricks. L&apos;autre méthode reste l&apos;import CSV/Parquet par un admin.
                 </p>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -838,6 +886,7 @@ export function ParametresPage() {
                 </div>
               </CardContent>
             </Card>
+            </>
           )}
 
           {activeSection === "ia" && (

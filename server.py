@@ -1924,6 +1924,113 @@ def api_md_sync(req: Request):
     }
 
 
+@app.post("/api/masterdata/trigger-databricks-job")
+def api_md_trigger_databricks_job(req: Request):
+    """Trigger the Databricks Job that pushes masterdata into File2EDI.
+
+    Reads config from `masterdataDatabricksJobConfig` (host + jobId) in app settings,
+    and uses `DATABRICKS_TOKEN` (env) or the Databricks CLI profile for auth.
+    """
+    import datetime as _dt
+    import urllib.request
+    import urllib.error
+
+    actor = _resolve_actor(req) or "operator"
+
+    cfg: dict = {}
+    try:
+        from src.file2edi.store import get_store as _gs
+        cfg = dict((_gs().load_app_settings() or {}).get("masterdataDatabricksJobConfig") or {})
+    except Exception:
+        cfg = {}
+
+    if not cfg.get("enabled"):
+        raise HTTPException(
+            status_code=503,
+            detail="Sync Databricks non activée. Activez-la dans Paramètres → Masterdata.",
+        )
+
+    host = str(cfg.get("host") or DATABRICKS_HOST or "").rstrip("/")
+    job_id_raw = str(cfg.get("jobId") or "").strip()
+    if not host or not job_id_raw:
+        raise HTTPException(
+            status_code=400,
+            detail="host ou jobId manquant. Renseignez-les dans Paramètres → Masterdata.",
+        )
+    try:
+        job_id = int(job_id_raw)
+    except ValueError as exc:
+        raise HTTPException(400, f"jobId doit être un entier: {job_id_raw}") from exc
+
+    auth = _auth_headers()
+    if auth.get("_auth_error"):
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"Authentification Databricks impossible: {auth['_auth_error']}. "
+                "Définir DATABRICKS_TOKEN ou DATABRICKS_CONFIG_PROFILE."
+            ),
+        )
+
+    url = f"{host}/api/2.1/jobs/run-now"
+    body = json.dumps({"job_id": job_id}).encode("utf-8")
+    dbx_req = urllib.request.Request(url, data=body, method="POST", headers=auth)
+    try:
+        with urllib.request.urlopen(dbx_req, timeout=30) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:600]
+        _log_masterdata_business_event(
+            actor=actor,
+            action="masterdata_databricks_job_trigger_failed",
+            details={"host": host, "job_id": job_id, "error": f"HTTP {exc.code}: {detail}"},
+            result="error",
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"Databricks a répondu HTTP {exc.code}: {detail}",
+        ) from exc
+    except Exception as exc:
+        _log_masterdata_business_event(
+            actor=actor,
+            action="masterdata_databricks_job_trigger_failed",
+            details={"host": host, "job_id": job_id, "error": str(exc)[:400]},
+            result="error",
+        )
+        raise HTTPException(502, f"Échec déclenchement Databricks: {exc}") from exc
+
+    run_id = payload.get("run_id")
+    number_in_job = payload.get("number_in_job")
+    run_page_url = f"{host}/jobs/{job_id}/runs/{run_id}" if run_id else ""
+
+    _log_masterdata_business_event(
+        actor=actor,
+        action="masterdata_databricks_job_triggered",
+        details={
+            "host": host,
+            "job_id": job_id,
+            "run_id": run_id,
+            "number_in_job": number_in_job,
+            "run_page_url": run_page_url,
+        },
+        result="ok",
+    )
+
+    return {
+        "ok": True,
+        "runId": run_id,
+        "numberInJob": number_in_job,
+        "runPageUrl": run_page_url,
+        "host": host,
+        "jobId": job_id,
+        "triggeredAt": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "message": (
+            f"Job Databricks {job_id} déclenché (run #{number_in_job or '?'}). "
+            "Le push masterdata démarre côté Databricks — suivez l'onglet Synchronisations."
+        ),
+    }
+
+
 @app.post("/api/masterdata/delta")
 def api_md_delta():
     try:

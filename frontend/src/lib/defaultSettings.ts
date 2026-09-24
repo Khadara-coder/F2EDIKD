@@ -22,10 +22,15 @@ export const DEFAULT_APP_SETTINGS: AppSettings = {
     sftpProfile: "default",
   },
   masterdataN8nConfig: {
-    enabled: true,
+    enabled: false,
     webhookUrl: "http://localhost:5678/webhook/masterdata-sync",
     authHeader: "x-api-key",
     timeoutSeconds: 120,
+  },
+  masterdataDatabricksJobConfig: {
+    enabled: true,
+    host: "https://adb-5555213114570927.7.azuredatabricks.net",
+    jobId: "",
   },
   aiProvider: "databricks",
   databricksConfig: {
@@ -106,6 +111,10 @@ export function mergeSettings(partial?: Partial<AppSettings> | null): AppSetting
     masterdataN8nConfig: {
       ...DEFAULT_APP_SETTINGS.masterdataN8nConfig,
       ...partial.masterdataN8nConfig,
+    },
+    masterdataDatabricksJobConfig: {
+      ...DEFAULT_APP_SETTINGS.masterdataDatabricksJobConfig,
+      ...partial.masterdataDatabricksJobConfig,
     },
     aiProvider: partial.aiProvider ?? DEFAULT_APP_SETTINGS.aiProvider,
     databricksConfig: { ...DEFAULT_APP_SETTINGS.databricksConfig, ...partial.databricksConfig },

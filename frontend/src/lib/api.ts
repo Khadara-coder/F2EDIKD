@@ -497,6 +497,18 @@ export const api = {
       `/masterdata/sync-history?limit=${limit}`,
     ),
 
+  triggerMasterdataDatabricksJob: () =>
+    request<{
+      ok: boolean;
+      runId?: number;
+      numberInJob?: number;
+      runPageUrl?: string;
+      host?: string;
+      jobId?: number;
+      triggeredAt?: string;
+      message: string;
+    }>(`/masterdata/trigger-databricks-job`, { method: "POST" }),
+
   getAppLogs: (params?: {
     limit?: number;
     level?: string;

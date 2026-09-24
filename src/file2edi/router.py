@@ -1617,6 +1617,10 @@ def create_router() -> APIRouter:
                     **_default_settings().get("masterdataN8nConfig", {}),
                     **(persisted.get("masterdataN8nConfig") or {}),
                 },
+                "masterdataDatabricksJobConfig": {
+                    **_default_settings().get("masterdataDatabricksJobConfig", {}),
+                    **(persisted.get("masterdataDatabricksJobConfig") or {}),
+                },
                 "aiProvider": persisted.get("aiProvider", _default_settings().get("aiProvider", "databricks")),
                 "databricksConfig": {
                     **_default_settings().get("databricksConfig", {}),
@@ -2162,10 +2166,15 @@ def _default_settings() -> dict:
             "sftpProfile": "default",
         },
         "masterdataN8nConfig": {
-            "enabled": True,
+            "enabled": False,
             "webhookUrl": "http://localhost:5678/webhook/masterdata-sync",
             "authHeader": "x-api-key",
             "timeoutSeconds": 120,
+        },
+        "masterdataDatabricksJobConfig": {
+            "enabled": False,
+            "host": "https://adb-5555213114570927.7.azuredatabricks.net",
+            "jobId": "",
         },
         "aiProvider": "databricks",
         "databricksConfig": {
