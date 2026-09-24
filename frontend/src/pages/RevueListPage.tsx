@@ -176,7 +176,7 @@ export function RevueListPage() {
       const matchesStatus = statusFilter === "all" || statusToBusinessGroup(row.status as OrderStatus) === statusFilter;
       // "Mes dossiers" = current user appears in any ownership/traceability field.
       const userLc = (currentUsername || "").toLowerCase();
-      const ownershipFields = [row.submittedBy, row.processedBy, row.assignedTo, row.sapSentBy]
+      const ownershipFields = [row.submittedBy, row.processedBy, row.assignedTo, row.sapSentBy, row.transferredFrom, row.transferredTo]
         .filter(Boolean)
         .map((value) => String(value).toLowerCase());
       const matchesMyOrders = !myOrdersOnly || !currentUsername ||

@@ -4,6 +4,8 @@ import { api } from "@/lib/api";
 import { useCurrentUser, hasAtLeastRole } from "@/hooks/useCurrentUser";
 import type { AppRole } from "@/types";
 import {
+  ChevronLeft,
+  ChevronRight,
   Clock,
   Database,
   FileText,
@@ -28,7 +30,7 @@ const navItems = [
 
 export function Sidebar() {
   const { data: me } = useCurrentUser();
-  const { open, close } = useSidebar();
+  const { open, close, collapsed, toggleCollapse } = useSidebar();
   if (me?.authenticated === false) {
     return null;
   }
@@ -80,17 +82,18 @@ export function Sidebar() {
       <aside
         id="app-sidebar"
         className={cn(
-          "fixed left-0 top-0 z-50 flex h-dvh w-[min(260px,88vw)] flex-col bg-sidebar text-sidebar-foreground shadow-xl transition-transform duration-200 ease-out lg:w-[260px] lg:translate-x-0 lg:shadow-none",
-          open ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+          "fixed left-0 top-0 z-50 flex h-dvh w-[min(260px,88vw)] flex-col bg-sidebar text-sidebar-foreground shadow-xl transition-transform duration-200 ease-out lg:w-[260px] lg:shadow-none",
+          open ? "translate-x-0" : "-translate-x-full",
+          collapsed ? "lg:-translate-x-full" : "lg:translate-x-0",
         )}
       >
-        <div className="border-b border-sidebar-border px-6 py-5">
+        <div className="border-b border-sidebar-border px-4 py-4">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex flex-1 items-center justify-center lg:justify-center">
+            <div className="flex flex-1 items-center justify-start">
               <img
                 src={logoSrc}
                 alt="Genie Commande"
-                className="h-12 w-auto max-w-[160px] object-contain sm:h-14 sm:max-w-[180px]"
+                className="h-10 w-auto max-w-[140px] object-contain sm:h-12 sm:max-w-[160px]"
                 onError={(e) => {
                   const img = e.currentTarget;
                   if (!img.src.endsWith("file.png")) {
@@ -99,6 +102,7 @@ export function Sidebar() {
                 }}
               />
             </div>
+            {/* Mobile close button */}
             <button
               type="button"
               onClick={close}
@@ -106,6 +110,16 @@ export function Sidebar() {
               aria-label="Fermer"
             >
               <X className="h-5 w-5" />
+            </button>
+            {/* Desktop collapse button */}
+            <button
+              type="button"
+              onClick={toggleCollapse}
+              className="hidden h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 hover:bg-sidebar-border hover:text-white lg:flex"
+              aria-label="Réduire le menu"
+              title="Réduire le menu"
+            >
+              <ChevronLeft className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -160,6 +174,19 @@ export function Sidebar() {
           </div>
         </div>
       </aside>
+
+      {/* Desktop expand handle — visible only when sidebar is collapsed */}
+      {collapsed && (
+        <button
+          type="button"
+          onClick={toggleCollapse}
+          aria-label="Déplier le menu"
+          title="Déplier le menu"
+          className="fixed left-0 top-1/2 z-50 hidden -translate-y-1/2 items-center justify-center rounded-r-lg bg-sidebar px-1.5 py-4 text-slate-400 shadow-md hover:bg-sidebar-border hover:text-white lg:flex"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      )}
     </>
   );
 }

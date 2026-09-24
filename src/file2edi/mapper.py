@@ -7,6 +7,12 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+try:
+    from src.masterdata_runtime import material_designation as _material_designation
+except ImportError:
+    def _material_designation(matnr: str):  # type: ignore[misc]
+        return None
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
@@ -154,7 +160,7 @@ def engine_to_order_review(order_id: str, upload_id: str, result: dict) -> dict:
                 "specialInstructions": str(ln.get("special_instructions") or ""),
                 "warnings": str(ln.get("warnings") or ""),
                 "boschArticle": art,
-                "designation": description_raw,
+                "designation": (_material_designation(art) if art else None) or description_raw,
                 "quantity": qty,
                 "unit": str(ln.get("Unite") or ln.get("unit") or "PCE"),
                 "unitPrice": price,

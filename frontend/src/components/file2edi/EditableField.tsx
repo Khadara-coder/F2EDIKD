@@ -75,17 +75,17 @@ export function EditableField({
       id={fieldId}
       tabIndex={fieldId ? -1 : undefined}
     >
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
         <span className="text-xs font-medium text-muted-foreground" id={fieldId ? `${fieldId}-label` : undefined}>
           {label}
         </span>
         {flag === "manual" && (
-          <Badge variant="info" className="text-[10px] px-1.5 py-0">
+          <Badge variant="info" className="text-[10px] px-1.5 py-0 shrink-0">
             Modifié manuellement
           </Badge>
         )}
         {flag === "auto" && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0">
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
             Modifié automatiquement
           </Badge>
         )}

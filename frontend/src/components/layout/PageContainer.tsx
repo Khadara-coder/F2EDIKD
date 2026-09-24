@@ -2,7 +2,8 @@ import { useEffect, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { UploadQueueProvider } from "@/hooks/useUploadQueue";
 import { Sidebar } from "./Sidebar";
-import { SidebarProvider } from "./SidebarContext";
+import { SidebarProvider, useSidebar } from "./SidebarContext";
+import { cn } from "@/lib/utils";
 
 interface PageContainerProps {
   children: ReactNode;
@@ -14,6 +15,23 @@ function ScrollToTop() {
     window.scrollTo(0, 0);
   }, [pathname]);
   return null;
+}
+
+function MainArea({ children }: { children: ReactNode }) {
+  const { collapsed } = useSidebar();
+  return (
+    <main
+      id="main-content"
+      tabIndex={-1}
+      className={cn(
+        "min-h-dvh px-3 pb-24 pt-3 sm:px-5 sm:pb-10 sm:pt-5 lg:px-8 lg:pb-8 lg:pt-8",
+        "transition-[margin] duration-200 ease-out",
+        collapsed ? "lg:ml-0" : "lg:ml-[260px]",
+      )}
+    >
+      {children}
+    </main>
+  );
 }
 
 export function PageContainer({ children }: PageContainerProps) {
@@ -29,13 +47,7 @@ export function PageContainer({ children }: PageContainerProps) {
             Aller au contenu
           </a>
           <Sidebar />
-          <main
-            id="main-content"
-            tabIndex={-1}
-            className="min-h-dvh px-3 pb-24 pt-3 sm:px-5 sm:pb-10 sm:pt-5 lg:ml-[260px] lg:px-8 lg:pb-8 lg:pt-8"
-          >
-            {children}
-          </main>
+          <MainArea>{children}</MainArea>
         </div>
       </UploadQueueProvider>
     </SidebarProvider>

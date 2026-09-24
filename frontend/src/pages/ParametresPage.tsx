@@ -615,6 +615,17 @@ export function ParametresPage() {
                 <CardContent className="space-y-6">
                   <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
                     <div>
+                      <p className="font-medium">Connecteur SFTP activé</p>
+                      <p className="text-xs text-muted-foreground">Active ou désactive l'envoi SFTP de tous les fichiers EDIFACT</p>
+                    </div>
+                    <Switch
+                      checked={form.watch("sftpConfig.enabled")}
+                      onCheckedChange={(v) => form.setValue("sftpConfig.enabled", v)}
+                    />
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 rounded-lg border p-4">
+                    <div>
                       <p className="font-medium">Export automatique SFTP</p>
                       <p className="text-xs text-muted-foreground">Envoi automatique après génération EDIFACT</p>
                     </div>
@@ -624,15 +635,7 @@ export function ParametresPage() {
                     />
                   </div>
 
-                  <div className="flex items-center justify-between gap-4">
-                    <Label className="text-sm font-medium">Connecteur SFTP activé</Label>
-                    <Switch
-                      checked={form.watch("sftpConfig.enabled")}
-                      onCheckedChange={(v) => form.setValue("sftpConfig.enabled", v)}
-                    />
-                  </div>
-
-                  <div className="grid gap-4 sm:grid-cols-2">
+                  <div className={cn("grid gap-4 sm:grid-cols-2", !form.watch("sftpConfig.enabled") && "opacity-50")}>
                     <EditableField
                       label="Hôte"
                       value={form.watch("sftpConfig.host")}

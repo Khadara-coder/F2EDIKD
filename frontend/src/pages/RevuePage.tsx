@@ -688,7 +688,7 @@ export function RevuePage() {
         }}
       />
 
-      <div id="review-order-lines" tabIndex={-1} className="mb-6 grid min-w-0 items-start gap-4 lg:grid-cols-[13fr_7fr] lg:items-stretch lg:gap-6">
+      <div id="review-order-lines" tabIndex={-1} className="mb-6 grid min-w-0 items-start gap-4 md:grid-cols-[13fr_7fr] md:items-stretch md:gap-6">
         <div className="min-w-0">
           <PdfPreviewPanel
             fileName={order.fileName}
