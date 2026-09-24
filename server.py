@@ -1939,6 +1939,21 @@ class MasterdataRowPayload(BaseModel):
     fields: dict[str, str]
 
 
+class MasterdataPushPayload(BaseModel):
+    kind: str                                  # customers | partners | materials | salesorders
+    rows: list[dict[str, str]]                 # lignes sous forme [{col: val}, ...]
+    source: str = "databricks_job"             # identifiant de la source (pour les logs)
+    job_id: str | None = None                  # run ID Databricks (pour les logs)
+    description: str | None = None            # commentaire libre
+
+
+class MasterdataPushAllPayload(BaseModel):
+    tables: dict[str, list[dict[str, str]]]    # {"customers": [...], "materials": [...], ...}
+    source: str = "databricks_job"
+    job_id: str | None = None
+    description: str | None = None
+
+
 @app.post("/api/masterdata/import")
 async def api_md_import(
     req: Request,
@@ -2063,6 +2078,313 @@ def api_md_add_row(req: Request, payload: MasterdataRowPayload):
         "message": f"Ligne ajoutée - {result.get('rows')} lignes au total",
         **result,
     }
+
+
+# ── Masterdata Push (Databricks / API externes) ────────────────────────────────
+
+def _log_masterdata_business_event(
+    *,
+    actor: str,
+    action: str,
+    details: dict,
+    result: str = "ok",
+) -> None:
+    """Log to both PostgreSQL (store) and Delta/workspace (save_audit_event)."""
+    try:
+        from src.file2edi.store import get_store as _gs
+        _gs().log_business_event(
+            actor=actor,
+            action=action,
+            entity_type="__masterdata__",
+            entity_id=details.get("kind") or "masterdata",
+            result=result,
+            details=details,
+        )
+    except Exception as _e:
+        log.warning("_log_masterdata_business_event postgres failed: %s", _e)
+    save_audit_event("__masterdata__", action, actor, {**details, "result": result})
+
+
+def _rows_to_csv_bytes(rows: list[dict]) -> bytes:
+    """Convert a list of row dicts to semicolon-separated CSV bytes (UTF-8)."""
+    import csv as _csv
+    import io
+    if not rows:
+        return b""
+    buf = io.StringIO()
+    writer = _csv.DictWriter(buf, fieldnames=list(rows[0].keys()), delimiter=";", extrasaction="ignore")
+    writer.writeheader()
+    writer.writerows(rows)
+    return buf.getvalue().encode("utf-8")
+
+
+@app.post("/api/masterdata/push")
+def api_md_push(req: Request, payload: MasterdataPushPayload):
+    """Push a full masterdata table as JSON rows (for Databricks jobs and external systems).
+
+    Replaces the entire table — equivalent to /api/masterdata/import but via JSON.
+    Authentication: API key (x-api-key header or Authorization: Bearer <key>).
+    """
+    actor, _ = _ensure_masterdata_importer(req)
+    t0 = datetime.now(timezone.utc)
+
+    def _reject(reason: str, *, kind: str, status: int = 400) -> None:
+        _log_masterdata_business_event(
+            actor=actor,
+            action="masterdata_push_rejected",
+            details={
+                "kind": kind,
+                "reason": reason,
+                "rows_received": len(payload.rows or []),
+                "source": payload.source,
+                "job_id": payload.job_id,
+                "description": payload.description,
+            },
+            result="rejected",
+        )
+        raise HTTPException(status, reason)
+
+    try:
+        key = _masterdata_kind_key(payload.kind)
+    except ValueError as exc:
+        _reject(str(exc), kind=payload.kind)
+    if not payload.rows:
+        _reject("rows ne peut pas être vide", kind=key)
+
+    raw = _rows_to_csv_bytes(payload.rows)
+    if not raw:
+        _reject("Impossible de sérialiser les lignes", kind=key)
+
+    filename = {
+        "customers": "10564_Customers.csv",
+        "partners":  "10564_Partners.csv",
+        "materials": "DB_Materials.csv",
+        "salesorders": "DB_Salesorder.csv",
+    }.get(key, f"{key}.csv")
+
+    try:
+        result = _masterdata_import_dataframe(key, raw, filename=filename)
+    except ValueError as exc:
+        _reject(str(exc), kind=key)
+    except Exception as exc:
+        _log_masterdata_business_event(
+            actor=actor,
+            action="masterdata_push_failed",
+            details={
+                "kind": key,
+                "error": str(exc),
+                "source": payload.source,
+                "job_id": payload.job_id,
+            },
+            result="error",
+        )
+        raise HTTPException(500, f"Push échoué: {exc}") from exc
+
+    duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+    _invalidate_legacy_masterdata_cache()
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _mdr.bump_sync_metadata(synced_at_utc=now_iso, source=payload.source)
+    _apply_masterdata_sync_metadata_to_cache_state()
+
+    details = {
+        "kind": key,
+        "rows": result.get("rows"),
+        "source": payload.source,
+        "job_id": payload.job_id,
+        "description": payload.description,
+        "duration_ms": duration_ms,
+    }
+    _log_masterdata_business_event(actor=actor, action="masterdata_push_succeeded", details=details)
+
+    out: dict = {
+        "ok": True,
+        "kind": key,
+        "rows": result.get("rows"),
+        "synced_at": now_iso,
+        "source": payload.source,
+        "job_id": payload.job_id,
+        "duration_ms": duration_ms,
+    }
+    if key == "salesorders":
+        try:
+            from src.sap_feedback import reconcile_sent_orders_with_sap, enrich_all_orders_vbeln
+            out["sapFeedback"] = reconcile_sent_orders_with_sap()
+            enrich_all_orders_vbeln()
+        except Exception as exc:
+            log.warning("SAP reconcile after push failed: %s", exc)
+            out["sapFeedback"] = {"ok": False, "error": str(exc)}
+    return out
+
+
+@app.post("/api/masterdata/push-all")
+def api_md_push_all(req: Request, payload: MasterdataPushAllPayload):
+    """Push all masterdata tables in a single call (for the Databricks daily sync job).
+
+    ``payload.tables`` is a dict ``{kind: [rows]}``. Any subset of the 4 tables
+    can be provided — omitted tables are left untouched.
+    Authentication: API key (x-api-key header or Authorization: Bearer <key>).
+    """
+    actor, _ = _ensure_masterdata_importer(req)
+    t0 = datetime.now(timezone.utc)
+    if not payload.tables:
+        _log_masterdata_business_event(
+            actor=actor,
+            action="masterdata_push_all_rejected",
+            details={
+                "reason": "tables ne peut pas être vide",
+                "source": payload.source,
+                "job_id": payload.job_id,
+            },
+            result="rejected",
+        )
+        raise HTTPException(400, "tables ne peut pas être vide")
+
+    imported: list[dict] = []
+    errors: list[dict] = []
+    salesorders_touched = False
+
+    for kind_raw, rows in payload.tables.items():
+        try:
+            key = _masterdata_kind_key(kind_raw)
+        except ValueError as exc:
+            errors.append({"kind": kind_raw, "error": str(exc)})
+            _log_masterdata_business_event(
+                actor=actor,
+                action="masterdata_push_rejected",
+                details={
+                    "kind": kind_raw,
+                    "reason": str(exc),
+                    "rows_received": len(rows or []),
+                    "source": payload.source,
+                    "job_id": payload.job_id,
+                },
+                result="rejected",
+            )
+            continue
+        if not rows:
+            errors.append({"kind": key, "error": "rows vide"})
+            _log_masterdata_business_event(
+                actor=actor,
+                action="masterdata_push_rejected",
+                details={
+                    "kind": key,
+                    "reason": "rows vide",
+                    "rows_received": 0,
+                    "source": payload.source,
+                    "job_id": payload.job_id,
+                },
+                result="rejected",
+            )
+            continue
+        filename = {
+            "customers": "10564_Customers.csv",
+            "partners":  "10564_Partners.csv",
+            "materials": "DB_Materials.csv",
+            "salesorders": "DB_Salesorder.csv",
+        }.get(key, f"{key}.csv")
+        raw = _rows_to_csv_bytes(rows)
+        try:
+            result = _masterdata_import_dataframe(key, raw, filename=filename)
+            imported.append({"kind": key, "rows": result.get("rows")})
+            if key == "salesorders":
+                salesorders_touched = True
+        except ValueError as exc:
+            errors.append({"kind": key, "error": str(exc)})
+            _log_masterdata_business_event(
+                actor=actor,
+                action="masterdata_push_rejected",
+                details={
+                    "kind": key,
+                    "reason": str(exc),
+                    "rows_received": len(rows),
+                    "source": payload.source,
+                    "job_id": payload.job_id,
+                },
+                result="rejected",
+            )
+        except Exception as exc:
+            errors.append({"kind": key, "error": f"Push échoué: {exc}"})
+            _log_masterdata_business_event(
+                actor=actor,
+                action="masterdata_push_failed",
+                details={
+                    "kind": key,
+                    "error": str(exc),
+                    "source": payload.source,
+                    "job_id": payload.job_id,
+                },
+                result="error",
+            )
+
+    if not imported:
+        _log_masterdata_business_event(
+            actor=actor,
+            action="masterdata_push_all_rejected",
+            details={
+                "reason": "Aucune table importée",
+                "errors": errors,
+                "source": payload.source,
+                "job_id": payload.job_id,
+            },
+            result="rejected",
+        )
+        raise HTTPException(
+            status_code=400,
+            detail={"message": "Aucune table importée", "errors": errors},
+        )
+
+    duration_ms = int((datetime.now(timezone.utc) - t0).total_seconds() * 1000)
+    _invalidate_legacy_masterdata_cache()
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _mdr.bump_sync_metadata(synced_at_utc=now_iso, source=payload.source)
+    _apply_masterdata_sync_metadata_to_cache_state()
+
+    details = {
+        "imported": imported,
+        "errors": errors,
+        "source": payload.source,
+        "job_id": payload.job_id,
+        "description": payload.description,
+        "duration_ms": duration_ms,
+    }
+    _log_masterdata_business_event(actor=actor, action="masterdata_push_all_succeeded", details=details)
+
+    out: dict = {
+        "ok": True,
+        "imported": imported,
+        "errors": errors,
+        "synced_at": now_iso,
+        "source": payload.source,
+        "job_id": payload.job_id,
+        "duration_ms": duration_ms,
+        "message": f"{len(imported)} table(s) synchronisée(s)"
+        + (f", {len(errors)} en erreur" if errors else ""),
+    }
+    if salesorders_touched:
+        try:
+            from src.sap_feedback import reconcile_sent_orders_with_sap, enrich_all_orders_vbeln
+            out["sapFeedback"] = reconcile_sent_orders_with_sap()
+            enrich_all_orders_vbeln()
+        except Exception as exc:
+            log.warning("SAP reconcile after push-all failed: %s", exc)
+            out["sapFeedback"] = {"ok": False, "error": str(exc)}
+    return out
+
+
+@app.get("/api/masterdata/sync-history")
+def api_md_sync_history(req: Request, limit: int = 50):
+    """Return the last N masterdata sync events (push, import, sync) for the activity log."""
+    try:
+        from src.file2edi.store import get_store as _gs
+        events = _gs().list_business_events(
+            limit=max(1, min(500, int(limit or 50))),
+            action_prefix="masterdata_",
+        )
+        md_events = events
+        return {"events": md_events, "count": len(md_events)}
+    except Exception as exc:
+        log.warning("api_md_sync_history failed: %s", exc)
+        return {"items": [], "count": 0}
 
 
 # ── Settings ───────────────────────────────────────────────────────────────────
@@ -4267,11 +4589,13 @@ def spa_root():
 
 
 def _spa_index_response() -> HTMLResponse:
+    headers = {"Cache-Control": "no-cache, no-store, must-revalidate", "Pragma": "no-cache"}
     if INDEX_HTML.exists():
-        return HTMLResponse(INDEX_HTML.read_text(encoding="utf-8"))
+        return HTMLResponse(INDEX_HTML.read_text(encoding="utf-8"), headers=headers)
     return HTMLResponse(
         "<h2>Frontend building... Run: cd frontend && npm run build</h2>",
         status_code=503,
+        headers=headers,
     )
 
 # Mount Vite assets (/assets/*)

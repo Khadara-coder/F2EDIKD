@@ -419,6 +419,31 @@ def material_line_status(matnr: str) -> dict[str, Any]:
 
 
 
+def material_designation(matnr: str) -> str | None:
+    """Return MAKTX (SAP article designation) for a MATNR, or None if not found."""
+    df, matnr_col, _, _, _ = _materials_df_and_cols()
+    if df is None or matnr_col is None:
+        return None
+    code = normalize_article_code(matnr)
+    if not code:
+        return None
+    try:
+        cols = {str(c).strip().lower(): c for c in df.columns}
+        maktx_col = cols.get("maktx")
+        if maktx_col is None:
+            return None
+        series = df[matnr_col].astype(str).map(lambda v: normalize_article_code(v))
+        matches = df.loc[series == code]
+        if matches.empty:
+            return None
+        maktx = str(matches.iloc[0][maktx_col]).strip()
+        if maktx.lower() in {"nan", "none", "null", ""}:
+            return None
+        return maktx
+    except Exception:
+        return None
+
+
 def material_status_replacement(matnr: str) -> str | None:
     """Legacy helper: final replacement MATNR after chain resolution."""
     status = material_line_status(matnr)
@@ -1260,6 +1285,35 @@ def kind_key_from_filename(filename: str) -> str | None:
     return None
 
 
+def _backup_path(key: str) -> Path:
+    fname = MD_FILES[key]
+    return runtime_dir() / f"{fname}.bak"
+
+
+def snapshot_current(key: str) -> Path | None:
+    """Copy the current runtime CSV to a .bak sidecar. Returns the backup path or None if no current file."""
+    fname = MD_FILES[key]
+    path = runtime_dir() / fname
+    if not path.exists():
+        return None
+    bak = _backup_path(key)
+    bak.parent.mkdir(parents=True, exist_ok=True)
+    bak.write_bytes(path.read_bytes())
+    return bak
+
+
+def restore_backup(key: str) -> bool:
+    """Restore the runtime CSV from its .bak sidecar. Returns True if restored."""
+    fname = MD_FILES[key]
+    path = runtime_dir() / fname
+    bak = _backup_path(key)
+    if not bak.exists():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bak.read_bytes())
+    return True
+
+
 def write_csv(key: str, df) -> None:
     fname = MD_FILES[key]
     path = runtime_dir() / fname
@@ -1271,7 +1325,34 @@ def write_csv(key: str, df) -> None:
     load_cache()
 
 
-def import_dataframe(key: str, raw: bytes, filename: str = "") -> dict:
+def _current_row_count(key: str) -> int | None:
+    """Best-effort count of the currently-loaded rows for `key` (before overwrite)."""
+    try:
+        import pandas as _pd
+        fname = MD_FILES[key]
+        path = runtime_dir() / fname
+        if not path.exists():
+            return None
+        df = _pd.read_csv(path, sep=";", dtype=str, encoding="utf-8")
+        return int(len(df))
+    except Exception:
+        return None
+
+
+def import_dataframe(
+    key: str,
+    raw: bytes,
+    filename: str = "",
+    *,
+    min_ratio: float = 0.5,
+) -> dict:
+    """Validate + write a masterdata table with automatic rollback on failure.
+
+    Strategy: snapshot the current file to `.bak`, validate the incoming
+    dataframe (schema + non-empty + row count sanity), then overwrite. If the
+    check fails at any step the backup is restored, so the runtime never sees
+    partial data.
+    """
     df = dataframe_from_bytes(raw, filename=filename)
     schema = validate_schema(key, df)
     if not schema["schema_valid"]:
@@ -1279,7 +1360,30 @@ def import_dataframe(key: str, raw: bytes, filename: str = "") -> dict:
         raise ValueError(f"Colonnes manquantes pour {key}: {missing}")
     if len(df) == 0:
         raise ValueError("Fichier masterdata vide")
-    write_csv(key, df)
+
+    previous_rows = _current_row_count(key)
+    incoming_rows = int(len(df))
+    if previous_rows and previous_rows > 0:
+        ratio = incoming_rows / previous_rows
+        if ratio < min_ratio:
+            raise ValueError(
+                f"Le fichier reçu contient {incoming_rows} lignes, soit {ratio:.0%} "
+                f"de la version actuelle ({previous_rows}). Refus (< {min_ratio:.0%}). "
+                f"Ancienne version conservée."
+            )
+
+    backup = snapshot_current(key)
+    try:
+        write_csv(key, df)
+    except Exception:
+        if backup is not None:
+            try:
+                restore_backup(key)
+                load_cache()
+            except Exception:
+                pass
+        raise
+
     name = (filename or "").lower()
     is_parquet = name.endswith(".parquet") or (len(raw) >= 4 and raw[:4] == b"PAR1")
     if is_parquet:
@@ -1290,9 +1394,11 @@ def import_dataframe(key: str, raw: bytes, filename: str = "") -> dict:
             pq_path.write_bytes(raw)
     return {
         "kind": key,
-        "rows": int(len(df)),
+        "rows": incoming_rows,
+        "previous_rows": previous_rows,
         "file": MD_PARQUET_FILES.get(key) if is_parquet else MD_FILES[key],
         "format": "parquet" if is_parquet else "csv",
+        "backup_kept": backup is not None,
     }
 
 

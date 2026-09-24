@@ -492,6 +492,11 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  getMasterdataSyncHistory: (limit = 50) =>
+    request<{ events: OrderActivityEvent[]; count: number }>(
+      `/masterdata/sync-history?limit=${limit}`,
+    ),
+
   getAppLogs: (params?: {
     limit?: number;
     level?: string;

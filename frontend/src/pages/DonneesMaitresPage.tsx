@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   Database,
+  History,
   Package,
   RefreshCw,
   Shield,
@@ -49,11 +50,12 @@ import type {
   MasterDataClient,
   MasterDataRuleRow,
   MasterDataShipToRow,
+  OrderActivityEvent,
 } from "@/types";
 
-type TabKey = "clients" | "shipto" | "articles" | "rules";
+type TabKey = "clients" | "shipto" | "articles" | "rules" | "synchronisations";
 
-const ADD_FIELDS: Record<Exclude<TabKey, "rules">, { key: string; label: string; required?: boolean }[]> = {
+const ADD_FIELDS: Record<Exclude<TabKey, "rules" | "synchronisations">, { key: string; label: string; required?: boolean }[]> = {
   clients: [
     { key: "SOLDTO", label: "Sold-to", required: true },
     { key: "NAME", label: "Nom", required: true },
@@ -111,6 +113,13 @@ export function DonneesMaitresPage() {
   const pageSize = 8;
   const { data, refetch, isFetching } = useMasterData(tab, search);
 
+  const syncHistoryQuery = useQuery({
+    queryKey: ["masterdata-sync-history"],
+    queryFn: () => api.getMasterdataSyncHistory(50),
+    enabled: tab === "synchronisations",
+    staleTime: 30_000,
+  });
+
   const summary = data?.summary;
   const clients = (data?.clients ?? []) as MasterDataClient[];
   const shipTos = (tab === "shipto" ? (data?.rows ?? []) : []) as MasterDataShipToRow[];
@@ -148,7 +157,9 @@ export function DonneesMaitresPage() {
         ? filteredShipTos
         : tab === "articles"
           ? articles
-          : rules;
+          : tab === "rules"
+            ? rules
+            : [];
 
   const totalPages = Math.max(1, Math.ceil(currentRows.length / pageSize));
   const paginated = useMemo(
@@ -230,6 +241,7 @@ export function DonneesMaitresPage() {
   });
 
   const canMutateTab = tab === "clients" || tab === "shipto" || tab === "articles";
+  const isDataTab = tab !== "synchronisations";
 
   const openAdd = () => {
     if (!canMutateTab) {
@@ -276,11 +288,14 @@ export function DonneesMaitresPage() {
               <TabsTrigger value="shipto">Ship-to</TabsTrigger>
               <TabsTrigger value="articles">Articles Bosch</TabsTrigger>
               <TabsTrigger value="rules">Règles de validation</TabsTrigger>
+              <TabsTrigger value="synchronisations" className="gap-2">
+                <History className="h-4 w-4" /> Synchronisations
+              </TabsTrigger>
             </TabsList>
           </div>
           <div className="flex flex-col items-stretch gap-1 sm:items-end">
             <div className="flex flex-wrap gap-2">
-              {isAdmin && (
+              {isAdmin && isDataTab && (
                 <>
                   <Button
                     variant="outline"
@@ -301,17 +316,31 @@ export function DonneesMaitresPage() {
                   </Button>
                 </>
               )}
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-2"
-                disabled={syncMutation.isPending}
-                onClick={() => syncMutation.mutate()}
-                title="Déclencher le workflow n8n (GitHub → masterdata → reload-cache)"
-              >
-                <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
-                {syncMutation.isPending ? "Synchronisation…" : "Synchroniser"}
-              </Button>
+              {isDataTab && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={syncMutation.isPending}
+                  onClick={() => syncMutation.mutate()}
+                  title="Déclencher le workflow n8n (GitHub → masterdata → reload-cache)"
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncMutation.isPending ? "animate-spin" : ""}`} />
+                  {syncMutation.isPending ? "Synchronisation…" : "Synchroniser"}
+                </Button>
+              )}
+              {tab === "synchronisations" && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2"
+                  disabled={syncHistoryQuery.isFetching}
+                  onClick={() => void syncHistoryQuery.refetch()}
+                >
+                  <RefreshCw className={`h-4 w-4 ${syncHistoryQuery.isFetching ? "animate-spin" : ""}`} />
+                  Actualiser
+                </Button>
+              )}
             </div>
             {(syncMessage || actionMessage) && (
               <p
@@ -369,6 +398,7 @@ export function DonneesMaitresPage() {
 
           <div className="min-w-0 lg:col-span-7">
             <Card>
+              {isDataTab && (
               <CardHeader className="flex flex-col gap-3 space-y-0 pb-4 sm:flex-row sm:flex-wrap sm:items-center">
                 <Input
                   placeholder={searchPlaceholder}
@@ -403,6 +433,7 @@ export function DonneesMaitresPage() {
                   </div>
                 )}
               </CardHeader>
+              )}
               <CardContent className="p-0">
                 <TabsContent value="clients" className="mt-0">
                   <DataTable
@@ -614,14 +645,24 @@ export function DonneesMaitresPage() {
                   </DataTable>
                 </TabsContent>
 
-                <PaginationBar
-                  total={currentRows.length}
-                  page={page}
-                  pageSize={pageSize}
-                  totalPages={totalPages}
-                  onPrev={() => setPage((p) => Math.max(1, p - 1))}
-                  onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
-                />
+                <TabsContent value="synchronisations" className="mt-0">
+                  <SyncHistoryTable
+                    events={syncHistoryQuery.data?.events ?? []}
+                    loading={syncHistoryQuery.isLoading}
+                    displayTimeZone={displayTimeZone}
+                  />
+                </TabsContent>
+
+                {isDataTab && (
+                  <PaginationBar
+                    total={currentRows.length}
+                    page={page}
+                    pageSize={pageSize}
+                    totalPages={totalPages}
+                    onPrev={() => setPage((p) => Math.max(1, p - 1))}
+                    onNext={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  />
+                )}
               </CardContent>
             </Card>
           </div>
@@ -988,5 +1029,82 @@ function DetailCard({
         </Button>
       </CardContent>
     </Card>
+  );
+}
+
+function SyncHistoryTable({
+  events,
+  loading,
+  displayTimeZone,
+}: {
+  events: OrderActivityEvent[];
+  loading: boolean;
+  displayTimeZone: string | undefined;
+}) {
+  if (loading) {
+    return <LoadingState label="Chargement de l'historique…" className="py-10" />;
+  }
+  if (events.length === 0) {
+    return (
+      <p className="py-10 text-center text-sm text-muted-foreground">
+        Aucune synchronisation enregistrée.
+      </p>
+    );
+  }
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Date</TableHead>
+          <TableHead>Action</TableHead>
+          <TableHead>Source</TableHead>
+          <TableHead>Job ID</TableHead>
+          <TableHead>Tables</TableHead>
+          <TableHead>Lignes</TableHead>
+          <TableHead>Durée</TableHead>
+          <TableHead>Résultat</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {events.map((ev) => {
+          const details = ev.details ?? {};
+          const tables = Array.isArray(details.tables)
+            ? (details.tables as string[]).join(", ")
+            : typeof details.kind === "string"
+              ? details.kind
+              : "-";
+          const rows =
+            typeof details.rows === "number"
+              ? details.rows.toLocaleString("fr-FR")
+              : "-";
+          const source = typeof details.source === "string" ? details.source : ev.actor ?? "-";
+          const jobId = typeof details.job_id === "string" ? details.job_id : "-";
+          return (
+            <TableRow key={ev.eventId}>
+              <TableCell className="whitespace-nowrap text-xs">
+                {formatDateTime(ev.createdAt, displayTimeZone)}
+              </TableCell>
+              <TableCell className="font-mono text-xs">{ev.action}</TableCell>
+              <TableCell className="text-xs">{source}</TableCell>
+              <TableCell className="font-mono text-xs max-w-[8rem] truncate" title={jobId}>
+                {jobId}
+              </TableCell>
+              <TableCell className="text-xs max-w-[12rem] truncate" title={tables}>
+                {tables}
+              </TableCell>
+              <TableCell className="text-xs">{rows}</TableCell>
+              <TableCell className="text-xs">
+                {ev.durationMs != null ? `${(ev.durationMs / 1000).toFixed(1)} s` : "-"}
+              </TableCell>
+              <TableCell>
+                <Badge variant={ev.result === "ok" ? "success" : "destructive"}>
+                  {ev.result}
+                </Badge>
+              </TableCell>
+            </TableRow>
+          );
+        })}
+      </TableBody>
+    </Table>
   );
 }
